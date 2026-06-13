@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Doméstico · Flex</title>
+<style>
+:root {
+  --naranja: #FF6B00;
+  --verde: #2E7D32;
+  --gris-oscuro: #1A1A1A;
+  --gris-borde: #E0E0E0;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: transparent;
+  color: var(--gris-oscuro);
+  padding: 4px 0;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* ── BUSCADOR ── */
+.search-wrap {
+  position: relative;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.search-wrap .ico {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 13px;
+  color: #AAA;
+  pointer-events: none;
+}
+.search-wrap input {
+  flex: 1;
+  padding: 10px 12px 10px 32px;
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+  background: rgba(255,255,255,0.08);
+  color: white;
+  transition: border-color 0.2s;
+}
+.search-wrap input::placeholder { color: rgba(255,255,255,0.35); }
+.search-wrap input:focus { border-color: var(--naranja); }
+.btn-refresh {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  background: rgba(255,255,255,0.08);
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,0.5);
+  transition: 0.15s;
+}
+.btn-refresh:hover { border-color: var(--naranja); color: var(--naranja); }
+.btn-refresh.spin { animation: spinit 0.5s linear; }
+@keyframes spinit { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+
+/* Autocomplete */
+#ac-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 46px;
+  background: #2A2A2A;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  margin-top: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  display: none;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.4);
+  z-index: 9999;
+}
+.ac-item {
+  padding: 9px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.85);
+}
+.ac-item:last-child { border-bottom: none; }
+.ac-item:hover { background: rgba(255,107,0,0.15); }
+.ac-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.ac-nombre { flex: 1; font-weight: 600; }
+.ac-partido { font-size: 10px; color: rgba(255,255,255,0.4); }
+.ac-precio { font-weight: 800; font-size: 11px; color: #69F0AE; margin-left: auto; }
+.ac-precio.sin { color: rgba(255,255,255,0.25); font-weight: 400; }
+
+/* ── PANEL MANUAL (hidden but functional) ── */
+.manual-panel {
+  display: none;
+  padding: 12px 0 0;
+}
+.manual-panel.show { display: block; }
+.mp-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.5);
+  margin-bottom: 8px;
+}
+.mp-field { margin-bottom: 8px; }
+.mp-field label {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.4);
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 3px;
+}
+.mp-field input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+  background: rgba(255,255,255,0.08);
+  color: white;
+}
+.mp-field input:focus { border-color: var(--naranja); }
+.zona-btns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  margin-bottom: 8px;
+  width: 100%;
+}
+.zona-btn {
+  padding: 8px 4px;
+  border: 2px solid var(--zb-color, rgba(255,255,255,0.2));
+  border-radius: 8px;
+  font-size: clamp(9px, 2vw, 11px);
+  font-weight: 800;
+  cursor: pointer;
+  background: rgba(255,255,255,0.05);
+  color: #fff;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  word-break: break-word;
+}
+.zona-btn:hover {
+  background: color-mix(in srgb, var(--zb-color, #fff) 22%, transparent);
+  border-color: var(--zb-color, rgba(255,255,255,0.5));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--zb-color, #fff) 35%, transparent);
+  transform: translateY(-1px);
+}
+.zona-btn:active {
+  transform: scale(0.97) translateY(0);
+}
+.zona-btn.sel-z {
+  background: color-mix(in srgb, var(--zb-color, #fff) 35%, transparent);
+  border-color: var(--zb-color, white);
+  border-width: 2.5px;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--zb-color, #fff) 45%, transparent),
+              inset 0 0 12px color-mix(in srgb, var(--zb-color, #fff) 12%, transparent);
+  transform: scale(1.03);
+}
+.zona-btn.sel-z::after {
+  content: '✓';
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 10px;
+  font-weight: 900;
+  color: #fff;
+  opacity: 0.9;
+}
+.zb-label { font-size: clamp(8px, 1.8vw, 10px); font-weight: 700; color: rgba(255,255,255,0.75); letter-spacing: 0.2px; white-space: nowrap; }
+.zb-precio { font-size: clamp(12px, 3vw, 15px); font-weight: 900; color: #fff; white-space: nowrap; }
+.mp-confirm {
+  width: 100%;
+  padding: 9px;
+  background: var(--naranja);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.mp-confirm:hover { background: #E65100; }
+.mp-confirm:disabled { background: rgba(255,255,255,0.15); cursor: default; color: rgba(255,255,255,0.3); }
+
+/* ── PANEL CONFIRMACIÓN ── */
+.confirm-panel {
+  display: none;
+  padding: 12px 0 0;
+}
+.confirm-panel.show { display: block; }
+
+/* Chip de localidad encontrada */
+.loc-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255,107,0,0.12);
+  border: 1px solid rgba(255,107,0,0.25);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.loc-chip-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.loc-chip-nombre {
+  font-size: 13px;
+  font-weight: 800;
+  color: white;
+  flex: 1;
+}
+.loc-chip-zona {
+  font-size: 10px;
+  color: rgba(255,255,255,0.45);
+}
+
+/* Precio grande */
+.precio-grande {
+  text-align: center;
+  margin-bottom: 12px;
+}
+.precio-grande .p-sym {
+  font-size: 18px;
+  font-weight: 900;
+  color: #69F0AE;
+  vertical-align: top;
+  margin-top: 6px;
+}
+.precio-grande .p-num {
+  font-size: 44px;
+  font-weight: 900;
+  color: #69F0AE;
+  line-height: 1;
+}
+.precio-grande .p-unit {
+  font-size: 10px;
+  color: rgba(255,255,255,0.35);
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Multiplicador */
+.mult-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+  margin-bottom: 10px;
+}
+.mult-row label {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.55);
+  flex: 1;
+}
+.mult-ctrl { display: flex; align-items: center; gap: 6px; }
+.mult-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: var(--naranja);
+  color: white;
+  font-size: 19px;
+  font-weight: 900;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: 0.15s;
+}
+.mult-btn:hover { background: #E65100; }
+.mult-num {
+  width: 46px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 900;
+  color: white;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-radius: 7px;
+  padding: 4px 0;
+  background: rgba(255,255,255,0.08);
+  outline: none;
+}
+
+/* Total box */
+.total-box {
+  background: rgba(46,125,50,0.25);
+  border: 1px solid rgba(105,240,174,0.25);
+  border-radius: 10px;
+  padding: 12px 14px;
+  text-align: center;
+  margin-bottom: 10px;
+}
+.total-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.45);
+  text-transform: uppercase;
+  margin-bottom: 2px;
+  letter-spacing: 0.5px;
+}
+.total-num {
+  font-size: 36px;
+  font-weight: 900;
+  color: #69F0AE;
+  line-height: 1;
+}
+.total-det {
+  font-size: 11px;
+  color: rgba(255,255,255,0.35);
+  margin-top: 3px;
+}
+
+/* Botón confirmar */
+.btn-aceptar {
+  width: 100%;
+  padding: 11px;
+  background: linear-gradient(135deg, #FF6B00, #E65100);
+  color: white;
+  border: none;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: 0.15s;
+  letter-spacing: 0.3px;
+}
+.btn-aceptar:hover { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 4px 14px rgba(255,107,0,0.3); }
+
+/* Cambiar link */
+.cambiar-link {
+  display: block;
+  text-align: center;
+  margin-top: 7px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.3);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.cambiar-link:hover { color: rgba(255,255,255,0.6); }
+
+/* ── PANEL TICKET ── */
+.ticket-panel {
+  display: none;
+  padding: 12px 0 0;
+}
+.ticket-panel.show { display: block; }
+.ticket-card {
+  background: rgba(46,125,50,0.18);
+  border: 1px solid rgba(105,240,174,0.2);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+.tk-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+  font-size: 12px;
+}
+.tk-row:last-child {
+  margin-bottom: 0;
+  border-top: 1px dashed rgba(255,255,255,0.1);
+  padding-top: 7px;
+  margin-top: 4px;
+}
+.tk-key { color: rgba(255,255,255,0.4); }
+.tk-val { font-weight: 700; color: rgba(255,255,255,0.85); }
+.tk-total-row .tk-val { font-size: 18px; font-weight: 900; color: #69F0AE; }
+.tk-stamp {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+  color: #69F0AE;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin-bottom: 8px;
+}
+.btn-nuevo {
+  width: 100%;
+  padding: 9px;
+  background: rgba(255,107,0,0.2);
+  border: 1px solid rgba(255,107,0,0.35);
+  color: var(--naranja);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.btn-nuevo:hover { background: rgba(255,107,0,0.3); }
+
+/* Wrapper posición relativa para el autocomplete */
+.search-container { position: relative; }
+</style>
+</head>
+<body>
+
+<div class="search-container">
+  <div class="search-wrap">
+    <span class="ico">🔍</span>
+    <input type="text" id="buscador" placeholder="Buscar localidad o partido..." autocomplete="off" spellcheck="false">
+    <button class="btn-refresh" id="btn-refresh" title="Limpiar y empezar de nuevo" onclick="refresh()">↺</button>
+  </div>
+  <div id="ac-list"></div>
+</div>
+
+<!-- PANEL MANUAL (localidad no encontrada) -->
+<div class="manual-panel" id="manual-panel">
+  <div class="mp-title">📍 No encontrada — seleccioná la zona:</div>
+  <div class="mp-field">
+    <label>Nombre</label>
+    <input type="text" id="mp-nombre" placeholder="Ej: Villa del Pino, Barrio Nuevo...">
+  </div>
+  <div class="zona-btns" id="zona-btns">
+    <button class="zona-btn" data-z="local" style="--zb-color:#EF5350" onclick="selZonaManual('local',this)">
+      <span class="zb-label">🔴 Tu Localidad</span>
+      <span class="zb-precio">$4.500</span>
+    </button>
+    <button class="zona-btn" data-z="c1" style="--zb-color:#FB8C00" onclick="selZonaManual('c1',this)">
+      <span class="zb-label">🟠 1er Cordón</span>
+      <span class="zb-precio">$5.500</span>
+    </button>
+    <button class="zona-btn" data-z="c2" style="--zb-color:#42A5F5" onclick="selZonaManual('c2',this)">
+      <span class="zb-label">🔵 2do Cordón</span>
+      <span class="zb-precio">$6.500</span>
+    </button>
+    <button class="zona-btn" data-z="c3" style="--zb-color:#66BB6A" onclick="selZonaManual('c3',this)">
+      <span class="zb-label">🟢 Zona Nueva</span>
+      <span class="zb-precio">$9.500</span>
+    </button>
+  </div>
+  <button class="mp-confirm" id="mp-confirm" onclick="confirmarManual()" disabled>Continuar →</button>
+</div>
+
+<!-- PANEL PRECIO + CANTIDAD -->
+<div class="confirm-panel" id="confirm-panel">
+  <div class="loc-chip">
+    <div class="loc-chip-dot" id="cp-dot"></div>
+    <div class="loc-chip-nombre" id="cp-loc"></div>
+    <div class="loc-chip-zona" id="cp-zona"></div>
+  </div>
+
+  <div class="precio-grande">
+    <span class="p-sym">$</span><span class="p-num" id="cp-precio-num">0</span>
+    <div class="p-unit">precio por envío</div>
+  </div>
+
+  <div class="mult-row">
+    <label>Cantidad de envíos</label>
+    <div class="mult-ctrl">
+      <button class="mult-btn" onclick="cambiarCant(-1)">−</button>
+      <input type="number" class="mult-num" id="mult-num" value="1" min="1" max="999" oninput="calcTotal()">
+      <button class="mult-btn" onclick="cambiarCant(1)">+</button>
+    </div>
+  </div>
+
+  <div class="total-box">
+    <div class="total-label">Total a cobrar</div>
+    <div class="total-num" id="ct-total">$0</div>
+    <div class="total-det" id="ct-det"></div>
+  </div>
+
+  <button class="btn-aceptar" onclick="aceptarFinal()">✅ Confirmar precio</button>
+  <span class="cambiar-link" onclick="refresh()">cambiar localidad</span>
+</div>
+
+<!-- PANEL TICKET (confirmado) -->
+<div class="ticket-panel" id="ticket-panel">
+  <div class="ticket-card">
+    <div class="tk-row">
+      <span class="tk-key">Localidad</span>
+      <span class="tk-val" id="tk-loc">—</span>
+    </div>
+    <div class="tk-row">
+      <span class="tk-key">Zona</span>
+      <span class="tk-val" id="tk-zona">—</span>
+    </div>
+    <div class="tk-row">
+      <span class="tk-key">Precio unitario</span>
+      <span class="tk-val" id="tk-unit">—</span>
+    </div>
+    <div class="tk-row">
+      <span class="tk-key">Cantidad</span>
+      <span class="tk-val" id="tk-cant">—</span>
+    </div>
+    <div class="tk-row tk-total-row">
+      <span class="tk-key">TOTAL</span>
+      <span class="tk-val" id="tk-total">—</span>
+    </div>
+  </div>
+  <div class="tk-stamp">✔ PRECIO CONFIRMADO</div>
+  <button class="btn-nuevo" onclick="refresh()">+ Nuevo envío</button>
+</div>
+
+<script>
+// ================================================================
+// LOCALIDADES COMPLETAS
+// ================================================================
+const LOCS = [
+// ── LOCAL — MORENO ──
+{id:"moreno",              n:"Moreno",                  p:"Moreno",              z:"local"},
+{id:"paso_del_rey",        n:"Paso del Rey",             p:"Moreno",              z:"local"},
+{id:"francisco_alvarez",   n:"Francisco Álvarez",        p:"Moreno",              z:"local"},
+{id:"la_reja",             n:"La Reja",                  p:"Moreno",              z:"local"},
+{id:"trujui",              n:"Trujui",                   p:"Moreno",              z:"local"},
+{id:"cuartel_v",           n:"Cuartel V",                p:"Moreno",              z:"local"},
+{id:"san_antonio_moreno",  n:"San Antonio Oeste",        p:"Moreno",              z:"local"},
+// ── C1 — MERLO ──
+{id:"merlo",               n:"Merlo",                   p:"Merlo",               z:"c1"},
+{id:"padua",               n:"Padua",                   p:"Merlo",               z:"c1"},
+{id:"san_antonio_padua",   n:"San Antonio de Padua",    p:"Merlo",               z:"c1"},
+{id:"libertad_merlo",      n:"Libertad",                p:"Merlo",               z:"c1"},
+{id:"pontevedra",          n:"Pontevedra",              p:"Merlo",               z:"c1"},
+{id:"parque_merlo",        n:"Parque Mariano Moreno",   p:"Merlo",               z:"c1"},
+{id:"los_eucaliptos",      n:"Los Eucaliptos",          p:"Merlo",               z:"c1"},
+{id:"golfer",              n:"Golfer",                  p:"Merlo",               z:"c1"},
+{id:"villa_sarmiento_m",   n:"Villa Sarmiento (Merlo)", p:"Merlo",               z:"c1"},
+{id:"marinos_descubierta", n:"Marinos de la Descubierta",p:"Merlo",              z:"c1"},
+{id:"la_union_merlo",      n:"La Unión (Merlo)",         p:"Merlo",               z:"c1"},
+// ── C1 — ITUZAINGÓ ──
+{id:"ituzaingo",           n:"Ituzaingó",               p:"Ituzaingó",           z:"c1"},
+{id:"villa_udaondo",       n:"Villa Udaondo",           p:"Ituzaingó",           z:"c1"},
+{id:"ituzaingo_norte",     n:"Ituzaingó Norte",         p:"Ituzaingó",           z:"c1"},
+{id:"las_victorias",       n:"Las Victorias",           p:"Ituzaingó",           z:"c1"},
+// ── C1 — SAN MIGUEL ──
+{id:"san_miguel",          n:"San Miguel",              p:"San Miguel",          z:"c1"},
+{id:"bella_vista",         n:"Bella Vista",             p:"San Miguel",          z:"c1"},
+{id:"muniz",               n:"Muñiz",                   p:"San Miguel",          z:"c1"},
+{id:"santa_maria",         n:"Santa María",             p:"San Miguel",          z:"c1"},
+// ── C1 — JOSÉ C. PAZ ──
+{id:"jose_c_paz",          n:"José C. Paz",             p:"José C. Paz",         z:"c1"},
+{id:"jose_c_paz_centro",   n:"J.C.Paz Centro",          p:"José C. Paz",         z:"c1"},
+// ── C2 — MORÓN ──
+{id:"moron",               n:"Morón",                   p:"Morón",               z:"c2"},
+{id:"haedo",               n:"Haedo",                   p:"Morón",               z:"c2"},
+{id:"el_palomar",          n:"El Palomar",              p:"Morón",               z:"c2"},
+{id:"villa_sarmiento_mo",  n:"Villa Sarmiento (Morón)", p:"Morón",               z:"c2"},
+{id:"castelar",            n:"Castelar",                p:"Morón",               z:"c2"},
+// ── C2 — HURLINGHAM ──
+{id:"hurlingham",          n:"Hurlingham",              p:"Hurlingham",          z:"c2"},
+{id:"villa_tesei",         n:"Villa Tesei",             p:"Hurlingham",          z:"c2"},
+{id:"william_morris",      n:"William Morris",          p:"Hurlingham",          z:"c2"},
+// ── C2 — TRES DE FEBRERO ──
+{id:"tres_de_febrero",     n:"Tres de Febrero",         p:"Tres de Febrero",     z:"c2"},
+{id:"caseros",             n:"Caseros",                 p:"Tres de Febrero",     z:"c2"},
+{id:"ciudadela",           n:"Ciudadela",               p:"Tres de Febrero",     z:"c2"},
+{id:"santos_lugares",      n:"Santos Lugares",          p:"Tres de Febrero",     z:"c2"},
+{id:"lomas_del_mirador",   n:"Lomas del Mirador",       p:"Tres de Febrero",     z:"c2"},
+{id:"el_libertador",       n:"El Libertador",           p:"Tres de Febrero",     z:"c2"},
+{id:"churruca",            n:"Churruca",                p:"Tres de Febrero",     z:"c2"},
+// ── C2 — SAN MARTÍN ──
+{id:"san_martin",          n:"Gral. San Martín",        p:"Gral. San Martín",    z:"c2"},
+{id:"villa_lynch",         n:"Villa Lynch",             p:"Gral. San Martín",    z:"c2"},
+{id:"villa_maipu",         n:"Villa Maipú",             p:"Gral. San Martín",    z:"c2"},
+{id:"jose_leon_suarez",    n:"José León Suárez",        p:"Gral. San Martín",    z:"c2"},
+{id:"villa_ballester",     n:"Villa Ballester",         p:"Gral. San Martín",    z:"c2"},
+{id:"billinghurst",        n:"Billinghurst",            p:"Gral. San Martín",    z:"c2"},
+{id:"chilavert",           n:"Chilavert",               p:"Gral. San Martín",    z:"c2"},
+{id:"villa_libertad",      n:"Villa Libertad",          p:"Gral. San Martín",    z:"c2"},
+// ── C2 — MALVINAS ARGENTINAS ──
+{id:"malvinas",            n:"Malvinas Argentinas",     p:"Malvinas Argentinas", z:"c2"},
+{id:"los_polvorines",      n:"Los Polvorines",          p:"Malvinas Argentinas", z:"c2"},
+{id:"pablo_nogues",        n:"Pablo Nogués",            p:"Malvinas Argentinas", z:"c2"},
+{id:"tortuguitas",         n:"Tortuguitas",             p:"Malvinas Argentinas", z:"c2"},
+{id:"grand_bourg",         n:"Grand Bourg",             p:"Malvinas Argentinas", z:"c2"},
+{id:"ing_sourdeaux",       n:"Ing. Adolfo Sourdeaux",   p:"Malvinas Argentinas", z:"c2"},
+// ── C2 — VICENTE LÓPEZ ──
+{id:"vicente_lopez",       n:"Vicente López",           p:"Vicente López",       z:"c2"},
+{id:"olivos",              n:"Olivos",                  p:"Vicente López",       z:"c2"},
+{id:"florida",             n:"Florida",                 p:"Vicente López",       z:"c2"},
+{id:"florida_oeste",       n:"Florida Oeste",           p:"Vicente López",       z:"c2"},
+{id:"munro",               n:"Munro",                   p:"Vicente López",       z:"c2"},
+{id:"villa_martelli",      n:"Villa Martelli",          p:"Vicente López",       z:"c2"},
+{id:"carapachay",          n:"Carapachay",              p:"Vicente López",       z:"c2"},
+{id:"la_lucila",           n:"La Lucila",               p:"Vicente López",       z:"c2"},
+// ── C2 — SAN ISIDRO ──
+{id:"san_isidro",          n:"San Isidro",              p:"San Isidro",          z:"c2"},
+{id:"martinez",            n:"Martínez",                p:"San Isidro",          z:"c2"},
+{id:"beccar",              n:"Beccar",                  p:"San Isidro",          z:"c2"},
+{id:"boulogne",            n:"Boulogne",                p:"San Isidro",          z:"c2"},
+{id:"villa_adelina",       n:"Villa Adelina",           p:"San Isidro",          z:"c2"},
+{id:"acassuso",            n:"Acassuso",                p:"San Isidro",          z:"c2"},
+// ── C2 — SAN FERNANDO ──
+{id:"san_fernando",        n:"San Fernando",            p:"San Fernando",        z:"c2"},
+{id:"victoria_sf",         n:"Victoria",                p:"San Fernando",        z:"c2"},
+{id:"virreyes",            n:"Virreyes",                p:"San Fernando",        z:"c2"},
+// ── C2 — TIGRE ──
+{id:"tigre",               n:"Tigre",                   p:"Tigre",               z:"c2"},
+{id:"gral_pacheco",        n:"General Pacheco",         p:"Tigre",               z:"c2"},
+{id:"don_torcuato",        n:"Don Torcuato",            p:"Tigre",               z:"c2"},
+{id:"el_talar",            n:"El Talar",                p:"Tigre",               z:"c2"},
+{id:"rincon_milberg",      n:"Rincón de Milberg",       p:"Tigre",               z:"c2"},
+{id:"benavidez",           n:"Benavídez",               p:"Tigre",               z:"c2"},
+{id:"troncos_talar",       n:"Los Troncos del Talar",   p:"Tigre",               z:"c2"},
+{id:"ricardo_rojas",       n:"Ricardo Rojas",           p:"Tigre",               z:"c2"},
+// ── C2 — LA MATANZA ──
+{id:"san_justo",           n:"San Justo",               p:"La Matanza",          z:"c2"},
+{id:"ramos_mejia",         n:"Ramos Mejía",             p:"La Matanza",          z:"c2"},
+{id:"villa_luzuriaga",     n:"Villa Luzuriaga",         p:"La Matanza",          z:"c2"},
+{id:"ciudad_madero",       n:"Ciudad Madero",           p:"La Matanza",          z:"c2"},
+{id:"tapiales",            n:"Tapiales",                p:"La Matanza",          z:"c2"},
+{id:"isidro_casanova",     n:"Isidro Casanova",         p:"La Matanza",          z:"c2"},
+{id:"rafael_castillo",     n:"Rafael Castillo",         p:"La Matanza",          z:"c2"},
+{id:"virrey_del_pino",     n:"Virrey del Pino",         p:"La Matanza",          z:"c2"},
+{id:"gonzalez_catan",      n:"González Catán",          p:"La Matanza",          z:"c2"},
+{id:"laferrere",           n:"Gregorio de Laferrère",   p:"La Matanza",          z:"c2"},
+{id:"veinte_junio",        n:"20 de Junio",             p:"La Matanza",          z:"c2"},
+{id:"la_tablada",          n:"La Tablada",              p:"La Matanza",          z:"c2"},
+{id:"aldo_bonzi",          n:"Aldo Bonzi",              p:"La Matanza",          z:"c2"},
+// ── C2 — AVELLANEDA ──
+{id:"avellaneda",          n:"Avellaneda",              p:"Avellaneda",          z:"c2"},
+{id:"dock_sud",            n:"Dock Sud",                p:"Avellaneda",          z:"c2"},
+{id:"villa_dominico",      n:"Villa Dominico",          p:"Avellaneda",          z:"c2"},
+{id:"wilde",               n:"Wilde",                   p:"Avellaneda",          z:"c2"},
+{id:"sarandi",             n:"Sarandí",                 p:"Avellaneda",          z:"c2"},
+{id:"gerli",               n:"Gerli",                   p:"Avellaneda",          z:"c2"},
+// ── C2 — LANÚS ──
+{id:"lanus",               n:"Lanús",                   p:"Lanús",               z:"c2"},
+{id:"lanus_este",          n:"Lanús Este",              p:"Lanús",               z:"c2"},
+{id:"lanus_oeste",         n:"Lanús Oeste",             p:"Lanús",               z:"c2"},
+{id:"remedios_escalada",   n:"Remedios de Escalada",    p:"Lanús",               z:"c2"},
+{id:"monte_chingolo",      n:"Monte Chingolo",          p:"Lanús",               z:"c2"},
+{id:"valentin_alsina",     n:"Valentín Alsina",         p:"Lanús",               z:"c2"},
+// ── C2 — LOMAS DE ZAMORA ──
+{id:"lomas_zamora",        n:"Lomas de Zamora",         p:"Lomas de Zamora",     z:"c2"},
+{id:"banfield",            n:"Banfield",                p:"Lomas de Zamora",     z:"c2"},
+{id:"temperley",           n:"Temperley",               p:"Lomas de Zamora",     z:"c2"},
+{id:"turdera",             n:"Turdera",                 p:"Lomas de Zamora",     z:"c2"},
+{id:"budge",               n:"Ingeniero Budge",         p:"Lomas de Zamora",     z:"c2"},
+{id:"villa_centenario",    n:"Villa Centenario",        p:"Lomas de Zamora",     z:"c2"},
+{id:"fiorito",             n:"Fiorito",                 p:"Lomas de Zamora",     z:"c2"},
+{id:"lomas_mirador_lz",    n:"Lomas del Mirador",       p:"Lomas de Zamora",     z:"c2"},
+// ── C2 — ALMIRANTE BROWN ──
+{id:"alte_brown",          n:"Almirante Brown",         p:"Alte. Brown",         z:"c2"},
+{id:"adrogue",             n:"Adrogué",                 p:"Alte. Brown",         z:"c2"},
+{id:"burzaco",             n:"Burzaco",                 p:"Alte. Brown",         z:"c2"},
+{id:"claypole",            n:"Claypole",                p:"Alte. Brown",         z:"c2"},
+{id:"don_orione",          n:"Don Orione",              p:"Alte. Brown",         z:"c2"},
+{id:"glew",                n:"Glew",                    p:"Alte. Brown",         z:"c2"},
+{id:"jose_marmol",         n:"José Mármol",             p:"Alte. Brown",         z:"c2"},
+{id:"longchamps",          n:"Longchamps",              p:"Alte. Brown",         z:"c2"},
+{id:"ministro_rivadavia",  n:"Ministro Rivadavia",      p:"Alte. Brown",         z:"c2"},
+// ── C2 — QUILMES ──
+{id:"quilmes",             n:"Quilmes",                 p:"Quilmes",             z:"c2"},
+{id:"bernal",              n:"Bernal",                  p:"Quilmes",             z:"c2"},
+{id:"bernal_oeste",        n:"Bernal Oeste",            p:"Quilmes",             z:"c2"},
+{id:"don_bosco",           n:"Don Bosco",               p:"Quilmes",             z:"c2"},
+{id:"ezpeleta",            n:"Ezpeleta",                p:"Quilmes",             z:"c2"},
+{id:"quilmes_oeste",       n:"Quilmes Oeste",           p:"Quilmes",             z:"c2"},
+{id:"san_fco_solano",      n:"San Francisco Solano",    p:"Quilmes",             z:"c2"},
+// ── C2 — BERAZATEGUI ──
+{id:"berazategui",         n:"Berazategui",             p:"Berazategui",         z:"c2"},
+{id:"hudson",              n:"Hudson",                  p:"Berazategui",         z:"c2"},
+{id:"pereyra",             n:"Pereyra",                 p:"Berazategui",         z:"c2"},
+{id:"ranelagh",            n:"Ranelagh",                p:"Berazategui",         z:"c2"},
+// ── C2 — FLORENCIO VARELA ──
+{id:"f_varela",            n:"Florencio Varela",        p:"Florencio Varela",    z:"c2"},
+{id:"bosques",             n:"Bosques",                 p:"Florencio Varela",    z:"c2"},
+{id:"villa_brown",         n:"Villa Brown",             p:"Florencio Varela",    z:"c2"},
+{id:"villa_hudson_fv",     n:"Villa Hudson",            p:"Florencio Varela",    z:"c2"},
+// ── C2 — EZEIZA ──
+{id:"ezeiza",              n:"Ezeiza",                  p:"Ezeiza",              z:"c2"},
+{id:"tristan_suarez",      n:"Tristán Suárez",          p:"Ezeiza",              z:"c2"},
+{id:"canning",             n:"Canning",                 p:"Ezeiza",              z:"c2"},
+{id:"el_jaguel",           n:"El Jagüel",               p:"Ezeiza",              z:"c2"},
+// ── C2 — ESTEBAN ECHEVERRÍA ──
+{id:"monte_grande",        n:"Monte Grande",            p:"Est. Echeverría",     z:"c2"},
+{id:"9_de_abril",          n:"9 de Abril",              p:"Est. Echeverría",     z:"c2"},
+// ── C2 — CABA ──
+{id:"caba_palermo",        n:"Palermo",                 p:"CABA",                z:"c2"},
+{id:"caba_belgrano",       n:"Belgrano",                p:"CABA",                z:"c2"},
+{id:"caba_nunez",          n:"Núñez",                   p:"CABA",                z:"c2"},
+{id:"caba_coghlan",        n:"Coghlan",                 p:"CABA",                z:"c2"},
+{id:"caba_villa_urquiza",  n:"Villa Urquiza",           p:"CABA",                z:"c2"},
+{id:"caba_devoto",         n:"Villa Devoto",            p:"CABA",                z:"c2"},
+{id:"caba_agronomy",       n:"Agronomía",               p:"CABA",                z:"c2"},
+{id:"caba_chacarita",      n:"Chacarita",               p:"CABA",                z:"c2"},
+{id:"caba_paternal",       n:"La Paternal",             p:"CABA",                z:"c2"},
+{id:"caba_villa_del_parque",n:"Villa del Parque",       p:"CABA",                z:"c2"},
+{id:"caba_monte_castro",   n:"Monte Castro",            p:"CABA",                z:"c2"},
+{id:"caba_versalles",      n:"Versalles",               p:"CABA",                z:"c2"},
+{id:"caba_flores",         n:"Flores",                  p:"CABA",                z:"c2"},
+{id:"caba_caballito",      n:"Caballito",               p:"CABA",                z:"c2"},
+{id:"caba_almagro",        n:"Almagro",                 p:"CABA",                z:"c2"},
+{id:"caba_boedo",          n:"Boedo",                   p:"CABA",                z:"c2"},
+{id:"caba_san_cristobal",  n:"San Cristóbal",           p:"CABA",                z:"c2"},
+{id:"caba_constitucion",   n:"Constitución",            p:"CABA",                z:"c2"},
+{id:"caba_monserrat",      n:"Monserrat",               p:"CABA",                z:"c2"},
+{id:"caba_centro",         n:"San Nicolás / Centro",    p:"CABA",                z:"c2"},
+{id:"caba_retiro",         n:"Retiro",                  p:"CABA",                z:"c2"},
+{id:"caba_recoleta",       n:"Recoleta",                p:"CABA",                z:"c2"},
+{id:"caba_boca",           n:"La Boca",                 p:"CABA",                z:"c2"},
+{id:"caba_barracas",       n:"Barracas",                p:"CABA",                z:"c2"},
+{id:"caba_nueva_pompeya",  n:"Nueva Pompeya",           p:"CABA",                z:"c2"},
+{id:"caba_mataderos",      n:"Mataderos",               p:"CABA",                z:"c2"},
+{id:"caba_lugano",         n:"Villa Lugano",            p:"CABA",                z:"c2"},
+{id:"caba_soldati",        n:"Villa Soldati",           p:"CABA",                z:"c2"},
+{id:"caba_floresta",       n:"Floresta",                p:"CABA",                z:"c2"},
+{id:"caba_liniers",        n:"Liniers",                 p:"CABA",                z:"c2"},
+{id:"caba_villa_luro",     n:"Villa Luro",              p:"CABA",                z:"c2"},
+{id:"caba_puerto_madero",  n:"Puerto Madero",           p:"CABA",                z:"c2"},
+{id:"caba_san_telmo",      n:"San Telmo",               p:"CABA",                z:"c2"},
+{id:"caba_balvanera",      n:"Balvanera",               p:"CABA",                z:"c2"},
+{id:"caba_villa_crespo",   n:"Villa Crespo",            p:"CABA",                z:"c2"},
+{id:"caba_palermo_chico",  n:"Palermo Chico",           p:"CABA",                z:"c2"},
+{id:"caba_velez",          n:"Vélez Sársfield",         p:"CABA",                z:"c2"},
+// ── C3 — ZONAS NUEVAS ──
+{id:"escobar",             n:"Escobar",                 p:"Escobar",             z:"c3"},
+{id:"belen_escobar",       n:"Belén de Escobar",        p:"Escobar",             z:"c3"},
+{id:"ing_maschwitz",       n:"Ing. Maschwitz",          p:"Escobar",             z:"c3"},
+{id:"garin",               n:"Garín",                   p:"Escobar",             z:"c3"},
+{id:"matheu",              n:"Matheu",                  p:"Escobar",             z:"c3"},
+{id:"pilar",               n:"Pilar",                   p:"Pilar",               z:"c3"},
+{id:"del_viso",            n:"Del Viso",                p:"Pilar",               z:"c3"},
+{id:"derqui",              n:"Derqui / Pte. Derqui",    p:"Pilar",               z:"c3"},
+{id:"villa_rosa",          n:"Villa Rosa",              p:"Pilar",               z:"c3"},
+{id:"fatima",              n:"Fátima",                  p:"Pilar",               z:"c3"},
+{id:"nordelta",            n:"Nordelta",                p:"Tigre",               z:"c3"},
+{id:"zarate",              n:"Zárate",                  p:"Zárate",              z:"c3"},
+{id:"campana",             n:"Campana",                 p:"Campana",             z:"c3"},
+{id:"lujan",               n:"Luján",                   p:"Luján",               z:"c3"},
+{id:"torres_lujan",        n:"Torres",                  p:"Luján",               z:"c3"},
+{id:"open_door",           n:"Open Door",               p:"Luján",               z:"c3"},
+{id:"gral_rodriguez",      n:"Gral. Rodríguez",         p:"Gral. Rodríguez",     z:"c3"},
+{id:"marcos_paz",          n:"Marcos Paz",              p:"Marcos Paz",          z:"c3"},
+{id:"canuelas",            n:"Cañuelas",                p:"Cañuelas",            z:"c3"},
+{id:"guernica",            n:"Guernica",                p:"Pte. Perón",          z:"c3"},
+{id:"san_vicente",         n:"San Vicente",             p:"San Vicente",         z:"c3"},
+{id:"la_plata",            n:"La Plata",                p:"La Plata",            z:"c3"},
+{id:"villa_elisa",         n:"Villa Elisa",             p:"La Plata",            z:"c3"},
+{id:"city_bell",           n:"City Bell",               p:"La Plata",            z:"c3"},
+{id:"gonnet",              n:"Gonnet",                  p:"La Plata",            z:"c3"},
+{id:"los_hornos",          n:"Los Hornos",              p:"La Plata",            z:"c3"},
+{id:"tolosa",              n:"Tolosa",                  p:"La Plata",            z:"c3"},
+{id:"gorina",              n:"Gorina",                  p:"La Plata",            z:"c3"},
+{id:"ensenada",            n:"Ensenada",                p:"Ensenada",            z:"c3"},
+{id:"berisso",             n:"Berisso",                 p:"Berisso",             z:"c3"},
+{id:"capilla_del_senor",   n:"Capilla del Señor",       p:"Exaltación de la Cruz",z:"c3"},
+];
+
+// ================================================================
+// CONFIG
+// ================================================================
+const PRECIO_ZONA = {local:4500, c1:5500, c2:6500, c3:9500};
+const ZONA_LBL    = {local:"Tu Localidad", c1:"1er Cordón", c2:"2do Cordón/CABA", c3:"Zona Nueva"};
+const ZONA_COLOR  = {local:"#EF5350", c1:"#FB8C00", c2:"#42A5F5", c3:"#66BB6A"};
+
+let precios = {};
+let sel = null;
+let precioActual = 0;
+let locActualNombre = '';
+let zonaActual = '';
+let modoManualZona = null;
+
+// ── STORAGE ──
+function load() { try { precios = JSON.parse(localStorage.getItem('dom_flex2')||'{}'); } catch(e){precios={};} }
+function save() { localStorage.setItem('dom_flex2', JSON.stringify(precios)); }
+
+// ── REFRESH ──
+function refresh() {
+  sel = null;
+  precioActual = 0;
+  modoManualZona = null;
+  document.getElementById('buscador').value = '';
+  document.getElementById('ac-list').style.display = 'none';
+  ocultarTodosPaneles();
+  const btn = document.getElementById('btn-refresh');
+  btn.classList.add('spin');
+  setTimeout(() => btn.classList.remove('spin'), 500);
+}
+
+function ocultarTodosPaneles() {
+  document.getElementById('manual-panel').classList.remove('show');
+  document.getElementById('confirm-panel').classList.remove('show');
+  document.getElementById('ticket-panel').classList.remove('show');
+}
+
+// ── SELECCIÓN ──
+function seleccionar(L) {
+  sel = L;
+  const precio = precios[L.id] || PRECIO_ZONA[L.z];
+  precios[L.id] = precio;
+  save();
+  abrirConfirmacion(L.n, ZONA_LBL[L.z], ZONA_COLOR[L.z], precio);
+}
+
+// ── PANEL CONFIRMACIÓN ──
+function abrirConfirmacion(nombre, zonaLabel, zonaColor, precio) {
+  precioActual = precio;
+  locActualNombre = nombre;
+  zonaActual = zonaLabel;
+  ocultarTodosPaneles();
+  document.getElementById('cp-loc').textContent = nombre;
+  document.getElementById('cp-zona').textContent = zonaLabel;
+  document.getElementById('cp-dot').style.background = zonaColor;
+  document.getElementById('cp-precio-num').textContent = precio.toLocaleString('es-AR');
+  document.getElementById('mult-num').value = 1;
+  document.getElementById('confirm-panel').classList.add('show');
+  calcTotal();
+}
+
+function cambiarCant(delta) {
+  const inp = document.getElementById('mult-num');
+  let v = parseInt(inp.value) || 1;
+  v = Math.max(1, Math.min(999, v + delta));
+  inp.value = v;
+  calcTotal();
+}
+
+function calcTotal() {
+  const cant = parseInt(document.getElementById('mult-num').value) || 1;
+  const total = precioActual * cant;
+  document.getElementById('ct-total').textContent = `$${total.toLocaleString('es-AR')}`;
+  document.getElementById('ct-det').textContent = `${cant} envío${cant>1?'s':''} × $${precioActual.toLocaleString('es-AR')}`;
+}
+
+function aceptarFinal() {
+  const cant = parseInt(document.getElementById('mult-num').value) || 1;
+  const total = precioActual * cant;
+
+  // Llenar ticket
+  document.getElementById('tk-loc').textContent   = locActualNombre;
+  document.getElementById('tk-zona').textContent  = zonaActual;
+  document.getElementById('tk-unit').textContent  = `$${precioActual.toLocaleString('es-AR')}`;
+  document.getElementById('tk-cant').textContent  = `${cant} envío${cant>1?'s':''}`;
+  document.getElementById('tk-total').textContent = `$${total.toLocaleString('es-AR')}`;
+  ocultarTodosPaneles();
+  document.getElementById('ticket-panel').classList.add('show');
+
+  // postMessage al parent
+  window.parent.postMessage({
+    type: 'domestico_flex_confirmado',
+    localidad: locActualNombre,
+    zona: zonaActual,
+    precio_unitario: precioActual,
+    cantidad: cant,
+    total: total
+  }, '*');
+}
+
+// ── MODO MANUAL ──
+function mostrarManual() {
+  sel = null;
+  modoManualZona = null;
+  ocultarTodosPaneles();
+  document.getElementById('manual-panel').classList.add('show');
+  document.getElementById('mp-nombre').value = document.getElementById('buscador').value.trim();
+  document.getElementById('mp-confirm').disabled = true;
+  document.querySelectorAll('.zona-btn').forEach(b => b.classList.remove('sel-z'));
+  setTimeout(() => document.getElementById('mp-nombre').focus(), 50);
+}
+
+function selZonaManual(z, btn) {
+  modoManualZona = z;
+  document.querySelectorAll('.zona-btn').forEach(b => b.classList.remove('sel-z'));
+  btn.classList.add('sel-z');
+  const nombre = document.getElementById('mp-nombre').value.trim();
+  document.getElementById('mp-confirm').disabled = !nombre;
+}
+
+function confirmarManual() {
+  const nombre = document.getElementById('mp-nombre').value.trim();
+  if (!nombre || !modoManualZona) return;
+  const precio = PRECIO_ZONA[modoManualZona];
+  abrirConfirmacion(nombre, ZONA_LBL[modoManualZona], ZONA_COLOR[modoManualZona], precio);
+}
+
+// ── BUSCADOR ──
+function norm(s) { return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''); }
+const buscador = document.getElementById('buscador');
+const acList   = document.getElementById('ac-list');
+
+buscador.addEventListener('input', () => {
+  const q = norm(buscador.value.trim());
+  if (q.length < 1) { acList.style.display='none'; return; }
+  const res = LOCS.filter(L => norm(L.n).includes(q) || norm(L.p).includes(q)).slice(0,12);
+
+  if (!res.length) {
+    acList.innerHTML = `<div class="ac-item" id="ac-no-enc" style="color:rgba(255,107,0,0.9);font-weight:700;justify-content:space-between">
+      <span>📍 "${buscador.value.trim()}" — No encontrada</span>
+      <span style="font-size:10px;opacity:0.7">Manual →</span>
+    </div>`;
+    acList.style.display = 'block';
+    document.getElementById('ac-no-enc').addEventListener('click', () => {
+      acList.style.display = 'none';
+      mostrarManual();
+    });
+    return;
+  }
+
+  acList.innerHTML = res.map(L => {
+    const p = precios[L.id];
+    return `<div class="ac-item" data-id="${L.id}">
+      <div class="ac-dot" style="background:${ZONA_COLOR[L.z]}"></div>
+      <span class="ac-nombre">${L.n}</span>
+      <span class="ac-partido">${L.p}</span>
+      <span class="ac-precio ${p?'':'sin'}">${p ? '$'+p.toLocaleString('es-AR') : ZONA_LBL[L.z]}</span>
+    </div>`;
+  }).join('');
+
+  const hayExacta = res.some(L => norm(L.n) === q);
+  if (!hayExacta) {
+    acList.innerHTML += `<div class="ac-item" id="ac-manual-extra" style="color:rgba(255,107,0,0.7);font-size:11px;justify-content:center;gap:4px">
+      <span>¿No es ninguna?</span><span style="font-weight:800">Ingresar manual →</span>
+    </div>`;
+  }
+
+  acList.style.display = 'block';
+
+  acList.querySelectorAll('.ac-item[data-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      const L = LOCS.find(l => l.id === el.getAttribute('data-id'));
+      buscador.value = '';
+      acList.style.display = 'none';
+      seleccionar(L);
+    });
+  });
+
+  const manualExtra = document.getElementById('ac-manual-extra');
+  if (manualExtra) {
+    manualExtra.addEventListener('click', () => {
+      acList.style.display = 'none';
+      mostrarManual();
+    });
+  }
+});
+
+document.addEventListener('click', e => {
+  if (!acList.contains(e.target) && e.target !== buscador) acList.style.display='none';
+});
+
+document.getElementById('mp-nombre').addEventListener('input', () => {
+  document.getElementById('mp-confirm').disabled = !document.getElementById('mp-nombre').value.trim() || !modoManualZona;
+});
+
+// ── INIT ──
+load();
+</script>
+</body>
+</html>

@@ -1324,7 +1324,7 @@ const DetalleDEFCombo = ({ itemPRE, onConfirm }) => {
 
 // Helpers para documentos — descarga como archivo HTML (funciona en Claude desktop)
 const descargarHTML = (html, nombreArchivo) => {
-  const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nombreArchivo}</title><style>body{margin:0;padding:12px;font-family:Arial,sans-serif;}@media print{body{margin:0;padding:0;}}</style></head><body>${html}</body></html>`;
+  const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nombreArchivo}</title><style>body{margin:0;padding:12px;font-family:Arial,sans-serif;}@media print{body{margin:0 auto;padding:0;max-width:100%;}}</style></head><body>${html}</body></html>`;
   const w = window.open('', '_blank');
   if (!w) { alert('Permitir popups para este sitio en Chrome'); return; }
   w.document.write(fullHtml);
@@ -1571,7 +1571,7 @@ function imprimirPedido(pedido, solo=null) {
         <span style="font-size:24px;font-weight:900;">${fmtDoc(tot.total)}</span>
       </div>
       <div style="margin-top:16px;font-size:10px;color:#94a3b8;text-align:center;">Precios con 15% OFF · Doméstico Química de Limpieza · Moreno, Bs. As.</div>
-      <style>@media print{@page{size:A4;margin:10mm;}}</style>
+      <style>@media print{@page{size:A4 portrait;margin:20mm 35mm;}}</style>
     </div>`;
 
     // ── ORDEN DE PRODUCCIÓN ───────────────────────────────────────────────────
@@ -1670,7 +1670,7 @@ function imprimirPedido(pedido, solo=null) {
       ${cliente.datoExtra?`<div style="margin-top:4px;font-size:11px;color:#475569;"><strong>Dato extra:</strong> ${cliente.datoExtra}</div>`:''}
       ${cliente.observaciones?`<div style="margin-top:8px;padding:7px 10px;background:#fef3c7;border-left:4px solid #d97706;border-radius:6px;font-size:11px;"><strong>⚠️ OBSERVACIONES DEL CLIENTE:</strong> ${cliente.observaciones}</div>`:''}
       <div style="margin-top:8px;padding:6px 10px;background:#fee2e2;border-radius:6px;font-size:11px;font-weight:700;">✋ VERIFICAR colores, fragancias y cantidades antes de embolsar.</div>
-      <style>@media print{@page{size:A4;margin:10mm;}}</style></div>`;
+      <style>@media print{@page{size:A4 portrait;margin:20mm 35mm;}}</style></div>`;
 
     // ── ETIQUETA (bultos prominente) ──────────────────────────────────────────
     const tipoEnvioEtiq = esR ? 'RETIRA EN PLANTA' : esI ? 'INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI' : `ENVÍO FLEX AMBA — ${cliente.localidad||ex.localidad||''}`;
@@ -1894,7 +1894,7 @@ function imprimirPedido(pedido, solo=null) {
         <div style="width:18px;height:18px;border:2px solid #0d5c3a;border-radius:3px;"></div>
         <span>${esR?'Listo para retiro en planta':esI?'Despachado por logística nacional':'Entregado a cadete / despacho FLEX'}</span>
       </div>
-      <style>@media print{@page{size:A4;margin:10mm;}}</style>
+      <style>@media print{@page{size:A4 portrait;margin:20mm 35mm;}}</style>
     </div>`;
 
     if (!solo) {

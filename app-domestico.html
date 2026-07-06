@@ -1942,6 +1942,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
     setPaso('detalles');
     setExtras(prev => ({
       ...prev,
+      esInterior: prev.esInterior || modalidadPreload==='interior',
       envio: (modalidadPreload==='flex' && typeof preData.extras?.envio==='number') ? preData.extras.envio : null,
       bultos: preData.envases || 1,
       localidad: (modalidadPreload==='flex' && preData.extras?.localidad) ? preData.extras.localidad : ''
@@ -2154,7 +2155,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
                   <div style={{ fontWeight:700, fontSize:14 }}>🏪 Retira en planta</div>
                   <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginTop:3 }}>El cliente pasa a buscar el pedido — sin costo de envío</div>
                 </button>
-                <button onClick={()=>{ setModalidadEntrega('envio'); setExtras(e=>({...e,retiraLocal:false})); }} className="sel-btn" style={{ textAlign:'left', padding:'14px 16px', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:12, color:'#fff', cursor:'pointer' }}>
+                <button onClick={()=>{ setModalidadEntrega('envio'); setExtras(e=>({...e,retiraLocal:false,esInterior:e.esInterior||modalidadPreload==='interior'})); }} className="sel-btn" style={{ textAlign:'left', padding:'14px 16px', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:12, color:'#fff', cursor:'pointer' }}>
                   <div style={{ fontWeight:700, fontSize:14 }}>🚚 Envío Flex / Interior del país</div>
                   <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginTop:3 }}>Flex (zona local) o Via Cargo/Andreani — el flete se coordina en el siguiente paso</div>
                 </button>
@@ -2230,7 +2231,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
                 let ok = false;
                 ok = !!(cliente.nombre && cliente.telefono);
                 return (
-                  <button onClick={()=>{ const esRetiro = modalidadEntrega==='local'; const extrasNew = {...extras, localidad:cliente.localidad, retiraLocal:esRetiro, esInterior: !esRetiro && extras.esInterior}; setExtras(extrasNew); if(esRetiro){ confirmarPedidoCon(extrasNew); } else { setPaso('extras'); } }}
+                  <button onClick={()=>{ const esRetiro = modalidadEntrega==='local'; const extrasNew = {...extras, localidad:cliente.localidad, retiraLocal:esRetiro, esInterior: !esRetiro && (extras.esInterior || modalidadPreload==='interior')}; setExtras(extrasNew); if(esRetiro){ confirmarPedidoCon(extrasNew); } else { setPaso('extras'); } }}
                     disabled={!ok} style={{...s.bP, opacity:ok?1:0.45, cursor:ok?'pointer':'not-allowed'}}>
                     Continuar → {modalidadEntrega==='local'?'Confirmar pedido':'Logística de entrega'}
                   </button>
@@ -3131,7 +3132,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   const irPreNuevo = () => { setCodigoPRE(null); setEtapa('pre'); };
   const irDefNuevo = () => { setCodigoPRE(null); setClientePreload(null); setModalidadPreload(null); setEtapa('pre'); };
   const irDefDesdePRE = (cod) => { setCodigoPRE(cod); setEtapa('def'); };
-  const irInicio = () => { setEtapa('inicio'); setBusResults([]); setBusqueda(''); setBusError(''); setClientePreload(null); reload(); };
+  const irInicio = () => { setEtapa('inicio'); setBusResults([]); setBusqueda(''); setBusError(''); setClientePreload(null); setModalidadPreload(null); reload(); };
   const irClientes = () => { setEtapa('clientes'); setBusResults([]); setBusqueda(''); setBusError(''); };
   const nuevoPedidoDesdeCli = (cli) => { setClientePreload(cli); setCodigoPRE(null); setEtapa('pre'); };
 

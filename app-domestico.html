@@ -346,7 +346,7 @@ const ItemLibre = ({ lista, setLista }) => {
   const [prec, setPrec] = useState('');
   return (
     <div style={s.card}>
-      <div style={s.cTit}>➕ Agregar ítem extra</div>
+      <div style={s.cTit}>➕ AGREGAR PRODUCTOS / EXTRAS</div>
       <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:12 }}>
         <div><label style={s.lbl}>Descripción</label><input value={nom} onChange={e=>setNom(e.target.value)} style={s.inp} placeholder="Ej: Tanque plástico, dispenser..." /></div>
         <div><label style={s.lbl}>Importe</label><input type="number" value={prec} onChange={e=>setPrec(e.target.value)} style={s.inp} placeholder="$0" /></div>
@@ -378,6 +378,9 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
       <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.75)', border:'1px solid rgba(255,255,255,0.14)', borderRadius:8, fontWeight:600, fontSize:12, cursor:'pointer', marginBottom:18 }}>← Atrás</button>
       <SH step="Extras y envío" title="Completar cotización" />
 
+      {/* Ítem libre — va primero */}
+      <ItemLibre lista={extras.agregados} setLista={v=>setExtras({...extras,agregados:v})} />
+
       {/* Envases */}
       <div style={s.card}>
         <div style={s.cTit}>🪣 Envases — $4.000 c/u</div>
@@ -388,9 +391,6 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
           {envases>0 && <span style={{ color:C.na, fontWeight:800 }}>{fmt(envases*PRECIO_ENVASE)}</span>}
         </div>
       </div>
-
-      {/* Ítem libre */}
-      <ItemLibre lista={extras.agregados} setLista={v=>setExtras({...extras,agregados:v})} />
 
       {/* Envío */}
       <div style={s.card}>
@@ -583,8 +583,8 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial }) => {
       `📋 *Código: ${codigo}*`,``,
       `📦 *Productos:*`,
       ...items.map(i=>`• ${i.nombre} — *${fmt(i.precio)}*`),
-      envases>0?`• Envases (${envases}) — *${fmt(totalEnvases)}*`:null,
-      ...extras.agregados.map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),``,
+      ...extras.agregados.map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),
+      envases>0?`• Envases (${envases}) — *${fmt(totalEnvases)}*`:null,``,
       `📦 *MODALIDAD DE ENTREGA*`,
       (extras.retiraLocal||modalidadPRE==='retiro')?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:(extras.esInterior||modalidadPRE==='interior')?`🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`:typeof extras.envio==='number'&&extras.localidad?`🚚 *ENVÍO FLEX AMBA* — ${extras.localidad} — *${fmt(extras.envio)}*`:zona?`🚚 *ENVÍO FLEX AMBA* — ${extras.localidad} (${zona.zona}) · ${extras.bultos} bulto${extras.bultos!==1?'s':''} — *${fmt(totalEnvio)}*`:(extras.localidad||modalidadPRE==='flex')?`🚚 *ENVÍO FLEX AMBA*${extras.localidad?` — ${extras.localidad}`:''}`:null,``,
       `━━━━━━━━━━━━━━━━`,`💰 *TOTAL: ${fmt(total)}*`,`━━━━━━━━━━━━━━━━`,``,
@@ -1515,11 +1515,14 @@ function imprimirPedido(pedido, solo=null) {
         <td colspan="2" style="padding:8px 4px 2px;font-size:12px;color:#b45309;font-style:italic;">⚠️ EL CLIENTE ELIGIÓ NO LLEVAR ENVASES</td>
       </tr>`;
 
-    const extrasRowsHtml = (ex.agregados||[]).map(a=>`${divRow}
+    const extrasRowsHtml = (ex.agregados||[]).length > 0 ? [
+      `${divRow}<tr><td colspan="2" style="padding:8px 4px 2px;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;">Productos Extra</td></tr>`,
+      ...(ex.agregados||[]).map(a=>`${divRow}
       <tr>
-        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#f97316;font-weight:900;margin-right:6px;">▸</span><strong>${a.nombre.toUpperCase()}</strong></td>
+        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0d5c3a;font-weight:900;margin-right:6px;">▸</span><strong>${a.nombre.toUpperCase()}</strong></td>
         <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">${fmtDoc(parseFloat(a.precio)||0)}</td>
-      </tr>`).join('');
+      </tr>`)
+    ].join('') : '';
 
     const envioRowHtml = envioLinea?`${divRow}
       <tr>
@@ -1561,8 +1564,8 @@ function imprimirPedido(pedido, solo=null) {
         </tr></thead>
         <tbody>
           ${itemRowsHtml}
-          ${envasesRowHtml}
           ${extrasRowsHtml}
+          ${envasesRowHtml}
           ${envioRowHtml}
         </tbody>
       </table>
@@ -1656,6 +1659,7 @@ function imprimirPedido(pedido, solo=null) {
           ${prodBody}
         </div>`;
       }).join('')}
+      ${(ex.agregados||[]).length>0?`<div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;margin:10px 0 5px;border-top:2px solid #e2e8f0;padding-top:8px;">⭐ Productos Extra</div>${ex.agregados.map(a=>`<div style="padding:8px 10px;border-left:4px solid #0d5c3a;background:#f8fafc;margin-bottom:7px;border-radius:4px;display:flex;justify-content:space-between;align-items:center;"><div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;">${a.nombre}</div><div style="font-size:13px;font-weight:700;color:#0d5c3a;">${fmtDoc(parseFloat(a.precio)||0)}</div></div>`).join('')}`:''}
       ${env>0?`<div style="padding:8px 10px;border-left:4px solid #f97316;background:#fff7ed;margin-bottom:7px;border-radius:4px;font-weight:800;">🪣 Envases vacíos: ${env}</div>`:`<div style="padding:8px 10px;border-left:4px solid #b45309;background:#fefce8;margin-bottom:7px;border-radius:6px;font-size:12px;font-weight:700;color:#b45309;">⚠️ EL CLIENTE ELIGIÓ NO LLEVAR ENVASES</div>`}
       <div style="margin-top:10px;padding:8px 12px;background:#e0f2fe;border-left:4px solid #0284c7;border-radius:6px;font-size:11px;">
         <span style="font-weight:900;color:#0284c7;">📦 ENTREGA:</span>
@@ -1839,13 +1843,13 @@ function imprimirPedido(pedido, solo=null) {
       ${actRows.join('')}`:'';
 
     const checkExtrasHtml = (ex.agregados||[]).length>0?`
-      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:6px;color:#f97316;">Extras del vendedor</div>
+      <div style="font-weight:800;font-size:13px;text-transform:uppercase;margin-top:12px;margin-bottom:6px;color:#0d5c3a;">⭐ PRODUCTOS EXTRA</div>
       ${ex.agregados.map(a=>`
         <div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
-          <div style="width:18px;height:18px;border:2px solid #f97316;border-radius:3px;flex-shrink:0;margin-top:1px;"></div>
+          <div style="width:18px;height:18px;border:2px solid #0d5c3a;border-radius:3px;flex-shrink:0;margin-top:1px;"></div>
           <div>
-            <div style="font-weight:700;">${a.nombre}</div>
-            ${a.precio?`<div style="font-size:10px;color:#f97316;font-weight:700;">${fmtDoc(parseFloat(a.precio)||0)}</div>`:''}
+            <div style="font-weight:700;font-size:13px;text-transform:uppercase;">${a.nombre}</div>
+            ${a.precio?`<div style="font-size:12px;color:#0d5c3a;font-weight:700;">${fmtDoc(parseFloat(a.precio)||0)}</div>`:''}
           </div>
         </div>`).join('')}`:'';
 
@@ -1878,9 +1882,9 @@ function imprimirPedido(pedido, solo=null) {
         ${cliente.observaciones?`<div style="margin-top:4px;padding:4px 8px;background:#fef3c7;border-radius:5px;font-size:11px;font-weight:700;color:#92400e;">⚠️ OBS: ${cliente.observaciones}</div>`:''}
       </div>
       ${checkItemsHtml}
+      ${checkExtrasHtml}
       ${checkActivadoresHtml}
       ${checkEnvasesHtml}
-      ${checkExtrasHtml}
       <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:6px;color:#0d5c3a;">Embalaje y Despacho</div>
       <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
         <div style="width:18px;height:18px;border:2px solid #0d5c3a;border-radius:3px;"></div>

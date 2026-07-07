@@ -1943,6 +1943,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
     setExtras(prev => ({
       ...prev,
       esInterior: prev.esInterior || modalidadPreload==='interior',
+      agregados: (preData.extras?.agregados || []).length > 0 ? preData.extras.agregados : prev.agregados,
       envio: (modalidadPreload==='flex' && typeof preData.extras?.envio==='number') ? preData.extras.envio : null,
       bultos: preData.envases || 1,
       localidad: (modalidadPreload==='flex' && preData.extras?.localidad) ? preData.extras.localidad : ''
@@ -2015,7 +2016,9 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
     const zona = detectarZona(extrasUsados.localidad || cliente.localidad);
     const pre = preData || {};
     const envasesHeredados = pre.envases ?? 0;
-    const agregadosHeredados = pre.extras?.agregados ?? [];
+    const agregadosHeredados = (extras.agregados && extras.agregados.length > 0)
+      ? extras.agregados
+      : (pre.extras?.agregados ?? []);
     const totalProd  = carrito.reduce((s,i) => s + Number(i.precio||0), 0);
     const totalEnv   = envasesHeredados * PRECIO_ENVASE;
     const totalAgr   = agregadosHeredados.reduce((s,a) => s + (parseFloat(a.precio)||0), 0);

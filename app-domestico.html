@@ -2695,9 +2695,9 @@ _Doméstico · Moreno, Bs. As._`
             {detalleItem(it).map((l,j) => <div key={j} style={{ fontSize:11, color:'rgba(255,255,255,0.55)', marginTop:2 }}>{l.trim()}</div>)}
           </div>
         ))}
+        {(ex.agregados||[]).map((a,i) => <div key={i} style={{ fontSize:13 }}>• {a.nombre} — <span style={{ color:'#f97316' }}>{fmt(a.precio)}</span></div>)}
         {env>0 && <div style={{ fontSize:13, marginBottom:4 }}>📦 Envases ({env}) — <span style={{ color:'#f97316' }}>{fmt(tot.envases)}</span></div>}
         {env===0 && <div style={{ fontSize:12, color:'rgba(255,200,0,0.7)' }}>⚠️ Sin envases</div>}
-        {(ex.agregados||[]).map((a,i) => <div key={i} style={{ fontSize:13 }}>• {a.nombre} — <span style={{ color:'#f97316' }}>{fmt(a.precio)}</span></div>)}
       </div>
 
       {/* Entrega */}

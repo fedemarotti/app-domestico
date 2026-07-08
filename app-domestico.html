@@ -2418,8 +2418,8 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
               `🛒 *PRODUCTOS Y DETALLE*`,
               `━━━━━━━━━━━━━━━━`,
               ...lineasProductos,
-              env>0 ? `• Envases (${env}) — *${fmt(tot.envases)}*` : `⚠️ _Sin envases (cliente no lleva)_`,
               ...(ex.agregados||[]).map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),
+              env>0 ? `• Envases (${env}) — *${fmt(tot.envases)}*` : `⚠️ _Sin envases (cliente no lleva)_`,
               ``,
               `━━━━━━━━━━━━━━━━`,
               `📦 *MODALIDAD DE ENTREGA*`,
@@ -2616,8 +2616,8 @@ _Doméstico · Moreno, Bs. As._`
     cl.observaciones?`📝 *Observaciones:* ${cl.observaciones}`:null,
     ``,`━━━━━━━━━━━━━━━━`,`🛒 *PRODUCTOS Y DETALLE*`,`━━━━━━━━━━━━━━━━`,
     ...lineasProductos,
-    env>0?`• Envases (${env}) — *${fmt(tot.envases)}*`:`⚠️ _Sin envases (cliente no lleva)_`,
     ...(ex.agregados||[]).map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),
+    env>0?`• Envases (${env}) — *${fmt(tot.envases)}*`:`⚠️ _Sin envases (cliente no lleva)_`,
     ``,`━━━━━━━━━━━━━━━━`,`📦 *MODALIDAD DE ENTREGA*`,
     ex.retiraLocal?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:
       ex.esInterior?`🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`:

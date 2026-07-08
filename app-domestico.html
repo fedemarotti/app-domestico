@@ -3147,7 +3147,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   const irPreNuevo = () => { setCodigoPRE(null); setEtapa('pre'); };
   const irDefNuevo = () => { setCodigoPRE(null); setClientePreload(null); setModalidadPreload(null); setEtapa('pre'); };
   const irDefDesdePRE = (cod) => { setCodigoPRE(cod); setEtapa('def'); };
-  const irInicio = () => { setEtapa('inicio'); setBusResults([]); setBusqueda(''); setBusError(''); setClientePreload(null); setModalidadPreload(null); reload(); };
+  const irInicio = () => { setEtapa('inicio'); setBusResults([]); setBusqueda(''); setBusError(''); setClientePreload(null); setModalidadPreload(null); listLS().then(arr => setPedidos(Array.isArray(arr) ? arr : [])); };
   const irClientes = () => { setEtapa('clientes'); setBusResults([]); setBusqueda(''); setBusError(''); };
   const nuevoPedidoDesdeCli = (cli) => { setClientePreload(cli); setCodigoPRE(null); setEtapa('pre'); };
 

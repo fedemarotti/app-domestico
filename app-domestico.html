@@ -3053,7 +3053,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   useEffect(() => { listLS().then(arr => setPedidos(Array.isArray(arr) ? arr : [])); }, []);
 
   const buscar = (rawOverride) => {
-    const raw = (rawOverride !== undefined ? rawOverride : busqueda).trim();
+    const raw = (typeof rawOverride === 'string' ? rawOverride : busqueda).trim();
     if (!raw) { setBusResults([]); setBusError(''); return; }
     const q = raw.toUpperCase();
     const qLow = raw.toLowerCase();

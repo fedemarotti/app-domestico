@@ -209,6 +209,48 @@ async function genCodigoPRE() {
   return `PRE${dd}${mm}${String(n).padStart(2,'0')}${sufijo}`;
 }
 const toDEF = c => c?.replace(/^PRE/,'DEF') || '';
+
+// Genera el código DEFINITIVO con la fecha REAL de confirmación/pago (no la fecha de la PRE original).
+// Esto evita que una PRE vieja (ej. de ayer) que recién se cobra hoy quede con el código y la fecha de ayer.
+async function genCodigoDEF() {
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2,'0');
+  const mm = String(now.getMonth()+1).padStart(2,'0');
+  const prefixHoy = `DEF${dd}${mm}`;
+
+  let maxN = 0;
+
+  if (supaClient) {
+    try {
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
+      const queryPromise = supaClient
+        .from('pedidos')
+        .select('codigo')
+        .like('codigo', `${prefixHoy}%`);
+      const { data } = await Promise.race([queryPromise, timeoutPromise]);
+      if (data && data.length > 0) {
+        data.forEach(row => {
+          const num = parseInt(row.codigo.replace(prefixHoy, '')) || 0;
+          if (num > maxN) maxN = num;
+        });
+      }
+    } catch(e) { console.warn('genCodigoDEF Supabase error (usando local):', e); }
+  }
+
+  try {
+    const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}');
+    Object.keys(all).forEach(k => {
+      if (k.startsWith(prefixHoy)) {
+        const num = parseInt(k.replace(prefixHoy, '')) || 0;
+        if (num > maxN) maxN = num;
+      }
+    });
+  } catch{}
+
+  const n = maxN + 1;
+  const sufijo = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+  return `DEF${dd}${mm}${String(n).padStart(2,'0')}${sufijo}`;
+}
 // ── SUPABASE CONFIG ─────────────────────────────────────────────────────────
 const SUPA_URL = window.__SUPA_URL__ || '';
 const SUPA_KEY = window.__SUPA_KEY__ || '';
@@ -2066,7 +2108,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
     setPaso('cliente');
   };
 
-  const confirmarPedidoCon = (extrasUsados) => {
+  const confirmarPedidoCon = async (extrasUsados) => {
     const zona = detectarZona(extrasUsados.localidad || cliente.localidad);
     const pre = preData || {};
     const envasesHeredados = pre.envases ?? 0;
@@ -2080,8 +2122,12 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
       : typeof extrasUsados.envio === 'number' ? extrasUsados.envio
       : (zona ? zona.precio * (extrasUsados.bultos||1) : 0);
     const total      = totalProd + totalEnv + totalAgr + totalEnvio;
+    // El código y la fecha DEFINITIVOS se generan recién ahora, en el momento real de la confirmación/pago —
+    // no heredan la fecha de una PRE vieja que se haya cobrado días después.
+    const codigoFinal = await genCodigoDEF();
+    setCodigo(codigoFinal);
     const p = {
-      codigo, codigoPRE, tipo:'DEF', numero:codigo,
+      codigo: codigoFinal, codigoPRE, tipo:'DEF', numero:codigoFinal,
       fecha:new Date().toLocaleString('es-AR'), ts:Date.now(),
       cliente, items:carrito,
       envases:envasesHeredados,

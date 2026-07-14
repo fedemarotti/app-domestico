@@ -1399,7 +1399,7 @@ const DetalleDEFCombo = ({ itemPRE, onConfirm }) => {
                   </div>
                 ); })}
                 {litResto===0 && (
-                  <button onClick={()=>onConfirm({ ...itemPRE, jabon_color:jabonColor, jabon_divs:jabonDivs, suav_color:suavColor, suav_divs:suavDivs, det_color:detColor, det_divs:detDivs, fragancias_piso:fragancias, canje_lavandina:canje })} style={{...s.bP,marginTop:8}}>✓ Confirmar combo</button>
+                  <button onClick={()=>onConfirm({ ...itemPRE, jabon_color:jabonColor, jabon_divs:jabonDivs, suav_color:suavColor, suav_divs:suavDivs, det_color:detColor, det_divs:detDivs, fragancias_piso:fragancias, canje_lavandina:canje, fragancias_canje: canje ? fragancias : [] })} style={{...s.bP,marginTop:8}}>✓ Confirmar combo</button>
                 )}
               </div>
             );
@@ -2036,14 +2036,21 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
     setItemActual(0);
     setModoEdicion(preData.items.map(() => false));
     setPaso('detalles');
+    // Resguardo: si por algún camino no llegó modalidadPreload, recuperamos la modalidad
+    // (interior/flex/retiro) directamente de los datos ya guardados de la PRE.
+    const modalidadResuelta = modalidadPreload || preData.modalidadPRE || null;
     setExtras(prev => ({
       ...prev,
-      esInterior: prev.esInterior || modalidadPreload==='interior',
+      esInterior: prev.esInterior || modalidadResuelta==='interior' || !!preData.extras?.esInterior,
+      retiraLocal: prev.retiraLocal || modalidadResuelta==='retiro' || !!preData.extras?.retiraLocal,
       agregados: (preData.extras?.agregados || []).length > 0 ? preData.extras.agregados : prev.agregados,
-      envio: (modalidadPreload==='flex' && typeof preData.extras?.envio==='number') ? preData.extras.envio : null,
+      envio: (modalidadResuelta==='flex' && typeof preData.extras?.envio==='number') ? preData.extras.envio : null,
       bultos: preData.envases || 1,
-      localidad: (modalidadPreload==='flex' && preData.extras?.localidad) ? preData.extras.localidad : ''
+      localidad: (modalidadResuelta==='flex' && preData.extras?.localidad) ? preData.extras.localidad : ''
     }));
+    if (!modalidadEntrega && modalidadResuelta) {
+      setModalidadEntrega(modalidadResuelta==='retiro' ? 'local' : 'envio');
+    }
   }, [preData]);
 
   const [carrito, setCarrito]   = useState([]);
@@ -3235,7 +3242,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 
   const irPreNuevo = () => { setCodigoPRE(null); setEtapa('pre'); };
   const irDefNuevo = () => { setCodigoPRE(null); setClientePreload(null); setModalidadPreload(null); setEtapa('pre'); };
-  const irDefDesdePRE = (cod) => { setCodigoPRE(cod); setEtapa('def'); };
+  const irDefDesdePRE = (cod, mod) => { setCodigoPRE(cod); if (mod) setModalidadPreload(mod); setEtapa('def'); };
   const irInicio = () => { setEtapa('inicio'); setBusResults([]); setBusqueda(''); setBusError(''); setClientePreload(null); setModalidadPreload(null); listLS().then(arr => setPedidos(Array.isArray(arr) ? arr : [])); };
   const irClientes = () => { setEtapa('clientes'); setBusResults([]); setBusqueda(''); setBusError(''); };
   const nuevoPedidoDesdeCli = (cli) => { setClientePreload(cli); setCodigoPRE(null); setEtapa('pre'); };
@@ -3333,7 +3340,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
                       <div style={{ fontSize:15, fontWeight:800, color:'#fff', marginBottom:10 }}>{fmt(res.totales?.total || res.total || 0)}</div>
                       <G cols={res.tipo==='PRE'?3:2} gap={8}>
                         <button onClick={()=>abrir(res)} className="sel-btn" style={res.tipo==='PRE'?s.bS:s.bV}>{res.tipo==='PRE'?'✏️ Editar PRE':'👁 Ver pedido'}</button>
-                        {res.tipo==='PRE' && <button onClick={()=>irDefDesdePRE(res.codigo)} className="sel-btn" style={s.bP}>→ Confirmar DEF</button>}
+                        {res.tipo==='PRE' && <button onClick={()=>irDefDesdePRE(res.codigo, res.modalidadPRE)} className="sel-btn" style={s.bP}>→ Confirmar DEF</button>}
                         <button onClick={()=>setBusResults(r=>r.filter((_,i)=>i!==idx))} className="sel-btn" style={s.bS}>✕</button>
                       </G>
                     </div>

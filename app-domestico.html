@@ -3370,8 +3370,9 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 // MÓDULO LIQUIDACIONES — solo admin. Flujo 100% independiente del flujo de ventas.
 // ═══════════════════════════════════════════════════════════════════════════════
 const ROLES_LIQ = [
-  { key:'ventas',     label:'VENDEDOR', email:VENTAS_EMAIL },
-  { key:'produccion', label:'NEGOCIO',  email:PRODUCCION_EMAIL },
+  { key:'ventas',     label:'VENDEDOR',      email:VENTAS_EMAIL },
+  { key:'produccion', label:'NEGOCIO',       email:PRODUCCION_EMAIL },
+  { key:'admin',      label:'ADMINISTRADOR', email:ADMIN_EMAIL },
 ];
 const MESES_NOMBRE = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 

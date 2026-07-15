@@ -3394,9 +3394,10 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 // MÓDULO LIQUIDACIONES — solo admin. Flujo 100% independiente del flujo de ventas.
 // ═══════════════════════════════════════════════════════════════════════════════
 const ROLES_LIQ = [
-  { key:'ventas',     label:'VENDEDOR',      email:VENTAS_EMAIL },
-  { key:'produccion', label:'NEGOCIO',       email:PRODUCCION_EMAIL },
-  { key:'admin',      label:'ADMINISTRADOR', email:ADMIN_EMAIL },
+  { key:'ventas',     label:'VENDEDOR',       email:VENTAS_EMAIL },
+  { key:'produccion', label:'NEGOCIO',        email:PRODUCCION_EMAIL },
+  { key:'admin',      label:'ADMINISTRADOR',  email:ADMIN_EMAIL },
+  { key:'total',      label:'VENTAS TOTALES', email:null },
 ];
 const MESES_NOMBRE = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -3474,12 +3475,19 @@ function ModuloLiquidaciones({ onVolver }) {
 
   const rolInfo = ROLES_LIQ.find(r => r.key === rol);
 
+  const esTotal = rolInfo && !rolInfo.email;
+  const emailsRolesConocidos = React.useMemo(() => ROLES_LIQ.filter(r => r.email).map(r => r.email.toLowerCase()), []);
+
   const filas = React.useMemo(() => {
     if (!pedidosData || !rango || !rolInfo) return [];
     return pedidosData
-      .filter(p => p.tipo === 'DEF'
-        && (p.creadoPor || '').trim().toLowerCase() === rolInfo.email.toLowerCase()
-        && typeof p.ts === 'number' && p.ts >= rango.desde && p.ts <= rango.hasta)
+      .filter(p => {
+        if (p.tipo !== 'DEF') return false;
+        if (typeof p.ts !== 'number' || p.ts < rango.desde || p.ts > rango.hasta) return false;
+        const email = (p.creadoPor || '').trim().toLowerCase();
+        if (esTotal) return emailsRolesConocidos.includes(email);
+        return email === rolInfo.email.toLowerCase();
+      })
       .sort((a, b) => a.ts - b.ts)
       .map(p => {
         const modalidad = p.extras?.retiraLocal ? 'LOCAL' : p.extras?.esInterior ? 'INTERIOR' : 'FLEX';
@@ -3488,9 +3496,12 @@ function ModuloLiquidaciones({ onVolver }) {
         const neto = transferido - envioFlex;
         const comision = Math.round(neto * 0.05);
         const comprador = p.cliente?.nombre || p.cliente?.telefono || p.cliente?.email || p.cliente?.dni || p.cliente?.localidad || 'Sin datos registrados';
-        return { codigo: p.codigo, fecha: fmtFechaDDMMAAAA(p.ts), comprador, modalidad, transferido, envioFlex, neto, comision };
+        const emailCreador = (p.creadoPor || '').trim().toLowerCase();
+        const vendedorInfo = ROLES_LIQ.find(r => r.email && r.email.toLowerCase() === emailCreador);
+        const vendedor = vendedorInfo ? vendedorInfo.label : 'Sin datos';
+        return { codigo: p.codigo, fecha: fmtFechaDDMMAAAA(p.ts), comprador, modalidad, transferido, envioFlex, neto, comision, vendedor };
       });
-  }, [pedidosData, rango, rolInfo]);
+  }, [pedidosData, rango, rolInfo, esTotal, emailsRolesConocidos]);
 
   const totales = React.useMemo(() => filas.reduce((acc, f) => ({
     transferido: acc.transferido + f.transferido,
@@ -3565,6 +3576,7 @@ function ModuloLiquidaciones({ onVolver }) {
           {cargando && <div style={{ padding:'40px 0', textAlign:'center', color:'rgba(255,255,255,0.6)' }}>Cargando ventas...</div>}
           {!cargando && (
             <InformeLiquidacion rolLabel={rolInfo?.label} etiquetaPeriodo={rango?.etiqueta} filas={filas} totales={totales}
+              mostrarVendedor={esTotal}
               onCerrar={()=>irA('tipo')} />
           )}
         </div>
@@ -3574,7 +3586,7 @@ function ModuloLiquidaciones({ onVolver }) {
 }
 
 // Tabla imprimible del informe de liquidación
-function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, onCerrar }) {
+function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrarVendedor, onCerrar }) {
   const fmtM = v => '$' + Math.round(v || 0).toLocaleString('es-AR');
   return (
     <div>
@@ -3590,12 +3602,13 @@ function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, onCerra
         </div>
 
         {filas.length === 0 ? (
-          <div style={{ padding:'20px 0', color:'#64748b', fontSize:14 }}>No hay ventas DEF registradas por este usuario en el período seleccionado.</div>
+          <div style={{ padding:'20px 0', color:'#64748b', fontSize:14 }}>{mostrarVendedor ? 'No hay ventas DEF registradas en el período seleccionado.' : 'No hay ventas DEF registradas por este usuario en el período seleccionado.'}</div>
         ) : (
           <table className="liq-table">
             <thead>
               <tr>
                 <th>Fecha</th>
+                {mostrarVendedor && <th>Vendedor</th>}
                 <th>Comprador</th>
                 <th>Modalidad</th>
                 <th>Importe transferido</th>
@@ -3608,6 +3621,7 @@ function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, onCerra
               {filas.map((f, i) => (
                 <tr key={i}>
                   <td>{f.fecha}</td>
+                  {mostrarVendedor && <td>{f.vendedor}</td>}
                   <td>{f.comprador}</td>
                   <td>{f.modalidad}</td>
                   <td>{fmtM(f.transferido)}</td>
@@ -3619,7 +3633,7 @@ function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, onCerra
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={3}>TOTAL ({filas.length} venta{filas.length!==1?'s':''})</td>
+                <td colSpan={mostrarVendedor ? 4 : 3}>TOTAL ({filas.length} venta{filas.length!==1?'s':''})</td>
                 <td>{fmtM(totales.transferido)}</td>
                 <td>{fmtM(totales.neto)}</td>
                 <td>{fmtM(totales.envioFlex)}</td>

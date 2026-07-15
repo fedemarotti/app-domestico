@@ -2068,6 +2068,8 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
   });
   const [cliente, setCliente]   = useState(clientePreload ? { nombre:clientePreload.nombre||'', telefono:clientePreload.telefono||'', email:clientePreload.email||'', dni:clientePreload.dni||'', direccion:clientePreload.direccion||'', localidad:clientePreload.localidad||'', ciudad:clientePreload.ciudad||'', provincia:clientePreload.provincia||'', cp:clientePreload.cp||'', datoExtra:clientePreload.datoExtra||'', observaciones:clientePreload.observaciones||'' } : { nombre:'', telefono:'', email:'', dni:'', direccion:'', localidad:'', ciudad:'', provincia:'', cp:'', datoExtra:'', observaciones:'' });
   const [pedidoFinal, setPedidoFinal] = useState(null);
+  const [confirmando, setConfirmando] = useState(false);
+  const confirmandoRef = React.useRef(false); // guardia dura contra doble-click/doble-tap (no depende de re-render)
   // null = sin elegir, 'local' = retira en planta, 'envio' = envío
   // pre-set desde PRE si el vendedor ya eligió la modalidad
   const [modalidadEntrega, setModalidadEntrega] = useState(
@@ -2116,36 +2118,50 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
   };
 
   const confirmarPedidoCon = async (extrasUsados) => {
-    const zona = detectarZona(extrasUsados.localidad || cliente.localidad);
-    const pre = preData || {};
-    const envasesHeredados = pre.envases ?? 0;
-    const agregadosHeredados = (extras.agregados && extras.agregados.length > 0)
-      ? extras.agregados
-      : (pre.extras?.agregados ?? []);
-    const totalProd  = carrito.reduce((s,i) => s + Number(i.precio||0), 0);
-    const totalEnv   = envasesHeredados * PRECIO_ENVASE;
-    const totalAgr   = agregadosHeredados.reduce((s,a) => s + (parseFloat(a.precio)||0), 0);
-    const totalEnvio = (extrasUsados.retiraLocal || extrasUsados.esInterior) ? 0
-      : typeof extrasUsados.envio === 'number' ? extrasUsados.envio
-      : (zona ? zona.precio * (extrasUsados.bultos||1) : 0);
-    const total      = totalProd + totalEnv + totalAgr + totalEnvio;
-    // El código y la fecha DEFINITIVOS se generan recién ahora, en el momento real de la confirmación/pago —
-    // no heredan la fecha de una PRE vieja que se haya cobrado días después.
-    const codigoFinal = await genCodigoDEF();
-    setCodigo(codigoFinal);
-    const p = {
-      codigo: codigoFinal, codigoPRE, tipo:'DEF', numero:codigoFinal,
-      fecha:new Date().toLocaleString('es-AR'), ts:Date.now(),
-      cliente, items:carrito,
-      envases:envasesHeredados,
-      extras:{ ...extrasUsados, agregados:agregadosHeredados },
-      totales:{ productos:totalProd, envases:totalEnv, agregados:totalAgr, envio:totalEnvio, total },
-      zonaEnvio:zona, estado:'pendiente',
-      creadoPor: usuarioActual?.email || null
-    };
-    saveLS(p);
-    if (cliente.nombre && cliente.telefono) saveCliente({ ...cliente });
-    setPedidoFinal(p); setPaso('docs');
+    // Guardia dura: un doble-click/doble-tap mientras esto está en curso (genCodigoDEF es async)
+    // generaba dos pedidos DEF distintos para la misma venta. El ref es inmediato, no espera a un re-render.
+    if (confirmandoRef.current) return;
+    confirmandoRef.current = true;
+    setConfirmando(true);
+    try {
+      const zona = detectarZona(extrasUsados.localidad || cliente.localidad);
+      const pre = preData || {};
+      const envasesHeredados = pre.envases ?? 0;
+      const agregadosHeredados = (extras.agregados && extras.agregados.length > 0)
+        ? extras.agregados
+        : (pre.extras?.agregados ?? []);
+      const totalProd  = carrito.reduce((s,i) => s + Number(i.precio||0), 0);
+      const totalEnv   = envasesHeredados * PRECIO_ENVASE;
+      const totalAgr   = agregadosHeredados.reduce((s,a) => s + (parseFloat(a.precio)||0), 0);
+      const totalEnvio = (extrasUsados.retiraLocal || extrasUsados.esInterior) ? 0
+        : typeof extrasUsados.envio === 'number' ? extrasUsados.envio
+        : (zona ? zona.precio * (extrasUsados.bultos||1) : 0);
+      const total      = totalProd + totalEnv + totalAgr + totalEnvio;
+      // Si ya existe un pedidoFinal (el vendedor volvió a "Editar cliente/entrega" y reconfirmó),
+      // reusamos el mismo código/fecha para ACTUALIZAR ese mismo registro (saveLS hace upsert por
+      // código) en vez de generar un código nuevo y crear un segundo pedido duplicado.
+      // El código y la fecha DEFINITIVOS solo se generan de cero en la primera confirmación real —
+      // no heredan la fecha de una PRE vieja que se haya cobrado días después.
+      const codigoFinal = pedidoFinal ? pedidoFinal.codigo : await genCodigoDEF();
+      setCodigo(codigoFinal);
+      const p = {
+        codigo: codigoFinal, codigoPRE, tipo:'DEF', numero:codigoFinal,
+        fecha: pedidoFinal ? pedidoFinal.fecha : new Date().toLocaleString('es-AR'),
+        ts: pedidoFinal ? pedidoFinal.ts : Date.now(),
+        cliente, items:carrito,
+        envases:envasesHeredados,
+        extras:{ ...extrasUsados, agregados:agregadosHeredados },
+        totales:{ productos:totalProd, envases:totalEnv, agregados:totalAgr, envio:totalEnvio, total },
+        zonaEnvio:zona, estado: pedidoFinal ? pedidoFinal.estado : 'pendiente',
+        creadoPor: pedidoFinal ? pedidoFinal.creadoPor : (usuarioActual?.email || null)
+      };
+      saveLS(p);
+      if (cliente.nombre && cliente.telefono) saveCliente({ ...cliente });
+      setPedidoFinal(p); setPaso('docs');
+    } finally {
+      confirmandoRef.current = false;
+      setConfirmando(false);
+    }
   };
   const confirmarPedido = () => confirmarPedidoCon(extras);
 
@@ -2343,8 +2359,8 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
                 ok = !!(cliente.nombre && cliente.telefono);
                 return (
                   <button onClick={()=>{ const esRetiro = modalidadEntrega==='local'; const extrasNew = {...extras, localidad:cliente.localidad, retiraLocal:esRetiro, esInterior: !esRetiro && (extras.esInterior || modalidadPreload==='interior')}; setExtras(extrasNew); if(esRetiro){ confirmarPedidoCon(extrasNew); } else { setPaso('extras'); } }}
-                    disabled={!ok} style={{...s.bP, opacity:ok?1:0.45, cursor:ok?'pointer':'not-allowed'}}>
-                    Continuar → {modalidadEntrega==='local'?'Confirmar pedido':'Logística de entrega'}
+                    disabled={!ok || confirmando} style={{...s.bP, opacity:(ok && !confirmando)?1:0.45, cursor:(ok && !confirmando)?'pointer':'not-allowed'}}>
+                    {confirmando ? '⏳ Confirmando…' : `Continuar → ${modalidadEntrega==='local'?'Confirmar pedido':'Logística de entrega'}`}
                   </button>
                 );
               })()}
@@ -2409,9 +2425,10 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
 
             {(() => {
               const bloqInterior = extras.esInterior && (!cliente.ciudad || !cliente.provincia || !cliente.cp);
+              const bloq = bloqInterior || confirmando;
               return (
-                <button onClick={confirmarPedido} disabled={bloqInterior} style={{ width:'100%', padding:'14px', background:'linear-gradient(135deg,#f97316,#ea580c)', color:'#fff', border:'none', borderRadius:12, fontWeight:900, fontSize:15, cursor:bloqInterior?'not-allowed':'pointer', letterSpacing:0.5, opacity:bloqInterior?0.45:1 }}>
-                  {bloqInterior ? '⚠️ Completá ciudad, provincia y CP' : '✓ Confirmar y generar documentos'}
+                <button onClick={confirmarPedido} disabled={bloq} style={{ width:'100%', padding:'14px', background:'linear-gradient(135deg,#f97316,#ea580c)', color:'#fff', border:'none', borderRadius:12, fontWeight:900, fontSize:15, cursor:bloq?'not-allowed':'pointer', letterSpacing:0.5, opacity:bloq?0.45:1 }}>
+                  {bloqInterior ? '⚠️ Completá ciudad, provincia y CP' : confirmando ? '⏳ Confirmando…' : '✓ Confirmar y generar documentos'}
                 </button>
               );
             })()}

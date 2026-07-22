@@ -3464,10 +3464,10 @@ function ModuloLiquidaciones({ onVolver }) {
   const mesesDisponibles = React.useMemo(() => {
     const { y, m } = arParts(Date.now());
     const out = [];
-    for (let i = 1; i <= 12; i++) {
+    for (let i = 0; i <= 12; i++) {
       let mm = m - i, yy = y;
       while (mm < 0) { mm += 12; yy -= 1; }
-      out.push({ y: yy, m: mm, label: `${MESES_NOMBRE[mm]} ${yy}` });
+      out.push({ y: yy, m: mm, label: `${MESES_NOMBRE[mm]} ${yy}${i === 0 ? ' (en curso)' : ''}` });
     }
     return out;
   }, []);

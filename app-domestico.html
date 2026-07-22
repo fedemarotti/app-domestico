@@ -313,8 +313,17 @@ const listLS = async () => {
   try { return Object.values(JSON.parse(localStorage.getItem('dom9_pedidos')||'{}')).sort((a,b)=>(b.ts||0)-(a.ts||0)); } catch { return []; }
 };
 const deleteLS = async (codigo) => {
+  // Devuelve true solo si el borrado quedó confirmado en la base de datos.
   try { const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}'); delete all[codigo]; localStorage.setItem('dom9_pedidos', JSON.stringify(all)); } catch{}
-  if (supaClient) { try { await supaClient.from('pedidos').delete().eq('codigo', codigo); } catch(e) { console.warn('Error al borrar pedido:', e); } }
+  if (!supaClient) return true; // modo local puro: no hay base contra la cual fallar
+  try {
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
+    const query = supaClient.from('pedidos').delete().eq('codigo', codigo).select('codigo');
+    const { data, error } = await Promise.race([query, timeout]);
+    if (error) { console.warn('Error al borrar pedido:', error); return false; }
+    if (!data || data.length === 0) { console.warn('El borrado no afectó ninguna fila en Supabase:', codigo); return false; }
+    return true;
+  } catch(e) { console.warn('Error al borrar pedido:', e); return false; }
 };
 // ── CLIENTES ─────────────────────────────────────────────────────────────────
 const CLIENTES_KEY = 'dom9_clientes';
@@ -3404,6 +3413,8 @@ const ROLES_LIQ = [
   { key:'total',      label:'VENTAS TOTALES', email:null,             icon:'📊',   color:'linear-gradient(145deg,#d97706,#b45309)', glow:'rgba(217,119,6,0.55)' },
 ];
 const MESES_NOMBRE = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const DIAS_SEMANA_NOMBRE = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
+const fmtDiaLargo = (ts) => { const { y, m, day } = arParts(ts); const dw = new Date(Date.UTC(y, m, day)).getUTCDay(); return `${DIAS_SEMANA_NOMBRE[dw]} ${day} DE ${MESES_NOMBRE[m].toUpperCase()} DE ${y}`; };
 
 function ModuloLiquidaciones({ onVolver }) {
   const [stack, setStack] = React.useState(['rol']);
@@ -3422,6 +3433,8 @@ function ModuloLiquidaciones({ onVolver }) {
   const [expandidos, setExpandidos]       = React.useState(new Set());
   const [confirmarBorrar, setConfirmarBorrar] = React.useState(null);
   const [borrados, setBorrados]           = React.useState(new Set());
+  const [errorBorrado, setErrorBorrado]   = React.useState(null);
+  const [borrandoCodigo, setBorrandoCodigo] = React.useState(null);
   // Hover / active en botones de rol
   const [hovBtn, setHovBtn]     = React.useState(null);
   const [activeBtn, setActiveBtn] = React.useState(null);
@@ -3465,6 +3478,7 @@ function ModuloLiquidaciones({ onVolver }) {
       setPedidosData(null);
       setExpandidos(new Set());
       setConfirmarBorrar(null);
+      setErrorBorrado(null);
       listLS().then(arr => { setPedidosData(Array.isArray(arr) ? arr : []); setCargando(false); });
     }
   }, [step]);
@@ -3513,7 +3527,7 @@ function ModuloLiquidaciones({ onVolver }) {
         const vendedorInfo = ROLES_LIQ.find(r => r.email && r.email.toLowerCase() === emailCreador);
         const vendedor = vendedorInfo ? vendedorInfo.label : 'Sin datos';
         const hora = p.ts ? (() => { const d = new Date(p.ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })() : '--:--';
-        return { codigo: p.codigo, comprador, modalidad, transferido, neto, envioFlex, comision, vendedor, hora, fecha: fmtFechaDDMMAAAA(p.ts) };
+        return { codigo: p.codigo, comprador, modalidad, transferido, neto, envioFlex, comision, vendedor, hora, fecha: fmtFechaDDMMAAAA(p.ts), ts: p.ts };
       });
   }, [pedidosData, rango, rolInfo, esTotal, emailsRolesConocidos, borrados]);
 
@@ -3526,10 +3540,60 @@ function ModuloLiquidaciones({ onVolver }) {
 
   const fmtM = v => '$' + Math.round(v || 0).toLocaleString('es-AR');
 
+  // ── Resumen con métricas (solo para cierre mensual) ──
+  const resumen = React.useMemo(() => {
+    if (tipo !== 'cierre' || !pedidosData || !rango || !rolInfo || filas.length === 0) return null;
+    const claveCliente = c => { const tel = (c?.telefono || '').replace(/\D/g, ''); if (tel) return 'T' + tel; const n = (c?.nombre || '').trim().toLowerCase(); return n ? 'N' + n : null; };
+    const pasaRol = p => { const email = (p.creadoPor || '').trim().toLowerCase(); return esTotal ? emailsRolesConocidos.includes(email) : email === rolInfo.email.toLowerCase(); };
+    const defsTodos = pedidosData.filter(p => p.tipo === 'DEF' && typeof p.ts === 'number' && !borrados.has(p.codigo) && pasaRol(p));
+    // Clientes nuevos: su PRIMERA compra DEF de la historia cae dentro del período
+    const primeraCompra = {};
+    defsTodos.forEach(p => { const k = claveCliente(p.cliente); if (!k) return; if (!(k in primeraCompra) || p.ts < primeraCompra[k].ts) primeraCompra[k] = p; });
+    const nuevos = Object.values(primeraCompra).filter(p => p.ts >= rango.desde && p.ts <= rango.hasta);
+    const clientesNuevos = nuevos.map(p => p.cliente?.nombre || p.cliente?.telefono || 'Sin datos').sort();
+    // Clientes que repitieron compra dentro del período
+    const enPeriodo = defsTodos.filter(p => p.ts >= rango.desde && p.ts <= rango.hasta);
+    const comprasCli = {};
+    enPeriodo.forEach(p => { const k = claveCliente(p.cliente); if (k) comprasCli[k] = (comprasCli[k] || 0) + 1; });
+    const clientesUnicos = Object.keys(comprasCli).length;
+    const repetidores = Object.values(comprasCli).filter(n => n > 1).length;
+    // Agrupado por día
+    const porDia = {};
+    filas.forEach(f => {
+      const key = fmtFechaDDMMAAAA(f.ts);
+      if (!porDia[key]) porDia[key] = { ts: f.ts, importe: 0, cant: 0, porVend: {} };
+      porDia[key].importe += f.transferido; porDia[key].cant += 1;
+      porDia[key].porVend[f.vendedor] = (porDia[key].porVend[f.vendedor] || 0) + f.transferido;
+    });
+    const rankVend = d => Object.entries(d.porVend).sort((a, b) => b[1] - a[1]).map(([v, imp]) => ({ v, imp }));
+    const dias = Object.values(porDia).sort((a, b) => a.ts - b.ts).map(d => ({ ...d, vendedores: rankVend(d) }));
+    const diaTopImporte  = [...dias].sort((a, b) => b.importe - a.importe)[0];
+    const diaTopCantidad = [...dias].sort((a, b) => b.cant - a.cant || b.importe - a.importe)[0];
+    // Modalidades
+    const porModalidad = {};
+    filas.forEach(f => { if (!porModalidad[f.modalidad]) porModalidad[f.modalidad] = { cant: 0, importe: 0 }; porModalidad[f.modalidad].cant += 1; porModalidad[f.modalidad].importe += f.transferido; });
+    // Por vendedor
+    const porVendedor = {};
+    filas.forEach(f => { if (!porVendedor[f.vendedor]) porVendedor[f.vendedor] = { cant: 0, importe: 0, comision: 0 }; porVendedor[f.vendedor].cant += 1; porVendedor[f.vendedor].importe += f.transferido; porVendedor[f.vendedor].comision += f.comision; });
+    // Venta más grande y ticket promedio
+    const ventaMayor = [...filas].sort((a, b) => b.transferido - a.transferido)[0];
+    const ticketPromedio = totales.transferido / filas.length;
+    return { clientesNuevos, clientesUnicos, repetidores, dias, diaTopImporte, diaTopCantidad, porModalidad, porVendedor, ventaMayor, ticketPromedio };
+  }, [tipo, pedidosData, rango, rolInfo, esTotal, emailsRolesConocidos, filas, totales, borrados]);
+
   const borrarFila = async (codigo) => {
     setConfirmarBorrar(null);
-    setBorrados(prev => new Set([...prev, codigo]));
-    await deleteLS(codigo);
+    setErrorBorrado(null);
+    setBorrandoCodigo(codigo);
+    const ok = await deleteLS(codigo);
+    setBorrandoCodigo(null);
+    if (ok) {
+      // Confirmado en la base: recién ahora desaparece de la lista
+      setBorrados(prev => new Set([...prev, codigo]));
+    } else {
+      // Falló el borrado en la base: la fila se queda y avisamos
+      setErrorBorrado(codigo);
+    }
   };
 
   const getRolBtnStyle = (r, isWide) => ({
@@ -3655,6 +3719,18 @@ function ModuloLiquidaciones({ onVolver }) {
             </div>
           </div>
 
+          {errorBorrado && (
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, padding:'12px 14px', background:'rgba(220,38,38,0.12)', border:'1px solid rgba(220,38,38,0.4)', borderRadius:10 }}>
+              <div style={{ flex:1, fontSize:13, fontWeight:700, color:'#fca5a5', lineHeight:1.4 }}>
+                ⚠️ No se pudo borrar el pedido <span style={{ fontFamily:'monospace' }}>{errorBorrado}</span> de la base de datos. Verificá tu conexión y volvé a intentar.
+              </div>
+              <button onClick={() => borrarFila(errorBorrado)}
+                style={{ padding:'7px 13px', background:'#dc2626', color:'#fff', border:'none', borderRadius:7, fontWeight:800, fontSize:12, cursor:'pointer', flexShrink:0 }}>Reintentar</button>
+              <button onClick={() => setErrorBorrado(null)}
+                style={{ padding:'7px 10px', background:'rgba(255,255,255,0.08)', color:'#ccc', border:'1px solid rgba(255,255,255,0.15)', borderRadius:7, fontSize:12, cursor:'pointer', flexShrink:0 }}>✗</button>
+            </div>
+          )}
+
           {cargando && <div style={{ padding:'40px 0', textAlign:'center', color:'rgba(255,255,255,0.5)' }}>⏳ Cargando ventas...</div>}
 
           {!cargando && filas.length === 0 && (
@@ -3688,8 +3764,10 @@ function ModuloLiquidaciones({ onVolver }) {
                         <div style={{ fontSize:15, fontWeight:800, color:'#4ade80', marginRight:6, flexShrink:0, whiteSpace:'nowrap' }}>{fmtM(f.transferido)}</div>
                         <div style={{ fontSize:10, color:'rgba(255,255,255,0.22)', marginRight:6, flexShrink:0, display:'inline-block', transition:'transform 0.18s', transform:exp?'rotate(180deg)':'none' }}>▼</div>
                         {/* Botón borrar */}
-                        <div onClick={e => { e.stopPropagation(); setConfirmarBorrar(confirmando ? null : f.codigo); }} style={{ flexShrink:0 }}>
-                          {confirmando ? (
+                        <div onClick={e => { e.stopPropagation(); if (borrandoCodigo) return; setConfirmarBorrar(confirmando ? null : f.codigo); }} style={{ flexShrink:0 }}>
+                          {borrandoCodigo === f.codigo ? (
+                            <span style={{ padding:'5px 9px', fontSize:13 }}>⏳</span>
+                          ) : confirmando ? (
                             <div style={{ display:'flex', gap:5 }}>
                               <button onClick={e => { e.stopPropagation(); borrarFila(f.codigo); }}
                                 style={{ padding:'5px 9px', background:'#dc2626', color:'#fff', border:'none', borderRadius:6, fontWeight:800, fontSize:11, cursor:'pointer' }}>✓ Sí</button>
@@ -3770,6 +3848,7 @@ function ModuloLiquidaciones({ onVolver }) {
           filas={filas}
           totales={totales}
           mostrarVendedor={esTotal}
+          resumen={resumen}
           onCerrar={() => atras()}
         />
       )}
@@ -3777,9 +3856,35 @@ function ModuloLiquidaciones({ onVolver }) {
   );
 }
 
+// Barra horizontal simple para los gráficos del informe (imprimible, sin librerías)
+function BarraInforme({ label, valor, max, color, texto }) {
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+      <div style={{ width:78, fontSize:10, fontWeight:700, color:'#475569', textAlign:'right', flexShrink:0, whiteSpace:'nowrap' }}>{label}</div>
+      <div style={{ flex:1, background:'#f1f5f9', borderRadius:4, height:16, overflow:'hidden' }}>
+        <div style={{ width:`${max ? Math.max(2, (valor / max) * 100) : 0}%`, background:color, height:'100%', borderRadius:4 }} />
+      </div>
+      <div style={{ width:92, fontSize:10, fontWeight:800, color:'#0f172a', flexShrink:0, whiteSpace:'nowrap' }}>{texto}</div>
+    </div>
+  );
+}
+
+// Tarjeta de métrica del resumen mensual
+function CardMetrica({ titulo, children, destacada }) {
+  return (
+    <div style={{ background: destacada ? 'linear-gradient(135deg,#f0f9ff,#e0f2fe)' : '#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px' }}>
+      <div style={{ fontSize:10, fontWeight:800, color:'#0369a1', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:6 }}>{titulo}</div>
+      {children}
+    </div>
+  );
+}
+
 // Tabla imprimible del informe de liquidación
-function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrarVendedor, onCerrar }) {
+function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrarVendedor, resumen, onCerrar }) {
   const fmtM = v => '$' + Math.round(v || 0).toLocaleString('es-AR');
+  const maxImporteDia = resumen ? Math.max(...resumen.dias.map(d => d.importe)) : 0;
+  const vendColores = { 'VENDEDOR':'#16a34a', 'NEGOCIO':'#0284c7', 'ADMINISTRADOR':'#7c3aed', 'Sin datos':'#94a3b8' };
+  const modColores  = { 'LOCAL':'#22c55e', 'FLEX':'#fb923c', 'INTERIOR':'#818cf8' };
   return (
     <div>
       <div className="no-print" style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
@@ -3792,6 +3897,88 @@ function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrar
           <div style={{ fontSize:12, fontWeight:800, color:'#0369a1', textTransform:'uppercase', letterSpacing:'1px' }}>Liquidación · {rolLabel}</div>
           <div style={{ fontSize:18, fontWeight:900 }}>{etiquetaPeriodo}</div>
         </div>
+
+        {/* ── RESUMEN DEL MES (solo cierre mensual) ── */}
+        {resumen && (
+          <div style={{ marginBottom:20 }}>
+            <div style={{ fontSize:13, fontWeight:900, color:'#0f172a', textTransform:'uppercase', letterSpacing:'0.5px', borderBottom:'2px solid #0369a1', paddingBottom:6, marginBottom:12 }}>
+              📊 Resumen del mes
+            </div>
+
+            {/* Tarjetas de métricas */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(230px, 1fr))', gap:10, marginBottom:14 }}>
+              <CardMetrica titulo="🏆 Día con más facturación" destacada>
+                <div style={{ fontSize:13, fontWeight:900, color:'#0f172a' }}>{fmtDiaLargo(resumen.diaTopImporte.ts)}</div>
+                <div style={{ fontSize:20, fontWeight:900, color:'#16a34a', margin:'2px 0' }}>{fmtM(resumen.diaTopImporte.importe)}</div>
+                <div style={{ fontSize:11, color:'#475569' }}>{resumen.diaTopImporte.cant} venta{resumen.diaTopImporte.cant!==1?'s':''} · {resumen.diaTopImporte.vendedores.map(x => `${x.v}: ${fmtM(x.imp)}`).join(' · ')}</div>
+              </CardMetrica>
+              <CardMetrica titulo="🥇 Día con más cantidad de ventas" destacada>
+                <div style={{ fontSize:13, fontWeight:900, color:'#0f172a' }}>{fmtDiaLargo(resumen.diaTopCantidad.ts)}</div>
+                <div style={{ fontSize:20, fontWeight:900, color:'#0284c7', margin:'2px 0' }}>{resumen.diaTopCantidad.cant} ventas</div>
+                <div style={{ fontSize:11, color:'#475569' }}>Total facturado: {fmtM(resumen.diaTopCantidad.importe)} · {resumen.diaTopCantidad.vendedores.map(x => `${x.v}: ${fmtM(x.imp)}`).join(' · ')}</div>
+              </CardMetrica>
+              <CardMetrica titulo="✨ Clientes nuevos (compraron y pagaron)">
+                <div style={{ fontSize:22, fontWeight:900, color:'#7c3aed' }}>{resumen.clientesNuevos.length}</div>
+                {resumen.clientesNuevos.length > 0 && (
+                  <div style={{ fontSize:10, color:'#64748b', lineHeight:1.5, marginTop:2 }}>{resumen.clientesNuevos.join(' · ')}</div>
+                )}
+              </CardMetrica>
+              <CardMetrica titulo="👥 Clientes del mes">
+                <div style={{ fontSize:14, color:'#0f172a' }}><b style={{ fontSize:20, fontWeight:900 }}>{resumen.clientesUnicos}</b> únicos</div>
+                <div style={{ fontSize:11, color:'#475569', marginTop:2 }}>{resumen.repetidores} repitieron compra en el mes</div>
+              </CardMetrica>
+              <CardMetrica titulo="🎯 Ticket promedio">
+                <div style={{ fontSize:20, fontWeight:900, color:'#0f172a' }}>{fmtM(resumen.ticketPromedio)}</div>
+                <div style={{ fontSize:11, color:'#475569', marginTop:2 }}>{filas.length} ventas en el período</div>
+              </CardMetrica>
+              <CardMetrica titulo="💎 Venta más grande">
+                <div style={{ fontSize:20, fontWeight:900, color:'#16a34a' }}>{fmtM(resumen.ventaMayor.transferido)}</div>
+                <div style={{ fontSize:11, color:'#475569', marginTop:2 }}>{resumen.ventaMayor.comprador} · {resumen.ventaMayor.fecha}{mostrarVendedor ? ` · ${resumen.ventaMayor.vendedor}` : ''}</div>
+              </CardMetrica>
+            </div>
+
+            {/* Gráfico: facturación por día */}
+            <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px', marginBottom:10 }}>
+              <div style={{ fontSize:10, fontWeight:800, color:'#0369a1', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8 }}>📅 Facturación por día</div>
+              {resumen.dias.map(d => (
+                <BarraInforme key={d.ts} label={fmtFechaDDMMAAAA(d.ts)} valor={d.importe} max={maxImporteDia}
+                  color={d.ts === resumen.diaTopImporte.ts ? '#16a34a' : '#7dd3fc'}
+                  texto={`${fmtM(d.importe)} (${d.cant}v)`} />
+              ))}
+            </div>
+
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:10 }}>
+              {/* Gráfico: por vendedor (solo en VENTAS TOTALES) */}
+              {mostrarVendedor && Object.keys(resumen.porVendedor).length > 0 && (
+                <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px' }}>
+                  <div style={{ fontSize:10, fontWeight:800, color:'#0369a1', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8 }}>🧑‍💼 Ventas por usuario</div>
+                  {Object.entries(resumen.porVendedor).sort((a,b) => b[1].importe - a[1].importe).map(([v, d]) => (
+                    <BarraInforme key={v} label={v} valor={d.importe}
+                      max={Math.max(...Object.values(resumen.porVendedor).map(x => x.importe))}
+                      color={vendColores[v] || '#94a3b8'}
+                      texto={`${fmtM(d.importe)} (${d.cant}v)`} />
+                  ))}
+                </div>
+              )}
+              {/* Gráfico: por modalidad */}
+              {Object.keys(resumen.porModalidad).length > 0 && (
+                <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px' }}>
+                  <div style={{ fontSize:10, fontWeight:800, color:'#0369a1', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8 }}>🚚 Ventas por modalidad</div>
+                  {Object.entries(resumen.porModalidad).sort((a,b) => b[1].importe - a[1].importe).map(([m, d]) => (
+                    <BarraInforme key={m} label={m} valor={d.importe}
+                      max={Math.max(...Object.values(resumen.porModalidad).map(x => x.importe))}
+                      color={modColores[m] || '#94a3b8'}
+                      texto={`${fmtM(d.importe)} (${d.cant}v)`} />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ fontSize:13, fontWeight:900, color:'#0f172a', textTransform:'uppercase', letterSpacing:'0.5px', borderBottom:'2px solid #0369a1', paddingBottom:6, margin:'16px 0 12px' }}>
+              📋 Detalle de ventas
+            </div>
+          </div>
+        )}
 
         {filas.length === 0 ? (
           <div style={{ padding:'20px 0', color:'#64748b', fontSize:14 }}>No hay ventas DEF registradas en el período seleccionado.</div>

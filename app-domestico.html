@@ -3497,6 +3497,18 @@ function ModuloLiquidaciones({ onVolver }) {
   // Hover / active en botones de rol
   const [hovBtn, setHovBtn]     = React.useState(null);
   const [activeBtn, setActiveBtn] = React.useState(null);
+  // Guardias táctiles: en iOS el scale() durante el touch cancela el click nativo,
+  // así que la acción se dispara en touchend y se suprime el click fantasma posterior.
+  const touchMoved = React.useRef(false);
+  const lastTouchTs = React.useRef(0);
+  const tapRol = (key) => {
+    if (Date.now() - lastTouchTs.current < 700) return; // click fantasma post-touch
+    elegirRol(key);
+  };
+  const touchEndRol = (key) => {
+    setActiveBtn(null);
+    if (!touchMoved.current) { lastTouchTs.current = Date.now(); elegirRol(key); }
+  };
 
   const irA = (nuevoStep) => { setStack(prev => [...prev.slice(0, pos+1), nuevoStep]); setPos(p => p+1); };
   const atras = () => setPos(p => Math.max(0, p-1));
@@ -3691,13 +3703,14 @@ function ModuloLiquidaciones({ onVolver }) {
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:12 }}>
             {ROLES_LIQ.filter(r => r.key !== 'total').map(r => (
               <button key={r.key}
-                onClick={() => elegirRol(r.key)}
+                onClick={() => tapRol(r.key)}
                 onMouseEnter={() => setHovBtn(r.key)}
                 onMouseLeave={() => { setHovBtn(null); setActiveBtn(null); }}
                 onMouseDown={() => setActiveBtn(r.key)}
                 onMouseUp={() => setActiveBtn(null)}
-                onTouchStart={() => setActiveBtn(r.key)}
-                onTouchEnd={() => { setActiveBtn(null); }}
+                onTouchStart={() => { touchMoved.current = false; setActiveBtn(r.key); }}
+                onTouchMove={() => { touchMoved.current = true; }}
+                onTouchEnd={() => touchEndRol(r.key)}
                 style={getRolBtnStyle(r, false)}>
                 <span style={{ fontSize:34, lineHeight:1 }}>{r.icon}</span>
                 <span style={{ textAlign:'center', lineHeight:1.2 }}>{r.label}</span>
@@ -3707,13 +3720,14 @@ function ModuloLiquidaciones({ onVolver }) {
           {/* Botón ancho: Ventas Totales */}
           {ROLES_LIQ.filter(r => r.key === 'total').map(r => (
             <button key={r.key}
-              onClick={() => elegirRol(r.key)}
+              onClick={() => tapRol(r.key)}
               onMouseEnter={() => setHovBtn(r.key)}
               onMouseLeave={() => { setHovBtn(null); setActiveBtn(null); }}
               onMouseDown={() => setActiveBtn(r.key)}
               onMouseUp={() => setActiveBtn(null)}
-              onTouchStart={() => setActiveBtn(r.key)}
-              onTouchEnd={() => { setActiveBtn(null); }}
+              onTouchStart={() => { touchMoved.current = false; setActiveBtn(r.key); }}
+              onTouchMove={() => { touchMoved.current = true; }}
+              onTouchEnd={() => touchEndRol(r.key)}
               style={getRolBtnStyle(r, true)}>
               <span style={{ fontSize:30, lineHeight:1 }}>{r.icon}</span>
               <span>{r.label}</span>

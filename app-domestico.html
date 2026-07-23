@@ -119,10 +119,26 @@ const FRAGANCIAS = [
   { label:'Limón',       icon:'🍋' }, { label:'Olor a Limpio',icon:'✨' },
 ];
 const PRECIO_ENVASE = 4000;
-// Tipo de envase: 'baldes' (con cargo) | 'cajas' (sin cargo) | 'bolsas' (sin envase, sin cargo)
-// Retrocompatibilidad: pedidos viejos sin tipoEnvase → envases>0 = baldes, envases=0 = bolsas
-const tipoEnvaseDe = (env, ex) => ex?.tipoEnvase || ((env ?? 0) > 0 ? 'baldes' : 'bolsas');
-const costoEnvases = (env, tipoEnv) => (tipoEnv === 'cajas' || tipoEnv === 'bolsas') ? 0 : (env || 0) * PRECIO_ENVASE;
+// Envases: baldes (con cargo) y cajas (sin cargo) pueden CONVIVIR en un pedido.
+// Modelo nuevo: envases = cant. de baldes; extras.cajas = cant. de cajas.
+// Retrocompat: extras.tipoEnvase ('cajas'/'bolsas' de la versión anterior) y pedidos viejos sin nada.
+const desgloseEnvases = (env, ex) => {
+  if (typeof ex?.cajas === 'number') return { baldes: env ?? 0, cajas: ex.cajas };
+  const t = ex?.tipoEnvase;
+  if (t === 'cajas')  return { baldes: 0, cajas: env ?? 0 };
+  if (t === 'bolsas') return { baldes: 0, cajas: 0 };
+  return { baldes: env ?? 0, cajas: 0 };
+};
+const costoEnvases = (env, ex) => desgloseEnvases(env, ex).baldes * PRECIO_ENVASE;
+const minBultosDe = (env, ex) => { const d = desgloseEnvases(env, ex); return Math.max(1, d.baldes + d.cajas); };
+const lineasEnvasesWA = (env, ex) => {
+  const { baldes, cajas } = desgloseEnvases(env, ex);
+  const out = [];
+  if (baldes > 0) out.push(`• 🪣 Envases (${baldes}) — *${fmt(baldes*PRECIO_ENVASE)}*`);
+  if (cajas > 0)  out.push(`• 📦 En caja${cajas!==1?'s':''} sin cargo (${cajas})`);
+  if (baldes === 0 && cajas === 0) out.push(`• 🛍️ _Sin envase — se entrega en bolsas (sin cargo)_`);
+  return out;
+};
 const ZONAS_ENVIO = [
   { zona:'Moreno', color:'#ef4444', precio:4500, localidades:['MORENO','PASO DEL REY','CUARTEL V','FRANCISCO ALVAREZ','LA REJA','TRUJUI','BORDENAVE'] },
   { zona:'Cordón 1', color:'#fb923c', precio:5500, localidades:['JOSE C PAZ','JOSE C. PAZ','SAN MIGUEL','ITUZAINGO','ITUZAINGÓ','MERLO','MALVINAS ARGENTINAS'] },
@@ -476,7 +492,7 @@ const ItemLibre = ({ lista, setLista }) => {
 
 // Extras + Envío (compartido PRE y DEF)
 const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar, onVolver, labelBtn='Confirmar', modalidad=null }) => {
-  const [avisoEnvase, setAvisoEnvase] = React.useState(null);
+  const minBultos = Math.max(1, envases + (extras.cajas || 0)); // nunca menos bultos que baldes+cajas
   const zonaEf = extras.envio || zona;
   // extras.envio puede ser un número (viene del mapa-flex: total ya calculado) o un objeto zona {zona, precio}
   const envioEsNumero = typeof extras.envio === 'number';
@@ -491,61 +507,43 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
       {/* Ítem libre — va primero */}
       <ItemLibre lista={extras.agregados} setLista={v=>setExtras({...extras,agregados:v})} />
 
-      {/* Envases — tipo + cantidad */}
+      {/* Envases: baldes (con cargo) y cajas (sin cargo) — pueden convivir */}
       <div style={s.card}>
-        <div style={s.cTit}>📦 ¿En qué se lleva el pedido?</div>
-        <div style={{ display:'flex', gap:8, marginBottom:12, flexWrap:'wrap' }}>
-          {[
-            { k:'baldes', icon:'🪣', label:'BALDES', sub:'$4.000 c/u' },
-            { k:'cajas',  icon:'📦', label:'CAJAS', sub:'Sin cargo' },
-            { k:'bolsas', icon:'🛍️', label:'SIN ENVASE', sub:'En bolsas · sin cargo' },
-          ].map(op => {
-            const activo = (extras.tipoEnvase || 'baldes') === op.k;
-            return (
-              <button key={op.k}
-                onClick={()=>{
-                  const anterior = extras.tipoEnvase || 'baldes';
-                  if (op.k === anterior) return;
-                  if (op.k === 'bolsas') setEnvases(0);
-                  setExtras({ ...extras, tipoEnvase: op.k });
-                  if (anterior === 'baldes' && envases > 0 && op.k !== 'baldes') setAvisoEnvase(`⚠️ Se quitó el cargo de envases del total (${fmt(envases*PRECIO_ENVASE)})`);
-                  else if (op.k === 'baldes' && envases > 0) setAvisoEnvase(`Se agregó el cargo de envases al total (${fmt(envases*PRECIO_ENVASE)})`);
-                  else setAvisoEnvase(null);
-                }}
-                style={{ flex:'1 1 30%', minWidth:104, padding:'10px 6px', borderRadius:10, cursor:'pointer', textAlign:'center',
-                  border: activo ? '2px solid #4ade80' : '1px solid rgba(255,255,255,0.18)',
-                  background: activo ? 'rgba(34,197,94,0.16)' : 'rgba(255,255,255,0.05)', color:'#fff' }}>
-                <div style={{ fontSize:20 }}>{op.icon}</div>
-                <div style={{ fontWeight:900, fontSize:12 }}>{op.label}</div>
-                <div style={{ fontSize:10, opacity:0.65 }}>{op.sub}</div>
-              </button>
-            );
-          })}
-        </div>
-        {avisoEnvase && (
-          <div style={{ padding:'9px 12px', borderRadius:9, fontSize:12, fontWeight:800, marginBottom:10, background:'rgba(220,38,38,0.14)', border:'1px solid rgba(220,38,38,0.4)', color:'#fca5a5' }}>
-            {avisoEnvase}
-          </div>
-        )}
-        {(extras.tipoEnvase || 'baldes') !== 'bolsas' ? (
-          <>
-            <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)', fontWeight:700, marginBottom:8 }}>
-              {(extras.tipoEnvase || 'baldes') === 'cajas' ? 'Cantidad de cajas (sirve de control de bultos):' : 'Cantidad de envases:'}
-            </div>
-            <div style={{ display:'flex', alignItems:'center', gap:16 }}>
-              <button onClick={()=>{const n=Math.max(0,envases-1);setEnvases(n);if(modalidad!=='retiro'&&!extras.esInterior&&!extras.retiraLocal)setExtras({...extras,bultos:Math.max(1,n)});}} style={{ width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 }}>−</button>
-              <span style={{ fontSize:26, fontWeight:900, minWidth:44, textAlign:'center' }}>{envases}</span>
-              <button onClick={()=>{const n=envases+1;setEnvases(n);if(modalidad!=='retiro'&&!extras.esInterior&&!extras.retiraLocal)setExtras({...extras,bultos:n});}} style={{ width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 }}>+</button>
-              {envases>0 && ((extras.tipoEnvase || 'baldes') === 'cajas'
-                ? <span style={{ color:'#4ade80', fontWeight:800 }}>Sin cargo</span>
-                : <span style={{ color:C.na, fontWeight:800 }}>{fmt(envases*PRECIO_ENVASE)}</span>)}
-            </div>
-          </>
-        ) : (
-          <div style={{ padding:'9px 12px', borderRadius:9, fontSize:12, fontWeight:700, background:'rgba(217,119,6,0.14)', border:'1px solid rgba(217,119,6,0.35)', color:'#fbbf24' }}>
-            🛍️ El pedido se entrega en bolsas, sin envases y sin cargo.
-          </div>
-        )}
+        <div style={s.cTit}>📦 Envases del pedido</div>
+        {(() => {
+          const cajas = extras.cajas || 0;
+          const esFlex = modalidad!=='retiro' && !extras.esInterior && !extras.retiraLocal;
+          const btnStyle = { width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 };
+          const setBaldes = (n) => { setEnvases(n); if (esFlex) setExtras({ ...extras, bultos: Math.max(1, n + cajas) }); };
+          const setCajas  = (m) => { const nx = { ...extras, cajas: m }; if (esFlex) nx.bultos = Math.max(1, envases + m); setExtras(nx); };
+          return (
+            <>
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,0.6)', fontWeight:700, marginBottom:8 }}>🪣 Baldes — $4.000 c/u (con cargo)</div>
+                <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+                  <button onClick={()=>setBaldes(Math.max(0,envases-1))} style={btnStyle}>−</button>
+                  <span style={{ fontSize:26, fontWeight:900, minWidth:44, textAlign:'center' }}>{envases}</span>
+                  <button onClick={()=>setBaldes(envases+1)} style={btnStyle}>+</button>
+                  {envases>0 && <span style={{ color:C.na, fontWeight:800 }}>{fmt(envases*PRECIO_ENVASE)}</span>}
+                </div>
+              </div>
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,0.6)', fontWeight:700, marginBottom:8 }}>📦 Cajas — sin cargo</div>
+                <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+                  <button onClick={()=>setCajas(Math.max(0,cajas-1))} style={btnStyle}>−</button>
+                  <span style={{ fontSize:26, fontWeight:900, minWidth:44, textAlign:'center' }}>{cajas}</span>
+                  <button onClick={()=>setCajas(cajas+1)} style={btnStyle}>+</button>
+                  {cajas>0 && <span style={{ color:'#4ade80', fontWeight:800 }}>Sin cargo</span>}
+                </div>
+              </div>
+              {envases===0 && cajas===0 && (
+                <div style={{ padding:'9px 12px', borderRadius:9, fontSize:12, fontWeight:700, background:'rgba(217,119,6,0.14)', border:'1px solid rgba(217,119,6,0.35)', color:'#fbbf24' }}>
+                  🛍️ Sin baldes ni cajas: el pedido se entrega en bolsas, sin cargo.
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* Envío */}
@@ -627,9 +625,9 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
                     )}
                     {zonaEf && (
                       <div>
-                        <label style={s.lbl}>Cantidad de bultos</label>
+                        <label style={s.lbl}>Cantidad de bultos {minBultos>1 && <span style={{ fontSize:10, color:'rgba(255,255,255,0.45)', fontWeight:600 }}>(mínimo {minBultos}: baldes + cajas)</span>}</label>
                         <div style={{ display:'flex', alignItems:'center', gap:16, marginTop:4 }}>
-                          <button onClick={()=>setExtras({...extras,bultos:Math.max(1,extras.bultos-1)})} style={{ width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 }}>−</button>
+                          <button onClick={()=>setExtras({...extras,bultos:Math.max(minBultos,extras.bultos-1)})} style={{ width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 }}>−</button>
                           <span style={{ fontSize:26, fontWeight:900, minWidth:44, textAlign:'center' }}>{extras.bultos}</span>
                           <button onClick={()=>setExtras({...extras,bultos:extras.bultos+1})} style={{ width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 }}>+</button>
                           <span style={{ color:C.na, fontWeight:800 }}>{fmt(zonaEf.precio*extras.bultos)}</span>
@@ -667,8 +665,13 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
 const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial }) => {
   const [codigo, setCodigo]   = useState(preloaded?.codigo || null);
   const [items, setItems]     = useState(preloaded?.items || []);
-  const [envases, setEnvases] = useState(preloaded?.envases || 0);
-  const [extras, setExtras]   = useState(preloaded?.extras ? { tipoEnvase:'baldes', ...preloaded.extras } : { agregados:[], envio:null, bultos: preloaded?.envases || 1, esInterior:false, retiraLocal:false, localidad:'', tipoEnvase:'baldes' });
+  const [envases, setEnvases] = useState(() => desgloseEnvases(preloaded?.envases || 0, preloaded?.extras).baldes);
+  const [extras, setExtras]   = useState(() => {
+    const d = desgloseEnvases(preloaded?.envases || 0, preloaded?.extras);
+    return preloaded?.extras
+      ? { ...preloaded.extras, cajas: d.cajas }
+      : { agregados:[], envio:null, bultos: Math.max(1, d.baldes + d.cajas), esInterior:false, retiraLocal:false, localidad:'', cajas:0 };
+  });
   const [paso, setPaso]       = useState('inicio');
   const [cur, setCur]         = useState({ tipo:null, cantidad:null, calidad:null });
   const [waMensaje, setWaMensaje] = useState('');
@@ -696,7 +699,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial }) => {
   }, []);
 
   const totalProd    = items.reduce((s,i)=>s+i.precio,0);
-  const totalEnvases = costoEnvases(envases, extras.tipoEnvase || 'baldes');
+  const totalEnvases = envases * PRECIO_ENVASE; // envases = baldes (las cajas no se cobran)
   const totalAgr     = extras.agregados.reduce((s,a)=>s+(parseFloat(a.precio)||0),0);
   const totalEnvio   = (extras.retiraLocal||extras.esInterior) ? 0
     : typeof extras.envio === 'number' ? extras.envio
@@ -742,7 +745,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial }) => {
       `📦 *Productos:*`,
       ...items.map(i=>`• ${i.nombre} — *${fmt(i.precio)}*`),
       ...extras.agregados.map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),
-      extras.tipoEnvase==='cajas'?`• 📦 En cajas sin cargo${envases>0?` (${envases} caja${envases!==1?'s':''})`:''}`:extras.tipoEnvase==='bolsas'?`• 🛍️ Sin envase — se entrega en bolsas (sin cargo)`:envases>0?`• Envases (${envases}) — *${fmt(totalEnvases)}*`:null,``,
+      ...lineasEnvasesWA(envases, extras),``,
       `📦 *MODALIDAD DE ENTREGA*`,
       (extras.retiraLocal||modalidadPRE==='retiro')?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:(extras.esInterior||modalidadPRE==='interior')?`🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`:typeof extras.envio==='number'&&extras.localidad?`🚚 *ENVÍO FLEX AMBA* — ${extras.localidad} — *${fmt(extras.envio)}*`:zona?`🚚 *ENVÍO FLEX AMBA* — ${extras.localidad} (${zona.zona}) · ${extras.bultos} bulto${extras.bultos!==1?'s':''} — *${fmt(totalEnvio)}*`:(extras.localidad||modalidadPRE==='flex')?`🚚 *ENVÍO FLEX AMBA*${extras.localidad?` — ${extras.localidad}`:''}`:null,``,
       `━━━━━━━━━━━━━━━━`,`💰 *TOTAL: ${fmt(total)}*`,`━━━━━━━━━━━━━━━━`,``,
@@ -1519,7 +1522,7 @@ function imprimirPedido(pedido, solo=null) {
   if (!pedido) return;
   try {
     const { codigo, fecha, cliente, items, envases:env, extras:ex, totales:tot, zonaEnvio } = pedido;
-    const tEnv = tipoEnvaseDe(env, ex); // 'baldes' | 'cajas' | 'bolsas'
+    const { baldes: dBaldes, cajas: dCajas } = desgloseEnvases(env, ex); // conviven baldes (con cargo) y cajas (sin cargo)
     const esR = ex.retiraLocal; const esI = ex.esInterior;
     const bultos = ex.bultos || 1;
     const BULTO_WORDS = ['','UN BULTO','DOS BULTOS','TRES BULTOS','CUATRO BULTOS','CINCO BULTOS','SEIS BULTOS','SIETE BULTOS','OCHO BULTOS','NUEVE BULTOS','DIEZ BULTOS'];
@@ -1664,22 +1667,23 @@ function imprimirPedido(pedido, solo=null) {
       return rows;
     }).join('');
 
-    const precioEnvaseUnit = env>0 ? tot.envases/env : 0;
-    const envasesRowHtml = tEnv==='cajas' ? `${divRow}
+    const precioEnvaseUnit = dBaldes>0 ? tot.envases/dBaldes : 0;
+    const envasesRowHtml = [
+      ...(dBaldes>0 ? Array.from({length:dBaldes}).map((_,i)=>`${divRow}
       <tr>
-        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0d5c3a;font-weight:900;margin-right:6px;">▸</span><strong>📦 EN CAJAS SIN CARGO${env>0?` (${env} CAJA${env!==1?'S':''})`:''}</strong></td>
+        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0d5c3a;font-weight:900;margin-right:6px;">▸</span><strong>🪣 ENVASE ${i+1} de ${dBaldes}</strong></td>
+        <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">${fmtDoc(precioEnvaseUnit)}</td>
+      </tr>`) : []),
+      ...(dCajas>0 ? [`${divRow}
+      <tr>
+        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0284c7;font-weight:900;margin-right:6px;">▸</span><strong>📦 EN CAJAS SIN CARGO (${dCajas} CAJA${dCajas!==1?'S':''})</strong></td>
         <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">SIN CARGO</td>
-      </tr>` : tEnv==='bolsas' ? `${divRow}
+      </tr>`] : []),
+      ...(dBaldes===0 && dCajas===0 ? [`${divRow}
       <tr>
         <td colspan="2" style="padding:8px 4px 2px;font-size:12px;color:#b45309;font-weight:800;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS (SIN CARGO)</td>
-      </tr>` : env>0?Array.from({length:env}).map((_,i)=>`${divRow}
-      <tr>
-        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0d5c3a;font-weight:900;margin-right:6px;">▸</span><strong>ENVASE ${i+1} de ${env}</strong></td>
-        <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">${fmtDoc(precioEnvaseUnit)}</td>
-      </tr>`).join(''):`${divRow}
-      <tr>
-        <td colspan="2" style="padding:8px 4px 2px;font-size:12px;color:#b45309;font-style:italic;">⚠️ EL CLIENTE ELIGIÓ NO LLEVAR ENVASES</td>
-      </tr>`;
+      </tr>`] : []),
+    ].join('');
 
     const extrasRowsHtml = (ex.agregados||[]).length > 0 ? [
       `${divRow}<tr><td colspan="2" style="padding:8px 4px 2px;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;">Productos Extra</td></tr>`,
@@ -1826,7 +1830,7 @@ function imprimirPedido(pedido, solo=null) {
         </div>`;
       }).join('')}
       ${(ex.agregados||[]).length>0?`<div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;margin:10px 0 5px;border-top:2px solid #e2e8f0;padding-top:8px;">⭐ Productos Extra</div>${ex.agregados.map(a=>`<div style="padding:8px 10px;border-left:4px solid #0d5c3a;background:#f8fafc;margin-bottom:7px;border-radius:4px;display:flex;justify-content:space-between;align-items:center;"><div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;">${a.nombre}</div><div style="font-size:13px;font-weight:700;color:#0d5c3a;">${fmtDoc(parseFloat(a.precio)||0)}</div></div>`).join('')}`:''}
-      ${tEnv==='cajas'?`<div style="padding:8px 10px;border-left:4px solid #0284c7;background:#e0f2fe;margin-bottom:7px;border-radius:4px;font-weight:800;">📦 EN CAJAS SIN CARGO${env>0?`: ${env} caja${env!==1?'s':''}`:''}</div>`:tEnv==='bolsas'?`<div style="padding:8px 10px;border-left:4px solid #b45309;background:#fefce8;margin-bottom:7px;border-radius:6px;font-size:12px;font-weight:800;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:env>0?`<div style="padding:8px 10px;border-left:4px solid #f97316;background:#fff7ed;margin-bottom:7px;border-radius:4px;font-weight:800;">🪣 Envases vacíos: ${env}</div>`:`<div style="padding:8px 10px;border-left:4px solid #b45309;background:#fefce8;margin-bottom:7px;border-radius:6px;font-size:12px;font-weight:700;color:#b45309;">⚠️ EL CLIENTE ELIGIÓ NO LLEVAR ENVASES</div>`}
+      ${dBaldes>0?`<div style="padding:8px 10px;border-left:4px solid #f97316;background:#fff7ed;margin-bottom:7px;border-radius:4px;font-weight:800;">🪣 Envases vacíos (baldes): ${dBaldes}</div>`:''}${dCajas>0?`<div style="padding:8px 10px;border-left:4px solid #0284c7;background:#e0f2fe;margin-bottom:7px;border-radius:4px;font-weight:800;">📦 EN CAJAS SIN CARGO: ${dCajas} caja${dCajas!==1?'s':''}</div>`:''}${dBaldes===0&&dCajas===0?`<div style="padding:8px 10px;border-left:4px solid #b45309;background:#fefce8;margin-bottom:7px;border-radius:6px;font-size:12px;font-weight:800;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:''}
       <div style="margin-top:10px;padding:8px 12px;background:#e0f2fe;border-left:4px solid #0284c7;border-radius:6px;font-size:11px;">
         <span style="font-weight:900;color:#0284c7;">📦 ENTREGA:</span>
         <span style="font-weight:700;margin-left:6px;">${esR?'RETIRA EN PLANTA':esI?'INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI':'ENVÍO FLEX AMBA — '+( cliente.localidad||ex.localidad||'')}</span>
@@ -1869,12 +1873,10 @@ function imprimirPedido(pedido, solo=null) {
       <div style="background:#0d5c3a;color:#fff;border-radius:6px;padding:10px 12px;text-align:center;margin:5mm 0 3mm;">
         <div style="font-size:22px;font-weight:900;letter-spacing:1px;">${bultoPalabra}</div>
       </div>
-      ${tEnv==='cajas'?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #0284c7;border-radius:6px;text-align:center;">
-        <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#0284c7;line-height:1.5;">📦 EN CAJAS SIN CARGO${env>0?`: ${env} CAJA${env!==1?'S':''}`:''}</div>
-      </div>`:tEnv==='bolsas'?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #b45309;border-radius:6px;text-align:center;">
+      ${dCajas>0?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #0284c7;border-radius:6px;text-align:center;">
+        <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#0284c7;line-height:1.5;">📦 EN CAJAS SIN CARGO: ${dCajas} CAJA${dCajas!==1?'S':''}${dBaldes>0?` + ${dBaldes} BALDE${dBaldes!==1?'S':''}`:''}</div>
+      </div>`:''}${dBaldes===0&&dCajas===0?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #b45309;border-radius:6px;text-align:center;">
         <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#b45309;line-height:1.5;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS<br/>POR ELECCIÓN DEL CLIENTE.</div>
-      </div>`:env===0?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #b45309;border-radius:6px;text-align:center;">
-        <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#b45309;line-height:1.5;">EL CLIENTE RETIRA EN PLANTA.<br/>EL PEDIDO SE ENTREGA SIN ENVASES POR ELECCIÓN DEL CLIENTE.</div>
       </div>`:''}
       ${esR?`<div style="margin-top:4mm;border-top:2px dashed #0d5c3a;padding-top:4mm;">
         <div style="font-size:9px;font-weight:700;color:#0d5c3a;text-transform:uppercase;margin-bottom:2mm;">DNI: ${cliente.dni||'__________________'}</div>
@@ -2023,19 +2025,23 @@ function imprimirPedido(pedido, solo=null) {
           </div>
         </div>`).join('')}`:'';
 
-    const checkEnvasesHtml = tEnv==='cajas'?`
-      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:6px;color:#0284c7;">📦 Cajas (sin cargo)</div>
-      ${Array.from({length:Math.max(env,0)}).map((_,i)=>`
-        <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
-          <div style="width:18px;height:18px;border:2px solid #0284c7;border-radius:3px;flex-shrink:0;"></div>
-          <span>📦 <strong>CAJA ${i+1} de ${env}</strong> — SIN CARGO</span>
-        </div>`).join('')}`:tEnv==='bolsas'?`\n      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:4px;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:env>0?`
+    const checkEnvasesHtml = [
+      dBaldes>0?`
       <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:6px;color:#f97316;">Envases (Baldes)</div>
-      ${Array.from({length:env}).map((_,i)=>`
+      ${Array.from({length:dBaldes}).map((_,i)=>`
         <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
           <div style="width:18px;height:18px;border:2px solid #f97316;border-radius:3px;flex-shrink:0;"></div>
-          <span>🪣 <strong>ENVASE ${i+1} de ${env}</strong></span>
-        </div>`).join('')}`:`\n      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:4px;color:#b45309;">⚠️ EL CLIENTE ELIGIÓ NO LLEVAR ENVASES</div>`;
+          <span>🪣 <strong>ENVASE ${i+1} de ${dBaldes}</strong></span>
+        </div>`).join('')}`:'',
+      dCajas>0?`
+      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:6px;color:#0284c7;">📦 Cajas (sin cargo)</div>
+      ${Array.from({length:dCajas}).map((_,i)=>`
+        <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
+          <div style="width:18px;height:18px;border:2px solid #0284c7;border-radius:3px;flex-shrink:0;"></div>
+          <span>📦 <strong>CAJA ${i+1} de ${dCajas}</strong> — SIN CARGO</span>
+        </div>`).join('')}`:'',
+      (dBaldes===0&&dCajas===0)?`\n      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:4px;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:'',
+    ].join('');
 
     const tipoEnvioCheck = esR ? 'RETIRA EN PLANTA' : esI ? 'INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI' : `ENVÍO FLEX AMBA — ${cliente.localidad||ex.localidad||''}`;
     const htmlCheck = `<div style="padding:14px;font-family:Arial;font-size:12px;color:#1e293b;max-width:800px;">
@@ -2131,7 +2137,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
       envio: (modalidadResuelta==='flex' && typeof preData.extras?.envio==='number') ? preData.extras.envio : null,
       bultos: preData.extras?.bultos ?? (preData.envases || 1),
       localidad: (modalidadResuelta==='flex' && preData.extras?.localidad) ? preData.extras.localidad : '',
-      tipoEnvase: preData.extras?.tipoEnvase || ((preData.envases ?? 0) > 0 ? 'baldes' : 'bolsas')
+      cajas: desgloseEnvases(preData.envases ?? 0, preData.extras).cajas
     }));
     if (!modalidadEntrega && modalidadResuelta) {
       setModalidadEntrega(modalidadResuelta==='retiro' ? 'local' : 'envio');
@@ -2147,6 +2153,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
     agregados:[],
     envio: null,
     bultos: 1,
+    cajas: 0,
     esInterior: modalidadPreload==='interior',
     retiraLocal: modalidadPreload==='retiro',
     localidad: ''
@@ -2211,13 +2218,12 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
     try {
       const zona = detectarZona(extrasUsados.localidad || cliente.localidad);
       const pre = preData || {};
-      const envasesHeredados = pre.envases ?? 0;
-      const tipoEnvHeredado = extrasUsados.tipoEnvase || pre.extras?.tipoEnvase || (envasesHeredados > 0 ? 'baldes' : 'bolsas');
+      const dEnv = desgloseEnvases(pre.envases ?? 0, pre.extras); // {baldes, cajas} heredados de la PRE
       const agregadosHeredados = (extras.agregados && extras.agregados.length > 0)
         ? extras.agregados
         : (pre.extras?.agregados ?? []);
       const totalProd  = carrito.reduce((s,i) => s + Number(i.precio||0), 0);
-      const totalEnv   = costoEnvases(envasesHeredados, tipoEnvHeredado);
+      const totalEnv   = dEnv.baldes * PRECIO_ENVASE; // solo los baldes se cobran; cajas sin cargo
       const totalAgr   = agregadosHeredados.reduce((s,a) => s + (parseFloat(a.precio)||0), 0);
       // La entrega NO cambió respecto de la PRE → heredar el envío YA COBRADO tal cual,
       // sin recalcular. PRE y DEF nunca pueden diferir en plata si no se editó nada.
@@ -2243,8 +2249,8 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
         fecha: pedidoFinal ? pedidoFinal.fecha : new Date().toLocaleString('es-AR'),
         ts: pedidoFinal ? pedidoFinal.ts : Date.now(),
         cliente, items:carrito,
-        envases:envasesHeredados,
-        extras:{ ...extrasUsados, agregados:agregadosHeredados, tipoEnvase:tipoEnvHeredado },
+        envases:dEnv.baldes,
+        extras:{ ...extrasUsados, agregados:agregadosHeredados, cajas:dEnv.cajas },
         totales:{ productos:totalProd, envases:totalEnv, agregados:totalAgr, envio:totalEnvio, total },
         zonaEnvio:zona, estado: pedidoFinal ? pedidoFinal.estado : 'pendiente',
         creadoPor: pedidoFinal ? pedidoFinal.creadoPor : (usuarioActual?.email || null)
@@ -2491,7 +2497,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
               <div style={{ marginBottom:20 }}>
                 <label style={{ fontSize:12, fontWeight:700, color:'rgba(255,255,255,0.7)', display:'block', marginBottom:6 }}>Cantidad de bultos</label>
                 <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                  <button onClick={()=>setExtras(e=>({...e,bultos:Math.max(1,e.bultos-1)}))} style={{ width:36, height:36, borderRadius:8, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>−</button>
+                  <button onClick={()=>setExtras(e=>{ const d=desgloseEnvases(preData?.envases ?? 0, preData?.extras); return {...e, bultos:Math.max(Math.max(1, d.baldes+d.cajas), (e.bultos||1)-1)}; })} style={{ width:36, height:36, borderRadius:8, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>−</button>
                   <span style={{ fontSize:22, fontWeight:900, minWidth:30, textAlign:'center' }}>{extras.bultos || 1}</span>
                   <button onClick={()=>setExtras(e=>({...e,bultos:(e.bultos||1)+1}))} style={{ width:36, height:36, borderRadius:8, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>+</button>
                   <span style={{ fontSize:12, color:'rgba(255,255,255,0.45)' }}>bulto{(extras.bultos||1)!==1?'s':''}</span>
@@ -2634,7 +2640,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
               `━━━━━━━━━━━━━━━━`,
               ...lineasProductos,
               ...(ex.agregados||[]).map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),
-              tipoEnvaseDe(env,ex)==='cajas' ? `• 📦 En cajas sin cargo${env>0?` (${env} caja${env!==1?'s':''})`:''}` : tipoEnvaseDe(env,ex)==='bolsas' ? `• 🛍️ _Sin envase — se entrega en bolsas (sin cargo)_` : env>0 ? `• Envases (${env}) — *${fmt(tot.envases)}*` : `⚠️ _Sin envases (cliente no lleva)_`,
+              ...lineasEnvasesWA(env, ex),
               ``,
               `━━━━━━━━━━━━━━━━`,
               `📦 *MODALIDAD DE ENTREGA*`,
@@ -2832,7 +2838,7 @@ _Doméstico · Moreno, Bs. As._`
     ``,`━━━━━━━━━━━━━━━━`,`🛒 *PRODUCTOS Y DETALLE*`,`━━━━━━━━━━━━━━━━`,
     ...lineasProductos,
     ...(ex.agregados||[]).map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),
-    tipoEnvaseDe(env,ex)==='cajas'?`• 📦 En cajas sin cargo${env>0?` (${env} caja${env!==1?'s':''})`:''}`:tipoEnvaseDe(env,ex)==='bolsas'?`• 🛍️ _Sin envase — se entrega en bolsas (sin cargo)_`:env>0?`• Envases (${env}) — *${fmt(tot.envases)}*`:`⚠️ _Sin envases (cliente no lleva)_`,
+    ...lineasEnvasesWA(env, ex),
     ``,`━━━━━━━━━━━━━━━━`,`📦 *MODALIDAD DE ENTREGA*`,
     ex.retiraLocal?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:
       ex.esInterior?`🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`:
@@ -2911,10 +2917,9 @@ _Doméstico · Moreno, Bs. As._`
           </div>
         ))}
         {(ex.agregados||[]).map((a,i) => <div key={i} style={{ fontSize:13 }}>• {a.nombre} — <span style={{ color:'#f97316' }}>{fmt(a.precio)}</span></div>)}
-        {tipoEnvaseDe(env,ex)==='cajas' && <div style={{ fontSize:13, marginBottom:4 }}>📦 En cajas sin cargo{env>0?` (${env} caja${env!==1?'s':''})`:''}</div>}
-        {tipoEnvaseDe(env,ex)==='bolsas' && <div style={{ fontSize:12, color:'rgba(255,200,0,0.7)' }}>🛍️ Sin envase — se entrega en bolsas</div>}
-        {tipoEnvaseDe(env,ex)==='baldes' && env>0 && <div style={{ fontSize:13, marginBottom:4 }}>📦 Envases ({env}) — <span style={{ color:'#f97316' }}>{fmt(tot.envases)}</span></div>}
-        {tipoEnvaseDe(env,ex)==='baldes' && env===0 && <div style={{ fontSize:12, color:'rgba(255,200,0,0.7)' }}>⚠️ Sin envases</div>}
+        {desgloseEnvases(env,ex).baldes>0 && <div style={{ fontSize:13, marginBottom:4 }}>🪣 Envases ({desgloseEnvases(env,ex).baldes}) — <span style={{ color:'#f97316' }}>{fmt(tot.envases)}</span></div>}
+        {desgloseEnvases(env,ex).cajas>0 && <div style={{ fontSize:13, marginBottom:4 }}>📦 En cajas sin cargo ({desgloseEnvases(env,ex).cajas})</div>}
+        {desgloseEnvases(env,ex).baldes===0 && desgloseEnvases(env,ex).cajas===0 && <div style={{ fontSize:12, color:'rgba(255,200,0,0.7)' }}>🛍️ Sin envase — se entrega en bolsas</div>}
       </div>
 
       {/* Entrega */}

@@ -476,6 +476,7 @@ const ItemLibre = ({ lista, setLista }) => {
 
 // Extras + Envío (compartido PRE y DEF)
 const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar, onVolver, labelBtn='Confirmar', modalidad=null }) => {
+  const [avisoEnvase, setAvisoEnvase] = React.useState(null);
   const zonaEf = extras.envio || zona;
   // extras.envio puede ser un número (viene del mapa-flex: total ya calculado) o un objeto zona {zona, precio}
   const envioEsNumero = typeof extras.envio === 'number';
@@ -502,7 +503,15 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
             const activo = (extras.tipoEnvase || 'baldes') === op.k;
             return (
               <button key={op.k}
-                onClick={()=>{ if (op.k === 'bolsas') setEnvases(0); setExtras({ ...extras, tipoEnvase: op.k }); }}
+                onClick={()=>{
+                  const anterior = extras.tipoEnvase || 'baldes';
+                  if (op.k === anterior) return;
+                  if (op.k === 'bolsas') setEnvases(0);
+                  setExtras({ ...extras, tipoEnvase: op.k });
+                  if (anterior === 'baldes' && envases > 0 && op.k !== 'baldes') setAvisoEnvase(`⚠️ Se quitó el cargo de envases del total (${fmt(envases*PRECIO_ENVASE)})`);
+                  else if (op.k === 'baldes' && envases > 0) setAvisoEnvase(`Se agregó el cargo de envases al total (${fmt(envases*PRECIO_ENVASE)})`);
+                  else setAvisoEnvase(null);
+                }}
                 style={{ flex:'1 1 30%', minWidth:104, padding:'10px 6px', borderRadius:10, cursor:'pointer', textAlign:'center',
                   border: activo ? '2px solid #4ade80' : '1px solid rgba(255,255,255,0.18)',
                   background: activo ? 'rgba(34,197,94,0.16)' : 'rgba(255,255,255,0.05)', color:'#fff' }}>
@@ -513,6 +522,11 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
             );
           })}
         </div>
+        {avisoEnvase && (
+          <div style={{ padding:'9px 12px', borderRadius:9, fontSize:12, fontWeight:800, marginBottom:10, background:'rgba(220,38,38,0.14)', border:'1px solid rgba(220,38,38,0.4)', color:'#fca5a5' }}>
+            {avisoEnvase}
+          </div>
+        )}
         {(extras.tipoEnvase || 'baldes') !== 'bolsas' ? (
           <>
             <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)', fontWeight:700, marginBottom:8 }}>
@@ -690,8 +704,10 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial }) => {
   const total        = totalProd + totalEnvases + totalAgr + totalEnvio;
 
   const snap = useCallback(() => {
-    saveLS({ codigo, tipo:'PRE', items, envases, extras, modalidadPRE, total, ts:Date.now(), fecha:new Date().toLocaleString('es-AR') });
-  }, [codigo, items, envases, extras, modalidadPRE, total]);
+    saveLS({ codigo, tipo:'PRE', items, envases, extras, modalidadPRE, total,
+      totales:{ productos:totalProd, envases:totalEnvases, agregados:totalAgr, envio:totalEnvio, total },
+      ts:Date.now(), fecha:new Date().toLocaleString('es-AR') });
+  }, [codigo, items, envases, extras, modalidadPRE, total, totalProd, totalEnvases, totalAgr, totalEnvio]);
 
   // Auto-save: persiste la PRE en localStorage/Supabase cada vez que cambia algo relevante
   React.useEffect(() => {
@@ -2113,7 +2129,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
       retiraLocal: prev.retiraLocal || modalidadResuelta==='retiro' || !!preData.extras?.retiraLocal,
       agregados: (preData.extras?.agregados || []).length > 0 ? preData.extras.agregados : prev.agregados,
       envio: (modalidadResuelta==='flex' && typeof preData.extras?.envio==='number') ? preData.extras.envio : null,
-      bultos: preData.envases || 1,
+      bultos: preData.extras?.bultos ?? (preData.envases || 1),
       localidad: (modalidadResuelta==='flex' && preData.extras?.localidad) ? preData.extras.localidad : '',
       tipoEnvase: preData.extras?.tipoEnvase || ((preData.envases ?? 0) > 0 ? 'baldes' : 'bolsas')
     }));
@@ -2203,7 +2219,15 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
       const totalProd  = carrito.reduce((s,i) => s + Number(i.precio||0), 0);
       const totalEnv   = costoEnvases(envasesHeredados, tipoEnvHeredado);
       const totalAgr   = agregadosHeredados.reduce((s,a) => s + (parseFloat(a.precio)||0), 0);
+      // La entrega NO cambió respecto de la PRE → heredar el envío YA COBRADO tal cual,
+      // sin recalcular. PRE y DEF nunca pueden diferir en plata si no se editó nada.
+      const entregaSinCambios = pre.extras &&
+        !!extrasUsados.retiraLocal === !!pre.extras.retiraLocal &&
+        !!extrasUsados.esInterior === !!pre.extras.esInterior &&
+        (extrasUsados.localidad || '') === (pre.extras.localidad || '') &&
+        (extrasUsados.bultos || 1) === (pre.extras.bultos || 1);
       const totalEnvio = (extrasUsados.retiraLocal || extrasUsados.esInterior) ? 0
+        : (entregaSinCambios && typeof pre.totales?.envio === 'number') ? pre.totales.envio
         : typeof extrasUsados.envio === 'number' ? extrasUsados.envio
         : (zona ? zona.precio * (extrasUsados.bultos||1) : 0);
       const total      = totalProd + totalEnv + totalAgr + totalEnvio;

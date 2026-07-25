@@ -119,6 +119,26 @@ const FRAGANCIAS = [
   { label:'Limón',       icon:'🍋' }, { label:'Olor a Limpio',icon:'✨' },
 ];
 const PRECIO_ENVASE = 4000;
+// Envases: baldes (con cargo) y cajas (sin cargo) pueden CONVIVIR en un pedido.
+// Modelo nuevo: envases = cant. de baldes; extras.cajas = cant. de cajas.
+// Retrocompat: extras.tipoEnvase ('cajas'/'bolsas' de la versión anterior) y pedidos viejos sin nada.
+const desgloseEnvases = (env, ex) => {
+  if (typeof ex?.cajas === 'number') return { baldes: env ?? 0, cajas: ex.cajas };
+  const t = ex?.tipoEnvase;
+  if (t === 'cajas')  return { baldes: 0, cajas: env ?? 0 };
+  if (t === 'bolsas') return { baldes: 0, cajas: 0 };
+  return { baldes: env ?? 0, cajas: 0 };
+};
+const costoEnvases = (env, ex) => desgloseEnvases(env, ex).baldes * PRECIO_ENVASE;
+const minBultosDe = (env, ex) => { const d = desgloseEnvases(env, ex); return Math.max(1, d.baldes + d.cajas); };
+const lineasEnvasesWA = (env, ex) => {
+  const { baldes, cajas } = desgloseEnvases(env, ex);
+  const out = [];
+  if (baldes > 0) out.push(`• 🪣 Envases (${baldes}) — *${fmt(baldes*PRECIO_ENVASE)}*`);
+  if (cajas > 0)  out.push(`• 📦 En caja${cajas!==1?'s':''} sin cargo (${cajas})`);
+  if (baldes === 0 && cajas === 0) out.push(`• 🛍️ _Sin envase — se entrega en bolsas (sin cargo)_`);
+  return out;
+};
 const ZONAS_ENVIO = [
   { zona:'Moreno', color:'#ef4444', precio:4500, localidades:['MORENO','PASO DEL REY','CUARTEL V','FRANCISCO ALVAREZ','LA REJA','TRUJUI','BORDENAVE'] },
   { zona:'Cordón 1', color:'#fb923c', precio:5500, localidades:['JOSE C PAZ','JOSE C. PAZ','SAN MIGUEL','ITUZAINGO','ITUZAINGÓ','MERLO','MALVINAS ARGENTINAS'] },
@@ -313,8 +333,17 @@ const listLS = async () => {
   try { return Object.values(JSON.parse(localStorage.getItem('dom9_pedidos')||'{}')).sort((a,b)=>(b.ts||0)-(a.ts||0)); } catch { return []; }
 };
 const deleteLS = async (codigo) => {
+  // Devuelve true solo si el borrado quedó confirmado en la base de datos.
   try { const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}'); delete all[codigo]; localStorage.setItem('dom9_pedidos', JSON.stringify(all)); } catch{}
-  if (supaClient) { try { await supaClient.from('pedidos').delete().eq('codigo', codigo); } catch(e) { console.warn('Error al borrar pedido:', e); } }
+  if (!supaClient) return true; // modo local puro: no hay base contra la cual fallar
+  try {
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
+    const query = supaClient.from('pedidos').delete().eq('codigo', codigo).select('codigo');
+    const { data, error } = await Promise.race([query, timeout]);
+    if (error) { console.warn('Error al borrar pedido:', error); return false; }
+    if (!data || data.length === 0) { console.warn('El borrado no afectó ninguna fila en Supabase:', codigo); return false; }
+    return true;
+  } catch(e) { console.warn('Error al borrar pedido:', e); return false; }
 };
 // ── CLIENTES ─────────────────────────────────────────────────────────────────
 const CLIENTES_KEY = 'dom9_clientes';
@@ -463,6 +492,7 @@ const ItemLibre = ({ lista, setLista }) => {
 
 // Extras + Envío (compartido PRE y DEF)
 const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar, onVolver, labelBtn='Confirmar', modalidad=null }) => {
+  const minBultos = Math.max(1, envases + (extras.cajas || 0)); // nunca menos bultos que baldes+cajas
   const zonaEf = extras.envio || zona;
   // extras.envio puede ser un número (viene del mapa-flex: total ya calculado) o un objeto zona {zona, precio}
   const envioEsNumero = typeof extras.envio === 'number';
@@ -477,15 +507,58 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
       {/* Ítem libre — va primero */}
       <ItemLibre lista={extras.agregados} setLista={v=>setExtras({...extras,agregados:v})} />
 
-      {/* Envases */}
+      {/* Envases: baldes (con cargo) y cajas (sin cargo) — pueden convivir */}
       <div style={s.card}>
-        <div style={s.cTit}>🪣 Envases — $4.000 c/u</div>
-        <div style={{ display:'flex', alignItems:'center', gap:16 }}>
-          <button onClick={()=>{const n=Math.max(0,envases-1);setEnvases(n);if(modalidad!=='retiro'&&!extras.esInterior&&!extras.retiraLocal)setExtras({...extras,bultos:Math.max(1,n)});}} style={{ width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 }}>−</button>
-          <span style={{ fontSize:26, fontWeight:900, minWidth:44, textAlign:'center' }}>{envases}</span>
-          <button onClick={()=>{const n=envases+1;setEnvases(n);if(modalidad!=='retiro'&&!extras.esInterior&&!extras.retiraLocal)setExtras({...extras,bultos:n});}} style={{ width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 }}>+</button>
-          {envases>0 && <span style={{ color:C.na, fontWeight:800 }}>{fmt(envases*PRECIO_ENVASE)}</span>}
-        </div>
+        <div style={s.cTit}>📦 Envases del pedido</div>
+        {(() => {
+          const cajas = extras.cajas || 0;
+          const esFlex = modalidad!=='retiro' && !extras.esInterior && !extras.retiraLocal;
+          const btnStyle = { width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 };
+          const sinEnvase = !!extras.sinEnvase && envases===0 && cajas===0;
+          const setBaldes = (n) => { setEnvases(n); const nx = { ...extras, sinEnvase:false }; if (esFlex) nx.bultos = Math.max(1, n + cajas); setExtras(nx); };
+          const setCajas  = (m) => { const nx = { ...extras, cajas: m, sinEnvase:false }; if (esFlex) nx.bultos = Math.max(1, envases + m); setExtras(nx); };
+          const elegirSinEnvase = () => { setEnvases(0); const nx = { ...extras, cajas:0, sinEnvase:true }; if (esFlex) nx.bultos = 1; setExtras(nx); };
+          return (
+            <>
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,0.6)', fontWeight:700, marginBottom:8 }}>🪣 Baldes — $4.000 c/u (con cargo)</div>
+                <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+                  <button onClick={()=>setBaldes(Math.max(0,envases-1))} style={btnStyle}>−</button>
+                  <span style={{ fontSize:26, fontWeight:900, minWidth:44, textAlign:'center' }}>{envases}</span>
+                  <button onClick={()=>setBaldes(envases+1)} style={btnStyle}>+</button>
+                  {envases>0 && <span style={{ color:C.na, fontWeight:800 }}>{fmt(envases*PRECIO_ENVASE)}</span>}
+                </div>
+              </div>
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,0.6)', fontWeight:700, marginBottom:8 }}>📦 Cajas — sin cargo</div>
+                <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+                  <button onClick={()=>setCajas(Math.max(0,cajas-1))} style={btnStyle}>−</button>
+                  <span style={{ fontSize:26, fontWeight:900, minWidth:44, textAlign:'center' }}>{cajas}</span>
+                  <button onClick={()=>setCajas(cajas+1)} style={btnStyle}>+</button>
+                  {cajas>0 && <span style={{ color:'#4ade80', fontWeight:800 }}>Sin cargo</span>}
+                </div>
+              </div>
+              <button onClick={elegirSinEnvase} className="sel-btn" style={{
+                width:'100%', padding:'14px 16px', borderRadius:12, cursor:'pointer', fontFamily:'inherit',
+                fontWeight:800, fontSize:14, textAlign:'left', color:'#fff', letterSpacing:'0.3px',
+                background: sinEnvase ? 'linear-gradient(135deg,#f97316,#c2520a)' : 'rgba(249,115,22,0.10)',
+                border: sinEnvase ? '2px solid #fdba74' : '2px solid rgba(249,115,22,0.6)',
+                boxShadow: sinEnvase ? '0 4px 20px rgba(249,115,22,0.6)' : '0 0 14px rgba(249,115,22,0.25)',
+                transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease',
+              }}>
+                🛍️ SIN BALDES NI CAJAS {sinEnvase && '✓'}
+                <div style={{ fontSize:11.5, fontWeight:600, marginTop:3, color:'rgba(255,255,255,0.85)' }}>
+                  {sinEnvase ? 'Seleccionado — el pedido se entrega en bolsas, sin cargo' : 'El pedido se entrega en bolsas, sin cargo'}
+                </div>
+              </button>
+              {envases===0 && cajas===0 && !sinEnvase && (
+                <div style={{ marginTop:8, padding:'8px 12px', borderRadius:9, fontSize:11.5, fontWeight:700, background:'rgba(217,119,6,0.14)', border:'1px solid rgba(217,119,6,0.35)', color:'#fbbf24' }}>
+                  ⚠️ Elegí baldes, cajas o tocá SIN BALDES NI CAJAS.
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* Envío */}
@@ -567,9 +640,9 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
                     )}
                     {zonaEf && (
                       <div>
-                        <label style={s.lbl}>Cantidad de bultos</label>
+                        <label style={s.lbl}>Cantidad de bultos {minBultos>1 && <span style={{ fontSize:10, color:'rgba(255,255,255,0.45)', fontWeight:600 }}>(mínimo {minBultos}: baldes + cajas)</span>}</label>
                         <div style={{ display:'flex', alignItems:'center', gap:16, marginTop:4 }}>
-                          <button onClick={()=>setExtras({...extras,bultos:Math.max(1,extras.bultos-1)})} style={{ width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 }}>−</button>
+                          <button onClick={()=>setExtras({...extras,bultos:Math.max(minBultos,extras.bultos-1)})} style={{ width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 }}>−</button>
                           <span style={{ fontSize:26, fontWeight:900, minWidth:44, textAlign:'center' }}>{extras.bultos}</span>
                           <button onClick={()=>setExtras({...extras,bultos:extras.bultos+1})} style={{ width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 }}>+</button>
                           <span style={{ color:C.na, fontWeight:800 }}>{fmt(zonaEf.precio*extras.bultos)}</span>
@@ -607,8 +680,13 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
 const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial }) => {
   const [codigo, setCodigo]   = useState(preloaded?.codigo || null);
   const [items, setItems]     = useState(preloaded?.items || []);
-  const [envases, setEnvases] = useState(preloaded?.envases || 0);
-  const [extras, setExtras]   = useState(preloaded?.extras || { agregados:[], envio:null, bultos: preloaded?.envases || 1, esInterior:false, retiraLocal:false, localidad:'' });
+  const [envases, setEnvases] = useState(() => desgloseEnvases(preloaded?.envases || 0, preloaded?.extras).baldes);
+  const [extras, setExtras]   = useState(() => {
+    const d = desgloseEnvases(preloaded?.envases || 0, preloaded?.extras);
+    return preloaded?.extras
+      ? { ...preloaded.extras, cajas: d.cajas }
+      : { agregados:[], envio:null, bultos: Math.max(1, d.baldes + d.cajas), esInterior:false, retiraLocal:false, localidad:'', cajas:0 };
+  });
   const [paso, setPaso]       = useState('inicio');
   const [cur, setCur]         = useState({ tipo:null, cantidad:null, calidad:null });
   const [waMensaje, setWaMensaje] = useState('');
@@ -636,7 +714,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial }) => {
   }, []);
 
   const totalProd    = items.reduce((s,i)=>s+i.precio,0);
-  const totalEnvases = envases * PRECIO_ENVASE;
+  const totalEnvases = envases * PRECIO_ENVASE; // envases = baldes (las cajas no se cobran)
   const totalAgr     = extras.agregados.reduce((s,a)=>s+(parseFloat(a.precio)||0),0);
   const totalEnvio   = (extras.retiraLocal||extras.esInterior) ? 0
     : typeof extras.envio === 'number' ? extras.envio
@@ -644,8 +722,10 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial }) => {
   const total        = totalProd + totalEnvases + totalAgr + totalEnvio;
 
   const snap = useCallback(() => {
-    saveLS({ codigo, tipo:'PRE', items, envases, extras, modalidadPRE, total, ts:Date.now(), fecha:new Date().toLocaleString('es-AR') });
-  }, [codigo, items, envases, extras, modalidadPRE, total]);
+    saveLS({ codigo, tipo:'PRE', items, envases, extras, modalidadPRE, total,
+      totales:{ productos:totalProd, envases:totalEnvases, agregados:totalAgr, envio:totalEnvio, total },
+      ts:Date.now(), fecha:new Date().toLocaleString('es-AR') });
+  }, [codigo, items, envases, extras, modalidadPRE, total, totalProd, totalEnvases, totalAgr, totalEnvio]);
 
   // Auto-save: persiste la PRE en localStorage/Supabase cada vez que cambia algo relevante
   React.useEffect(() => {
@@ -680,7 +760,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial }) => {
       `📦 *Productos:*`,
       ...items.map(i=>`• ${i.nombre} — *${fmt(i.precio)}*`),
       ...extras.agregados.map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),
-      envases>0?`• Envases (${envases}) — *${fmt(totalEnvases)}*`:null,``,
+      ...lineasEnvasesWA(envases, extras),``,
       `📦 *MODALIDAD DE ENTREGA*`,
       (extras.retiraLocal||modalidadPRE==='retiro')?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:(extras.esInterior||modalidadPRE==='interior')?`🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`:typeof extras.envio==='number'&&extras.localidad?`🚚 *ENVÍO FLEX AMBA* — ${extras.localidad} — *${fmt(extras.envio)}*`:zona?`🚚 *ENVÍO FLEX AMBA* — ${extras.localidad} (${zona.zona}) · ${extras.bultos} bulto${extras.bultos!==1?'s':''} — *${fmt(totalEnvio)}*`:(extras.localidad||modalidadPRE==='flex')?`🚚 *ENVÍO FLEX AMBA*${extras.localidad?` — ${extras.localidad}`:''}`:null,``,
       `━━━━━━━━━━━━━━━━`,`💰 *TOTAL: ${fmt(total)}*`,`━━━━━━━━━━━━━━━━`,``,
@@ -1457,6 +1537,7 @@ function imprimirPedido(pedido, solo=null) {
   if (!pedido) return;
   try {
     const { codigo, fecha, cliente, items, envases:env, extras:ex, totales:tot, zonaEnvio } = pedido;
+    const { baldes: dBaldes, cajas: dCajas } = desgloseEnvases(env, ex); // conviven baldes (con cargo) y cajas (sin cargo)
     const esR = ex.retiraLocal; const esI = ex.esInterior;
     const bultos = ex.bultos || 1;
     const BULTO_WORDS = ['','UN BULTO','DOS BULTOS','TRES BULTOS','CUATRO BULTOS','CINCO BULTOS','SEIS BULTOS','SIETE BULTOS','OCHO BULTOS','NUEVE BULTOS','DIEZ BULTOS'];
@@ -1601,15 +1682,23 @@ function imprimirPedido(pedido, solo=null) {
       return rows;
     }).join('');
 
-    const precioEnvaseUnit = env>0 ? tot.envases/env : 0;
-    const envasesRowHtml = env>0?Array.from({length:env}).map((_,i)=>`${divRow}
+    const precioEnvaseUnit = dBaldes>0 ? tot.envases/dBaldes : 0;
+    const envasesRowHtml = [
+      ...(dBaldes>0 ? Array.from({length:dBaldes}).map((_,i)=>`${divRow}
       <tr>
-        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0d5c3a;font-weight:900;margin-right:6px;">▸</span><strong>ENVASE ${i+1} de ${env}</strong></td>
+        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0d5c3a;font-weight:900;margin-right:6px;">▸</span><strong>🪣 ENVASE ${i+1} de ${dBaldes}</strong></td>
         <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">${fmtDoc(precioEnvaseUnit)}</td>
-      </tr>`).join(''):`${divRow}
+      </tr>`) : []),
+      ...(dCajas>0 ? [`${divRow}
       <tr>
-        <td colspan="2" style="padding:8px 4px 2px;font-size:12px;color:#b45309;font-style:italic;">⚠️ EL CLIENTE ELIGIÓ NO LLEVAR ENVASES</td>
-      </tr>`;
+        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0284c7;font-weight:900;margin-right:6px;">▸</span><strong>📦 EN CAJAS SIN CARGO (${dCajas} CAJA${dCajas!==1?'S':''})</strong></td>
+        <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">SIN CARGO</td>
+      </tr>`] : []),
+      ...(dBaldes===0 && dCajas===0 ? [`${divRow}
+      <tr>
+        <td colspan="2" style="padding:8px 4px 2px;font-size:12px;color:#b45309;font-weight:800;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS (SIN CARGO)</td>
+      </tr>`] : []),
+    ].join('');
 
     const extrasRowsHtml = (ex.agregados||[]).length > 0 ? [
       `${divRow}<tr><td colspan="2" style="padding:8px 4px 2px;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;">Productos Extra</td></tr>`,
@@ -1645,7 +1734,7 @@ function imprimirPedido(pedido, solo=null) {
           ${cliente.provincia?`<div style="font-size:12px;color:#475569;margin-bottom:3px;"><span style="font-weight:700;">Provincia:</span> ${cliente.provincia}</div>`:''}
           ${cliente.cp?`<div style="font-size:12px;color:#475569;margin-bottom:3px;"><span style="font-weight:700;">CP:</span> ${cliente.cp}</div>`:''}
           ${cliente.datoExtra?`<div style="font-size:12px;color:#475569;margin-bottom:3px;"><span style="font-weight:700;">Dato extra:</span> ${cliente.datoExtra}</div>`:''}
-          ${cliente.observaciones?`<div style="font-size:12px;color:#92400e;margin-top:6px;padding:6px 8px;background:#fef3c7;border-radius:5px;"><span style="font-weight:700;">Observaciones:</span> ${cliente.observaciones}</div>`:''}
+          ${cliente.observaciones?`<div style="font-size:16px;font-weight:900;color:#78350f;margin-top:8px;padding:10px 12px;background:#fef3c7;border:3px solid #d97706;border-radius:8px;text-transform:uppercase;letter-spacing:0.3px;">⚠️ OBSERVACIONES: ${cliente.observaciones}</div>`:''}
         </div>
         <div style="flex:1;min-width:0;background:#f8fafc;border-radius:8px;padding:12px 14px;">
           <div style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;">Pedido</div>
@@ -1756,7 +1845,7 @@ function imprimirPedido(pedido, solo=null) {
         </div>`;
       }).join('')}
       ${(ex.agregados||[]).length>0?`<div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;margin:10px 0 5px;border-top:2px solid #e2e8f0;padding-top:8px;">⭐ Productos Extra</div>${ex.agregados.map(a=>`<div style="padding:8px 10px;border-left:4px solid #0d5c3a;background:#f8fafc;margin-bottom:7px;border-radius:4px;display:flex;justify-content:space-between;align-items:center;"><div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;">${a.nombre}</div><div style="font-size:13px;font-weight:700;color:#0d5c3a;">${fmtDoc(parseFloat(a.precio)||0)}</div></div>`).join('')}`:''}
-      ${env>0?`<div style="padding:8px 10px;border-left:4px solid #f97316;background:#fff7ed;margin-bottom:7px;border-radius:4px;font-weight:800;">🪣 Envases vacíos: ${env}</div>`:`<div style="padding:8px 10px;border-left:4px solid #b45309;background:#fefce8;margin-bottom:7px;border-radius:6px;font-size:12px;font-weight:700;color:#b45309;">⚠️ EL CLIENTE ELIGIÓ NO LLEVAR ENVASES</div>`}
+      ${dBaldes>0?`<div style="padding:8px 10px;border-left:4px solid #f97316;background:#fff7ed;margin-bottom:7px;border-radius:4px;font-weight:800;">🪣 Envases vacíos (baldes): ${dBaldes}</div>`:''}${dCajas>0?`<div style="padding:8px 10px;border-left:4px solid #0284c7;background:#e0f2fe;margin-bottom:7px;border-radius:4px;font-weight:800;">📦 EN CAJAS SIN CARGO: ${dCajas} caja${dCajas!==1?'s':''}</div>`:''}${dBaldes===0&&dCajas===0?`<div style="padding:8px 10px;border-left:4px solid #b45309;background:#fefce8;margin-bottom:7px;border-radius:6px;font-size:12px;font-weight:800;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:''}
       <div style="margin-top:10px;padding:8px 12px;background:#e0f2fe;border-left:4px solid #0284c7;border-radius:6px;font-size:11px;">
         <span style="font-weight:900;color:#0284c7;">📦 ENTREGA:</span>
         <span style="font-weight:700;margin-left:6px;">${esR?'RETIRA EN PLANTA':esI?'INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI':'ENVÍO FLEX AMBA — '+( cliente.localidad||ex.localidad||'')}</span>
@@ -1768,7 +1857,7 @@ function imprimirPedido(pedido, solo=null) {
       ${cliente.direccion?`<div style="font-size:11px;color:#475569;"><strong>Dirección:</strong> ${cliente.direccion}</div>`:''}
       ${cliente.localidad?`<div style="font-size:11px;color:#475569;"><strong>Localidad:</strong> ${cliente.localidad}</div>`:''}
       ${cliente.datoExtra?`<div style="margin-top:4px;font-size:11px;color:#475569;"><strong>Dato extra:</strong> ${cliente.datoExtra}</div>`:''}
-      ${cliente.observaciones?`<div style="margin-top:8px;padding:7px 10px;background:#fef3c7;border-left:4px solid #d97706;border-radius:6px;font-size:11px;"><strong>⚠️ OBSERVACIONES DEL CLIENTE:</strong> ${cliente.observaciones}</div>`:''}
+      ${cliente.observaciones?`<div style="margin-top:10px;padding:10px 12px;background:#fef3c7;border:3px solid #d97706;border-radius:8px;font-size:16px;font-weight:900;color:#78350f;text-transform:uppercase;">⚠️ OBSERVACIONES: ${cliente.observaciones}</div>`:''}
       <div style="margin-top:8px;padding:6px 10px;background:#fee2e2;border-radius:6px;font-size:11px;font-weight:700;">✋ VERIFICAR colores, fragancias y cantidades antes de embolsar.</div>
       <style>@media print{@page{size:A4 portrait;margin:20mm 35mm;}}</style></div>`;
 
@@ -1794,13 +1883,15 @@ function imprimirPedido(pedido, solo=null) {
         ${cliente.provincia?`<div style="margin-bottom:2px;"><span style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Provincia: </span><span style="font-size:12px;font-weight:700;">${cliente.provincia}</span></div>`:''}
         ${cliente.cp?`<div style="margin-bottom:2px;"><span style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;">CP: </span><span style="font-size:12px;font-weight:700;">${cliente.cp}</span></div>`:''}
         ${cliente.datoExtra?`<div style="margin-bottom:2px;"><span style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Dato extra: </span><span style="font-size:11px;">${cliente.datoExtra}</span></div>`:''}
-        ${cliente.observaciones?`<div style="margin-top:5px;padding:4px 8px;background:#fef3c7;border-radius:4px;font-size:10px;font-weight:700;border-left:3px solid #d97706;">⚠️ OBS: ${cliente.observaciones}</div>`:''}
+        ${cliente.observaciones?`<div style="margin-top:6px;padding:8px 10px;background:#fef3c7;border-radius:6px;font-size:14px;font-weight:900;border:3px solid #d97706;color:#78350f;text-transform:uppercase;">⚠️ OBSERVACIONES: ${cliente.observaciones}</div>`:''}
       </div>
       <div style="background:#0d5c3a;color:#fff;border-radius:6px;padding:10px 12px;text-align:center;margin:5mm 0 3mm;">
         <div style="font-size:22px;font-weight:900;letter-spacing:1px;">${bultoPalabra}</div>
       </div>
-      ${env===0?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #b45309;border-radius:6px;text-align:center;">
-        <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#b45309;line-height:1.5;">EL CLIENTE RETIRA EN PLANTA.<br/>EL PEDIDO SE ENTREGA SIN ENVASES POR ELECCIÓN DEL CLIENTE.</div>
+      ${dCajas>0?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #0284c7;border-radius:6px;text-align:center;">
+        <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#0284c7;line-height:1.5;">📦 EN CAJAS SIN CARGO: ${dCajas} CAJA${dCajas!==1?'S':''}${dBaldes>0?` + ${dBaldes} BALDE${dBaldes!==1?'S':''}`:''}</div>
+      </div>`:''}${dBaldes===0&&dCajas===0?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #b45309;border-radius:6px;text-align:center;">
+        <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#b45309;line-height:1.5;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS<br/>POR ELECCIÓN DEL CLIENTE.</div>
       </div>`:''}
       ${esR?`<div style="margin-top:4mm;border-top:2px dashed #0d5c3a;padding-top:4mm;">
         <div style="font-size:9px;font-weight:700;color:#0d5c3a;text-transform:uppercase;margin-bottom:2mm;">DNI: ${cliente.dni||'__________________'}</div>
@@ -1949,13 +2040,23 @@ function imprimirPedido(pedido, solo=null) {
           </div>
         </div>`).join('')}`:'';
 
-    const checkEnvasesHtml = env>0?`
+    const checkEnvasesHtml = [
+      dBaldes>0?`
       <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:6px;color:#f97316;">Envases (Baldes)</div>
-      ${Array.from({length:env}).map((_,i)=>`
+      ${Array.from({length:dBaldes}).map((_,i)=>`
         <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
           <div style="width:18px;height:18px;border:2px solid #f97316;border-radius:3px;flex-shrink:0;"></div>
-          <span>🪣 <strong>ENVASE ${i+1} de ${env}</strong></span>
-        </div>`).join('')}`:`\n      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:4px;color:#b45309;">⚠️ EL CLIENTE ELIGIÓ NO LLEVAR ENVASES</div>`;
+          <span>🪣 <strong>ENVASE ${i+1} de ${dBaldes}</strong></span>
+        </div>`).join('')}`:'',
+      dCajas>0?`
+      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:6px;color:#0284c7;">📦 Cajas (sin cargo)</div>
+      ${Array.from({length:dCajas}).map((_,i)=>`
+        <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
+          <div style="width:18px;height:18px;border:2px solid #0284c7;border-radius:3px;flex-shrink:0;"></div>
+          <span>📦 <strong>CAJA ${i+1} de ${dCajas}</strong> — SIN CARGO</span>
+        </div>`).join('')}`:'',
+      (dBaldes===0&&dCajas===0)?`\n      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:4px;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:'',
+    ].join('');
 
     const tipoEnvioCheck = esR ? 'RETIRA EN PLANTA' : esI ? 'INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI' : `ENVÍO FLEX AMBA — ${cliente.localidad||ex.localidad||''}`;
     const htmlCheck = `<div style="padding:14px;font-family:Arial;font-size:12px;color:#1e293b;max-width:800px;">
@@ -1975,7 +2076,7 @@ function imprimirPedido(pedido, solo=null) {
         ${cliente.cp?`<div style="font-size:11px;color:#475569;margin-bottom:2px;"><strong>CP:</strong> ${cliente.cp}</div>`:''}
         ${cliente.datoExtra?`<div style="font-size:11px;color:#475569;margin-bottom:2px;"><strong>Dato extra:</strong> ${cliente.datoExtra}</div>`:''}
         <div style="margin-top:6px;padding:4px 8px;background:#e0f2fe;border-radius:5px;font-size:11px;font-weight:700;color:#0284c7;">📦 ${tipoEnvioCheck}</div>
-        ${cliente.observaciones?`<div style="margin-top:4px;padding:4px 8px;background:#fef3c7;border-radius:5px;font-size:11px;font-weight:700;color:#92400e;">⚠️ OBS: ${cliente.observaciones}</div>`:''}
+        ${cliente.observaciones?`<div style="margin-top:6px;padding:8px 10px;background:#fef3c7;border-radius:6px;font-size:15px;font-weight:900;color:#78350f;border:3px solid #d97706;text-transform:uppercase;">⚠️ OBSERVACIONES: ${cliente.observaciones}</div>`:''}
       </div>
       ${checkItemsHtml}
       ${checkExtrasHtml}
@@ -2049,8 +2150,9 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
       retiraLocal: prev.retiraLocal || modalidadResuelta==='retiro' || !!preData.extras?.retiraLocal,
       agregados: (preData.extras?.agregados || []).length > 0 ? preData.extras.agregados : prev.agregados,
       envio: (modalidadResuelta==='flex' && typeof preData.extras?.envio==='number') ? preData.extras.envio : null,
-      bultos: preData.envases || 1,
-      localidad: (modalidadResuelta==='flex' && preData.extras?.localidad) ? preData.extras.localidad : ''
+      bultos: preData.extras?.bultos ?? (preData.envases || 1),
+      localidad: (modalidadResuelta==='flex' && preData.extras?.localidad) ? preData.extras.localidad : '',
+      cajas: desgloseEnvases(preData.envases ?? 0, preData.extras).cajas
     }));
     if (!modalidadEntrega && modalidadResuelta) {
       setModalidadEntrega(modalidadResuelta==='retiro' ? 'local' : 'envio');
@@ -2066,6 +2168,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
     agregados:[],
     envio: null,
     bultos: 1,
+    cajas: 0,
     esInterior: modalidadPreload==='interior',
     retiraLocal: modalidadPreload==='retiro',
     localidad: ''
@@ -2130,14 +2233,22 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
     try {
       const zona = detectarZona(extrasUsados.localidad || cliente.localidad);
       const pre = preData || {};
-      const envasesHeredados = pre.envases ?? 0;
+      const dEnv = desgloseEnvases(pre.envases ?? 0, pre.extras); // {baldes, cajas} heredados de la PRE
       const agregadosHeredados = (extras.agregados && extras.agregados.length > 0)
         ? extras.agregados
         : (pre.extras?.agregados ?? []);
       const totalProd  = carrito.reduce((s,i) => s + Number(i.precio||0), 0);
-      const totalEnv   = envasesHeredados * PRECIO_ENVASE;
+      const totalEnv   = dEnv.baldes * PRECIO_ENVASE; // solo los baldes se cobran; cajas sin cargo
       const totalAgr   = agregadosHeredados.reduce((s,a) => s + (parseFloat(a.precio)||0), 0);
+      // La entrega NO cambió respecto de la PRE → heredar el envío YA COBRADO tal cual,
+      // sin recalcular. PRE y DEF nunca pueden diferir en plata si no se editó nada.
+      const entregaSinCambios = pre.extras &&
+        !!extrasUsados.retiraLocal === !!pre.extras.retiraLocal &&
+        !!extrasUsados.esInterior === !!pre.extras.esInterior &&
+        (extrasUsados.localidad || '') === (pre.extras.localidad || '') &&
+        (extrasUsados.bultos || 1) === (pre.extras.bultos || 1);
       const totalEnvio = (extrasUsados.retiraLocal || extrasUsados.esInterior) ? 0
+        : (entregaSinCambios && typeof pre.totales?.envio === 'number') ? pre.totales.envio
         : typeof extrasUsados.envio === 'number' ? extrasUsados.envio
         : (zona ? zona.precio * (extrasUsados.bultos||1) : 0);
       const total      = totalProd + totalEnv + totalAgr + totalEnvio;
@@ -2153,8 +2264,8 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
         fecha: pedidoFinal ? pedidoFinal.fecha : new Date().toLocaleString('es-AR'),
         ts: pedidoFinal ? pedidoFinal.ts : Date.now(),
         cliente, items:carrito,
-        envases:envasesHeredados,
-        extras:{ ...extrasUsados, agregados:agregadosHeredados },
+        envases:dEnv.baldes,
+        extras:{ ...extrasUsados, agregados:agregadosHeredados, cajas:dEnv.cajas },
         totales:{ productos:totalProd, envases:totalEnv, agregados:totalAgr, envio:totalEnvio, total },
         zonaEnvio:zona, estado: pedidoFinal ? pedidoFinal.estado : 'pendiente',
         creadoPor: pedidoFinal ? pedidoFinal.creadoPor : (usuarioActual?.email || null)
@@ -2350,7 +2461,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
 
                     {/* 11. Observaciones — siempre al final */}
                     <div><label style={s.lbl}>Observaciones</label>
-                      <textarea value={cliente.observaciones} onChange={e=>setCliente({...cliente,observaciones:e.target.value})} style={{...s.inp,minHeight:70,resize:'vertical'}} placeholder="Notas especiales del pedido..." /></div>
+                      <textarea value={cliente.observaciones} onChange={e=>setCliente({...cliente,observaciones:e.target.value.toUpperCase()})} style={{...s.inp,minHeight:70,resize:'vertical',textTransform:'uppercase',fontWeight:700}} placeholder="NOTAS ESPECIALES DEL PEDIDO..." /></div>
 
                   </div>
                 );
@@ -2401,7 +2512,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
               <div style={{ marginBottom:20 }}>
                 <label style={{ fontSize:12, fontWeight:700, color:'rgba(255,255,255,0.7)', display:'block', marginBottom:6 }}>Cantidad de bultos</label>
                 <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                  <button onClick={()=>setExtras(e=>({...e,bultos:Math.max(1,e.bultos-1)}))} style={{ width:36, height:36, borderRadius:8, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>−</button>
+                  <button onClick={()=>setExtras(e=>{ const d=desgloseEnvases(preData?.envases ?? 0, preData?.extras); return {...e, bultos:Math.max(Math.max(1, d.baldes+d.cajas), (e.bultos||1)-1)}; })} style={{ width:36, height:36, borderRadius:8, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>−</button>
                   <span style={{ fontSize:22, fontWeight:900, minWidth:30, textAlign:'center' }}>{extras.bultos || 1}</span>
                   <button onClick={()=>setExtras(e=>({...e,bultos:(e.bultos||1)+1}))} style={{ width:36, height:36, borderRadius:8, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>+</button>
                   <span style={{ fontSize:12, color:'rgba(255,255,255,0.45)' }}>bulto{(extras.bultos||1)!==1?'s':''}</span>
@@ -2537,14 +2648,14 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
               cl.cp ? `📮 CP: ${cl.cp}` : null,
               cl.ciudad ? `🏙️ Ciudad: ${cl.ciudad}` : null,
               cl.provincia ? `🗺️ Provincia: ${cl.provincia}` : null,
-              cl.observaciones ? `📝 *Observaciones:* ${cl.observaciones}` : null,
+              cl.observaciones ? `⚠️ *OBSERVACIONES: ${cl.observaciones.toUpperCase()}*` : null,
               ``,
               `━━━━━━━━━━━━━━━━`,
               `🛒 *PRODUCTOS Y DETALLE*`,
               `━━━━━━━━━━━━━━━━`,
               ...lineasProductos,
               ...(ex.agregados||[]).map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),
-              env>0 ? `• Envases (${env}) — *${fmt(tot.envases)}*` : `⚠️ _Sin envases (cliente no lleva)_`,
+              ...lineasEnvasesWA(env, ex),
               ``,
               `━━━━━━━━━━━━━━━━`,
               `📦 *MODALIDAD DE ENTREGA*`,
@@ -2738,11 +2849,11 @@ _Doméstico · Moreno, Bs. As._`
     cl.ciudad?`🏙️ Ciudad: ${cl.ciudad}`:null,
     cl.provincia?`🗺️ Provincia: ${cl.provincia}`:null,
     cl.datoExtra?`ℹ️ Dato extra: ${cl.datoExtra}`:null,
-    cl.observaciones?`📝 *Observaciones:* ${cl.observaciones}`:null,
+    cl.observaciones?`⚠️ *OBSERVACIONES: ${cl.observaciones.toUpperCase()}*`:null,
     ``,`━━━━━━━━━━━━━━━━`,`🛒 *PRODUCTOS Y DETALLE*`,`━━━━━━━━━━━━━━━━`,
     ...lineasProductos,
     ...(ex.agregados||[]).map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),
-    env>0?`• Envases (${env}) — *${fmt(tot.envases)}*`:`⚠️ _Sin envases (cliente no lleva)_`,
+    ...lineasEnvasesWA(env, ex),
     ``,`━━━━━━━━━━━━━━━━`,`📦 *MODALIDAD DE ENTREGA*`,
     ex.retiraLocal?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:
       ex.esInterior?`🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`:
@@ -2804,7 +2915,7 @@ _Doméstico · Moreno, Bs. As._`
             {[{k:'nombre',l:'Nombre'},{k:'dni',l:'DNI'},{k:'telefono',l:'Teléfono'},{k:'email',l:'Email'},{k:'direccion',l:'Dirección'},{k:'localidad',l:'Localidad'},{k:'ciudad',l:'Ciudad'},{k:'provincia',l:'Provincia'},{k:'cp',l:'CP'},{k:'observaciones',l:'Observaciones'}].map(f=>(
               <div key={f.k}>
                 <label style={{ fontSize:11, color:'rgba(255,255,255,0.45)', display:'block', marginBottom:2 }}>{f.l}</label>
-                <input value={cl[f.k]||''} onChange={e=>setCl(prev=>({...prev,[f.k]:e.target.value}))} style={{ width:'100%', padding:'8px 10px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.35)', borderRadius:8, color:'#fff', fontSize:13, boxSizing:'border-box' }} />
+                <input value={cl[f.k]||''} onChange={e=>setCl(prev=>({...prev,[f.k]: f.k==='observaciones' ? e.target.value.toUpperCase() : e.target.value}))} style={{ width:'100%', padding:'8px 10px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.35)', borderRadius:8, color:'#fff', fontSize:13, boxSizing:'border-box', ...(f.k==='observaciones' ? { textTransform:'uppercase', fontWeight:700 } : {}) }} />
               </div>
             ))}
           </div>
@@ -2821,8 +2932,9 @@ _Doméstico · Moreno, Bs. As._`
           </div>
         ))}
         {(ex.agregados||[]).map((a,i) => <div key={i} style={{ fontSize:13 }}>• {a.nombre} — <span style={{ color:'#f97316' }}>{fmt(a.precio)}</span></div>)}
-        {env>0 && <div style={{ fontSize:13, marginBottom:4 }}>📦 Envases ({env}) — <span style={{ color:'#f97316' }}>{fmt(tot.envases)}</span></div>}
-        {env===0 && <div style={{ fontSize:12, color:'rgba(255,200,0,0.7)' }}>⚠️ Sin envases</div>}
+        {desgloseEnvases(env,ex).baldes>0 && <div style={{ fontSize:13, marginBottom:4 }}>🪣 Envases ({desgloseEnvases(env,ex).baldes}) — <span style={{ color:'#f97316' }}>{fmt(tot.envases)}</span></div>}
+        {desgloseEnvases(env,ex).cajas>0 && <div style={{ fontSize:13, marginBottom:4 }}>📦 En cajas sin cargo ({desgloseEnvases(env,ex).cajas})</div>}
+        {desgloseEnvases(env,ex).baldes===0 && desgloseEnvases(env,ex).cajas===0 && <div style={{ fontSize:12, color:'rgba(255,200,0,0.7)' }}>🛍️ Sin envase — se entrega en bolsas</div>}
       </div>
 
       {/* Entrega */}
@@ -3141,7 +3253,7 @@ const ModuloClientes = ({ onNuevoPedido, onVolver, onAbrirPedido }) => {
         {[{k:'nombre',l:'Nombre completo *',t:'text'},{k:'telefono',l:'Teléfono / WhatsApp *',t:'tel'},{k:'email',l:'Email',t:'email'},{k:'direccion',l:'Dirección',t:'text'},{k:'localidad',l:'Localidad',t:'text'},{k:'cp',l:'Código Postal',t:'text'}].map(f=>(
           <div key={f.k}><label style={s.lbl}>{f.l}</label><input type={f.t} value={formCli[f.k]} onChange={e=>setFormCli({...formCli,[f.k]:f.t==='email'?e.target.value:e.target.value.toUpperCase()})} style={s.inp} placeholder={f.l.replace(' *','')} /></div>
         ))}
-        <div><label style={s.lbl}>Observaciones</label><textarea value={formCli.observaciones} onChange={e=>setFormCli({...formCli,observaciones:e.target.value})} style={{...s.inp,minHeight:70,resize:'vertical'}} placeholder="Notas sobre el cliente..." /></div>
+        <div><label style={s.lbl}>Observaciones</label><textarea value={formCli.observaciones} onChange={e=>setFormCli({...formCli,observaciones:e.target.value.toUpperCase()})} style={{...s.inp,minHeight:70,resize:'vertical',textTransform:'uppercase',fontWeight:700}} placeholder="NOTAS SOBRE EL CLIENTE..." /></div>
       </div>
       <button onClick={guardarNuevo} disabled={!formCli.nombre||!formCli.telefono} style={{...s.bP, opacity:(!formCli.nombre||!formCli.telefono)?0.45:1, cursor:(!formCli.nombre||!formCli.telefono)?'not-allowed':'pointer'}}>
         ✓ Guardar cliente
@@ -3404,6 +3516,8 @@ const ROLES_LIQ = [
   { key:'total',      label:'VENTAS TOTALES', email:null,             icon:'📊',   color:'linear-gradient(145deg,#d97706,#b45309)', glow:'rgba(217,119,6,0.55)' },
 ];
 const MESES_NOMBRE = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const DIAS_SEMANA_NOMBRE = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
+const fmtDiaLargo = (ts) => { const { y, m, day } = arParts(ts); const dw = new Date(Date.UTC(y, m, day)).getUTCDay(); return `${DIAS_SEMANA_NOMBRE[dw]} ${day} DE ${MESES_NOMBRE[m].toUpperCase()} DE ${y}`; };
 
 function ModuloLiquidaciones({ onVolver }) {
   const [stack, setStack] = React.useState(['rol']);
@@ -3422,9 +3536,23 @@ function ModuloLiquidaciones({ onVolver }) {
   const [expandidos, setExpandidos]       = React.useState(new Set());
   const [confirmarBorrar, setConfirmarBorrar] = React.useState(null);
   const [borrados, setBorrados]           = React.useState(new Set());
+  const [errorBorrado, setErrorBorrado]   = React.useState(null);
+  const [borrandoCodigo, setBorrandoCodigo] = React.useState(null);
   // Hover / active en botones de rol
   const [hovBtn, setHovBtn]     = React.useState(null);
   const [activeBtn, setActiveBtn] = React.useState(null);
+  // Guardias táctiles: en iOS el scale() durante el touch cancela el click nativo,
+  // así que la acción se dispara en touchend y se suprime el click fantasma posterior.
+  const touchMoved = React.useRef(false);
+  const lastTouchTs = React.useRef(0);
+  const tapRol = (key) => {
+    if (Date.now() - lastTouchTs.current < 700) return; // click fantasma post-touch
+    elegirRol(key);
+  };
+  const touchEndRol = (key) => {
+    setActiveBtn(null);
+    if (!touchMoved.current) { lastTouchTs.current = Date.now(); elegirRol(key); }
+  };
 
   const irA = (nuevoStep) => { setStack(prev => [...prev.slice(0, pos+1), nuevoStep]); setPos(p => p+1); };
   const atras = () => setPos(p => Math.max(0, p-1));
@@ -3451,10 +3579,10 @@ function ModuloLiquidaciones({ onVolver }) {
   const mesesDisponibles = React.useMemo(() => {
     const { y, m } = arParts(Date.now());
     const out = [];
-    for (let i = 1; i <= 12; i++) {
+    for (let i = 0; i <= 12; i++) {
       let mm = m - i, yy = y;
       while (mm < 0) { mm += 12; yy -= 1; }
-      out.push({ y: yy, m: mm, label: `${MESES_NOMBRE[mm]} ${yy}` });
+      out.push({ y: yy, m: mm, label: `${MESES_NOMBRE[mm]} ${yy}${i === 0 ? ' (en curso)' : ''}` });
     }
     return out;
   }, []);
@@ -3465,6 +3593,7 @@ function ModuloLiquidaciones({ onVolver }) {
       setPedidosData(null);
       setExpandidos(new Set());
       setConfirmarBorrar(null);
+      setErrorBorrado(null);
       listLS().then(arr => { setPedidosData(Array.isArray(arr) ? arr : []); setCargando(false); });
     }
   }, [step]);
@@ -3513,7 +3642,7 @@ function ModuloLiquidaciones({ onVolver }) {
         const vendedorInfo = ROLES_LIQ.find(r => r.email && r.email.toLowerCase() === emailCreador);
         const vendedor = vendedorInfo ? vendedorInfo.label : 'Sin datos';
         const hora = p.ts ? (() => { const d = new Date(p.ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })() : '--:--';
-        return { codigo: p.codigo, comprador, modalidad, transferido, neto, envioFlex, comision, vendedor, hora, fecha: fmtFechaDDMMAAAA(p.ts) };
+        return { codigo: p.codigo, comprador, modalidad, transferido, neto, envioFlex, comision, vendedor, hora, fecha: fmtFechaDDMMAAAA(p.ts), ts: p.ts };
       });
   }, [pedidosData, rango, rolInfo, esTotal, emailsRolesConocidos, borrados]);
 
@@ -3526,10 +3655,60 @@ function ModuloLiquidaciones({ onVolver }) {
 
   const fmtM = v => '$' + Math.round(v || 0).toLocaleString('es-AR');
 
+  // ── Resumen con métricas (solo para cierre mensual) ──
+  const resumen = React.useMemo(() => {
+    if (tipo !== 'cierre' || !pedidosData || !rango || !rolInfo || filas.length === 0) return null;
+    const claveCliente = c => { const tel = (c?.telefono || '').replace(/\D/g, ''); if (tel) return 'T' + tel; const n = (c?.nombre || '').trim().toLowerCase(); return n ? 'N' + n : null; };
+    const pasaRol = p => { const email = (p.creadoPor || '').trim().toLowerCase(); return esTotal ? emailsRolesConocidos.includes(email) : email === rolInfo.email.toLowerCase(); };
+    const defsTodos = pedidosData.filter(p => p.tipo === 'DEF' && typeof p.ts === 'number' && !borrados.has(p.codigo) && pasaRol(p));
+    // Clientes nuevos: su PRIMERA compra DEF de la historia cae dentro del período
+    const primeraCompra = {};
+    defsTodos.forEach(p => { const k = claveCliente(p.cliente); if (!k) return; if (!(k in primeraCompra) || p.ts < primeraCompra[k].ts) primeraCompra[k] = p; });
+    const nuevos = Object.values(primeraCompra).filter(p => p.ts >= rango.desde && p.ts <= rango.hasta);
+    const clientesNuevos = nuevos.map(p => p.cliente?.nombre || p.cliente?.telefono || 'Sin datos').sort();
+    // Clientes que repitieron compra dentro del período
+    const enPeriodo = defsTodos.filter(p => p.ts >= rango.desde && p.ts <= rango.hasta);
+    const comprasCli = {};
+    enPeriodo.forEach(p => { const k = claveCliente(p.cliente); if (k) comprasCli[k] = (comprasCli[k] || 0) + 1; });
+    const clientesUnicos = Object.keys(comprasCli).length;
+    const repetidores = Object.values(comprasCli).filter(n => n > 1).length;
+    // Agrupado por día
+    const porDia = {};
+    filas.forEach(f => {
+      const key = fmtFechaDDMMAAAA(f.ts);
+      if (!porDia[key]) porDia[key] = { ts: f.ts, importe: 0, cant: 0, porVend: {} };
+      porDia[key].importe += f.transferido; porDia[key].cant += 1;
+      porDia[key].porVend[f.vendedor] = (porDia[key].porVend[f.vendedor] || 0) + f.transferido;
+    });
+    const rankVend = d => Object.entries(d.porVend).sort((a, b) => b[1] - a[1]).map(([v, imp]) => ({ v, imp }));
+    const dias = Object.values(porDia).sort((a, b) => a.ts - b.ts).map(d => ({ ...d, vendedores: rankVend(d) }));
+    const diaTopImporte  = [...dias].sort((a, b) => b.importe - a.importe)[0];
+    const diaTopCantidad = [...dias].sort((a, b) => b.cant - a.cant || b.importe - a.importe)[0];
+    // Modalidades
+    const porModalidad = {};
+    filas.forEach(f => { if (!porModalidad[f.modalidad]) porModalidad[f.modalidad] = { cant: 0, importe: 0 }; porModalidad[f.modalidad].cant += 1; porModalidad[f.modalidad].importe += f.transferido; });
+    // Por vendedor
+    const porVendedor = {};
+    filas.forEach(f => { if (!porVendedor[f.vendedor]) porVendedor[f.vendedor] = { cant: 0, importe: 0, comision: 0 }; porVendedor[f.vendedor].cant += 1; porVendedor[f.vendedor].importe += f.transferido; porVendedor[f.vendedor].comision += f.comision; });
+    // Venta más grande y ticket promedio
+    const ventaMayor = [...filas].sort((a, b) => b.transferido - a.transferido)[0];
+    const ticketPromedio = totales.transferido / filas.length;
+    return { clientesNuevos, clientesUnicos, repetidores, dias, diaTopImporte, diaTopCantidad, porModalidad, porVendedor, ventaMayor, ticketPromedio };
+  }, [tipo, pedidosData, rango, rolInfo, esTotal, emailsRolesConocidos, filas, totales, borrados]);
+
   const borrarFila = async (codigo) => {
     setConfirmarBorrar(null);
-    setBorrados(prev => new Set([...prev, codigo]));
-    await deleteLS(codigo);
+    setErrorBorrado(null);
+    setBorrandoCodigo(codigo);
+    const ok = await deleteLS(codigo);
+    setBorrandoCodigo(null);
+    if (ok) {
+      // Confirmado en la base: recién ahora desaparece de la lista
+      setBorrados(prev => new Set([...prev, codigo]));
+    } else {
+      // Falló el borrado en la base: la fila se queda y avisamos
+      setErrorBorrado(codigo);
+    }
   };
 
   const getRolBtnStyle = (r, isWide) => ({
@@ -3568,13 +3747,14 @@ function ModuloLiquidaciones({ onVolver }) {
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:12 }}>
             {ROLES_LIQ.filter(r => r.key !== 'total').map(r => (
               <button key={r.key}
-                onClick={() => elegirRol(r.key)}
+                onClick={() => tapRol(r.key)}
                 onMouseEnter={() => setHovBtn(r.key)}
                 onMouseLeave={() => { setHovBtn(null); setActiveBtn(null); }}
                 onMouseDown={() => setActiveBtn(r.key)}
                 onMouseUp={() => setActiveBtn(null)}
-                onTouchStart={() => setActiveBtn(r.key)}
-                onTouchEnd={() => { setActiveBtn(null); }}
+                onTouchStart={() => { touchMoved.current = false; setActiveBtn(r.key); }}
+                onTouchMove={() => { touchMoved.current = true; }}
+                onTouchEnd={() => touchEndRol(r.key)}
                 style={getRolBtnStyle(r, false)}>
                 <span style={{ fontSize:34, lineHeight:1 }}>{r.icon}</span>
                 <span style={{ textAlign:'center', lineHeight:1.2 }}>{r.label}</span>
@@ -3584,13 +3764,14 @@ function ModuloLiquidaciones({ onVolver }) {
           {/* Botón ancho: Ventas Totales */}
           {ROLES_LIQ.filter(r => r.key === 'total').map(r => (
             <button key={r.key}
-              onClick={() => elegirRol(r.key)}
+              onClick={() => tapRol(r.key)}
               onMouseEnter={() => setHovBtn(r.key)}
               onMouseLeave={() => { setHovBtn(null); setActiveBtn(null); }}
               onMouseDown={() => setActiveBtn(r.key)}
               onMouseUp={() => setActiveBtn(null)}
-              onTouchStart={() => setActiveBtn(r.key)}
-              onTouchEnd={() => { setActiveBtn(null); }}
+              onTouchStart={() => { touchMoved.current = false; setActiveBtn(r.key); }}
+              onTouchMove={() => { touchMoved.current = true; }}
+              onTouchEnd={() => touchEndRol(r.key)}
               style={getRolBtnStyle(r, true)}>
               <span style={{ fontSize:30, lineHeight:1 }}>{r.icon}</span>
               <span>{r.label}</span>
@@ -3655,6 +3836,18 @@ function ModuloLiquidaciones({ onVolver }) {
             </div>
           </div>
 
+          {errorBorrado && (
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, padding:'12px 14px', background:'rgba(220,38,38,0.12)', border:'1px solid rgba(220,38,38,0.4)', borderRadius:10 }}>
+              <div style={{ flex:1, fontSize:13, fontWeight:700, color:'#fca5a5', lineHeight:1.4 }}>
+                ⚠️ No se pudo borrar el pedido <span style={{ fontFamily:'monospace' }}>{errorBorrado}</span> de la base de datos. Verificá tu conexión y volvé a intentar.
+              </div>
+              <button onClick={() => borrarFila(errorBorrado)}
+                style={{ padding:'7px 13px', background:'#dc2626', color:'#fff', border:'none', borderRadius:7, fontWeight:800, fontSize:12, cursor:'pointer', flexShrink:0 }}>Reintentar</button>
+              <button onClick={() => setErrorBorrado(null)}
+                style={{ padding:'7px 10px', background:'rgba(255,255,255,0.08)', color:'#ccc', border:'1px solid rgba(255,255,255,0.15)', borderRadius:7, fontSize:12, cursor:'pointer', flexShrink:0 }}>✗</button>
+            </div>
+          )}
+
           {cargando && <div style={{ padding:'40px 0', textAlign:'center', color:'rgba(255,255,255,0.5)' }}>⏳ Cargando ventas...</div>}
 
           {!cargando && filas.length === 0 && (
@@ -3688,8 +3881,10 @@ function ModuloLiquidaciones({ onVolver }) {
                         <div style={{ fontSize:15, fontWeight:800, color:'#4ade80', marginRight:6, flexShrink:0, whiteSpace:'nowrap' }}>{fmtM(f.transferido)}</div>
                         <div style={{ fontSize:10, color:'rgba(255,255,255,0.22)', marginRight:6, flexShrink:0, display:'inline-block', transition:'transform 0.18s', transform:exp?'rotate(180deg)':'none' }}>▼</div>
                         {/* Botón borrar */}
-                        <div onClick={e => { e.stopPropagation(); setConfirmarBorrar(confirmando ? null : f.codigo); }} style={{ flexShrink:0 }}>
-                          {confirmando ? (
+                        <div onClick={e => { e.stopPropagation(); if (borrandoCodigo) return; setConfirmarBorrar(confirmando ? null : f.codigo); }} style={{ flexShrink:0 }}>
+                          {borrandoCodigo === f.codigo ? (
+                            <span style={{ padding:'5px 9px', fontSize:13 }}>⏳</span>
+                          ) : confirmando ? (
                             <div style={{ display:'flex', gap:5 }}>
                               <button onClick={e => { e.stopPropagation(); borrarFila(f.codigo); }}
                                 style={{ padding:'5px 9px', background:'#dc2626', color:'#fff', border:'none', borderRadius:6, fontWeight:800, fontSize:11, cursor:'pointer' }}>✓ Sí</button>
@@ -3770,6 +3965,7 @@ function ModuloLiquidaciones({ onVolver }) {
           filas={filas}
           totales={totales}
           mostrarVendedor={esTotal}
+          resumen={resumen}
           onCerrar={() => atras()}
         />
       )}
@@ -3777,9 +3973,35 @@ function ModuloLiquidaciones({ onVolver }) {
   );
 }
 
+// Barra horizontal simple para los gráficos del informe (imprimible, sin librerías)
+function BarraInforme({ label, valor, max, color, texto }) {
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+      <div style={{ width:78, fontSize:10, fontWeight:700, color:'#475569', textAlign:'right', flexShrink:0, whiteSpace:'nowrap' }}>{label}</div>
+      <div style={{ flex:1, background:'#f1f5f9', borderRadius:4, height:16, overflow:'hidden' }}>
+        <div style={{ width:`${max ? Math.max(2, (valor / max) * 100) : 0}%`, background:color, height:'100%', borderRadius:4 }} />
+      </div>
+      <div style={{ width:92, fontSize:10, fontWeight:800, color:'#0f172a', flexShrink:0, whiteSpace:'nowrap' }}>{texto}</div>
+    </div>
+  );
+}
+
+// Tarjeta de métrica del resumen mensual
+function CardMetrica({ titulo, children, destacada }) {
+  return (
+    <div style={{ background: destacada ? 'linear-gradient(135deg,#f0f9ff,#e0f2fe)' : '#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px' }}>
+      <div style={{ fontSize:10, fontWeight:800, color:'#0369a1', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:6 }}>{titulo}</div>
+      {children}
+    </div>
+  );
+}
+
 // Tabla imprimible del informe de liquidación
-function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrarVendedor, onCerrar }) {
+function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrarVendedor, resumen, onCerrar }) {
   const fmtM = v => '$' + Math.round(v || 0).toLocaleString('es-AR');
+  const maxImporteDia = resumen ? Math.max(...resumen.dias.map(d => d.importe)) : 0;
+  const vendColores = { 'VENDEDOR':'#16a34a', 'NEGOCIO':'#0284c7', 'ADMINISTRADOR':'#7c3aed', 'Sin datos':'#94a3b8' };
+  const modColores  = { 'LOCAL':'#22c55e', 'FLEX':'#fb923c', 'INTERIOR':'#818cf8' };
   return (
     <div>
       <div className="no-print" style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
@@ -3792,6 +4014,88 @@ function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrar
           <div style={{ fontSize:12, fontWeight:800, color:'#0369a1', textTransform:'uppercase', letterSpacing:'1px' }}>Liquidación · {rolLabel}</div>
           <div style={{ fontSize:18, fontWeight:900 }}>{etiquetaPeriodo}</div>
         </div>
+
+        {/* ── RESUMEN DEL MES (solo cierre mensual) ── */}
+        {resumen && (
+          <div style={{ marginBottom:20 }}>
+            <div style={{ fontSize:13, fontWeight:900, color:'#0f172a', textTransform:'uppercase', letterSpacing:'0.5px', borderBottom:'2px solid #0369a1', paddingBottom:6, marginBottom:12 }}>
+              📊 Resumen del mes
+            </div>
+
+            {/* Tarjetas de métricas */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(230px, 1fr))', gap:10, marginBottom:14 }}>
+              <CardMetrica titulo="🏆 Día con más facturación" destacada>
+                <div style={{ fontSize:13, fontWeight:900, color:'#0f172a' }}>{fmtDiaLargo(resumen.diaTopImporte.ts)}</div>
+                <div style={{ fontSize:20, fontWeight:900, color:'#16a34a', margin:'2px 0' }}>{fmtM(resumen.diaTopImporte.importe)}</div>
+                <div style={{ fontSize:11, color:'#475569' }}>{resumen.diaTopImporte.cant} venta{resumen.diaTopImporte.cant!==1?'s':''} · {resumen.diaTopImporte.vendedores.map(x => `${x.v}: ${fmtM(x.imp)}`).join(' · ')}</div>
+              </CardMetrica>
+              <CardMetrica titulo="🥇 Día con más cantidad de ventas" destacada>
+                <div style={{ fontSize:13, fontWeight:900, color:'#0f172a' }}>{fmtDiaLargo(resumen.diaTopCantidad.ts)}</div>
+                <div style={{ fontSize:20, fontWeight:900, color:'#0284c7', margin:'2px 0' }}>{resumen.diaTopCantidad.cant} ventas</div>
+                <div style={{ fontSize:11, color:'#475569' }}>Total facturado: {fmtM(resumen.diaTopCantidad.importe)} · {resumen.diaTopCantidad.vendedores.map(x => `${x.v}: ${fmtM(x.imp)}`).join(' · ')}</div>
+              </CardMetrica>
+              <CardMetrica titulo="✨ Clientes nuevos (compraron y pagaron)">
+                <div style={{ fontSize:22, fontWeight:900, color:'#7c3aed' }}>{resumen.clientesNuevos.length}</div>
+                {resumen.clientesNuevos.length > 0 && (
+                  <div style={{ fontSize:10, color:'#64748b', lineHeight:1.5, marginTop:2 }}>{resumen.clientesNuevos.join(' · ')}</div>
+                )}
+              </CardMetrica>
+              <CardMetrica titulo="👥 Clientes del mes">
+                <div style={{ fontSize:14, color:'#0f172a' }}><b style={{ fontSize:20, fontWeight:900 }}>{resumen.clientesUnicos}</b> únicos</div>
+                <div style={{ fontSize:11, color:'#475569', marginTop:2 }}>{resumen.repetidores} repitieron compra en el mes</div>
+              </CardMetrica>
+              <CardMetrica titulo="🎯 Ticket promedio">
+                <div style={{ fontSize:20, fontWeight:900, color:'#0f172a' }}>{fmtM(resumen.ticketPromedio)}</div>
+                <div style={{ fontSize:11, color:'#475569', marginTop:2 }}>{filas.length} ventas en el período</div>
+              </CardMetrica>
+              <CardMetrica titulo="💎 Venta más grande">
+                <div style={{ fontSize:20, fontWeight:900, color:'#16a34a' }}>{fmtM(resumen.ventaMayor.transferido)}</div>
+                <div style={{ fontSize:11, color:'#475569', marginTop:2 }}>{resumen.ventaMayor.comprador} · {resumen.ventaMayor.fecha}{mostrarVendedor ? ` · ${resumen.ventaMayor.vendedor}` : ''}</div>
+              </CardMetrica>
+            </div>
+
+            {/* Gráfico: facturación por día */}
+            <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px', marginBottom:10 }}>
+              <div style={{ fontSize:10, fontWeight:800, color:'#0369a1', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8 }}>📅 Facturación por día</div>
+              {resumen.dias.map(d => (
+                <BarraInforme key={d.ts} label={fmtFechaDDMMAAAA(d.ts)} valor={d.importe} max={maxImporteDia}
+                  color={d.ts === resumen.diaTopImporte.ts ? '#16a34a' : '#7dd3fc'}
+                  texto={`${fmtM(d.importe)} (${d.cant}v)`} />
+              ))}
+            </div>
+
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:10 }}>
+              {/* Gráfico: por vendedor (solo en VENTAS TOTALES) */}
+              {mostrarVendedor && Object.keys(resumen.porVendedor).length > 0 && (
+                <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px' }}>
+                  <div style={{ fontSize:10, fontWeight:800, color:'#0369a1', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8 }}>🧑‍💼 Ventas por usuario</div>
+                  {Object.entries(resumen.porVendedor).sort((a,b) => b[1].importe - a[1].importe).map(([v, d]) => (
+                    <BarraInforme key={v} label={v} valor={d.importe}
+                      max={Math.max(...Object.values(resumen.porVendedor).map(x => x.importe))}
+                      color={vendColores[v] || '#94a3b8'}
+                      texto={`${fmtM(d.importe)} (${d.cant}v)`} />
+                  ))}
+                </div>
+              )}
+              {/* Gráfico: por modalidad */}
+              {Object.keys(resumen.porModalidad).length > 0 && (
+                <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px' }}>
+                  <div style={{ fontSize:10, fontWeight:800, color:'#0369a1', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8 }}>🚚 Ventas por modalidad</div>
+                  {Object.entries(resumen.porModalidad).sort((a,b) => b[1].importe - a[1].importe).map(([m, d]) => (
+                    <BarraInforme key={m} label={m} valor={d.importe}
+                      max={Math.max(...Object.values(resumen.porModalidad).map(x => x.importe))}
+                      color={modColores[m] || '#94a3b8'}
+                      texto={`${fmtM(d.importe)} (${d.cant}v)`} />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ fontSize:13, fontWeight:900, color:'#0f172a', textTransform:'uppercase', letterSpacing:'0.5px', borderBottom:'2px solid #0369a1', paddingBottom:6, margin:'16px 0 12px' }}>
+              📋 Detalle de ventas
+            </div>
+          </div>
+        )}
 
         {filas.length === 0 ? (
           <div style={{ padding:'20px 0', color:'#64748b', fontSize:14 }}>No hay ventas DEF registradas en el período seleccionado.</div>

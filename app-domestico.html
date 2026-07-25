@@ -515,9 +515,11 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
           const esFlex = modalidad!=='retiro' && !extras.esInterior && !extras.retiraLocal;
           const btnStyle = { width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 };
           const sinEnvase = !!extras.sinEnvase && envases===0 && cajas===0;
-          const setBaldes = (n) => { setEnvases(n); const nx = { ...extras, sinEnvase:false }; if (esFlex) nx.bultos = Math.max(1, n + cajas); setExtras(nx); };
-          const setCajas  = (m) => { const nx = { ...extras, cajas: m, sinEnvase:false }; if (esFlex) nx.bultos = Math.max(1, envases + m); setExtras(nx); };
-          const elegirSinEnvase = () => { setEnvases(0); const nx = { ...extras, cajas:0, sinEnvase:true }; if (esFlex) nx.bultos = 1; setExtras(nx); };
+          // Si el envío vino del mapa (envio numérico + envioUnit), al cambiar los bultos se recalcula el costo.
+          const syncEnvio = (nx) => { if (esFlex && typeof nx.envioUnit === 'number' && typeof nx.envio === 'number') nx.envio = Math.round(nx.envioUnit * nx.bultos); return nx; };
+          const setBaldes = (n) => { setEnvases(n); const nx = { ...extras, sinEnvase:false }; if (esFlex) nx.bultos = Math.max(1, n + cajas); setExtras(syncEnvio(nx)); };
+          const setCajas  = (m) => { const nx = { ...extras, cajas: m, sinEnvase:false }; if (esFlex) nx.bultos = Math.max(1, envases + m); setExtras(syncEnvio(nx)); };
+          const elegirSinEnvase = () => { setEnvases(0); const nx = { ...extras, cajas:0, sinEnvase:true }; if (esFlex) nx.bultos = 1; setExtras(syncEnvio(nx)); };
           return (
             <>
               <div style={{ marginBottom:14 }}>
@@ -705,13 +707,23 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial }) => {
   React.useEffect(() => {
     const handler = (event) => {
       if (event.data && event.data.type === 'domestico_flex_confirmado') {
-        const { total, localidad } = event.data;
-        setExtras(e => ({ ...e, envio: total, localidad: localidad }));
+        const { total, localidad, precio_unitario, cantidad } = event.data;
+        // El mapa no conoce los envases del pedido: acá se valida que los bultos
+        // elegidos en el mapa no sean menos que baldes + cajas.
+        const minB = Math.max(1, envases + (extras.cajas || 0));
+        const cantMapa = parseInt(cantidad) || ((typeof precio_unitario === 'number' && precio_unitario > 0) ? Math.max(1, Math.round(total / precio_unitario)) : 1);
+        const unit = (typeof precio_unitario === 'number' && precio_unitario > 0) ? precio_unitario : (cantMapa > 0 ? total / cantMapa : total);
+        const cantFinal = Math.max(cantMapa, minB);
+        const totalFinal = cantFinal === cantMapa ? total : Math.round(unit * cantFinal);
+        setExtras(e => ({ ...e, envio: totalFinal, envioUnit: unit, localidad: localidad, bultos: cantFinal }));
+        if (cantFinal > cantMapa) {
+          alert(`⚠️ Este pedido lleva mínimo ${minB} bulto${minB>1?'s':''} (baldes + cajas) y en el mapa se eligieron ${cantMapa}. El envío se ajustó automáticamente a ${cantFinal} bultos: $${totalFinal.toLocaleString('es-AR')}.`);
+        }
       }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, []);
+  }, [envases, extras.cajas]);
 
   const totalProd    = items.reduce((s,i)=>s+i.precio,0);
   const totalEnvases = envases * PRECIO_ENVASE; // envases = baldes (las cajas no se cobran)

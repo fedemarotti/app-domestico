@@ -517,9 +517,14 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
           const sinEnvase = !!extras.sinEnvase && envases===0 && cajas===0;
           // Si el envío vino del mapa (envio numérico + envioUnit), al cambiar los bultos se recalcula el costo.
           const syncEnvio = (nx) => { if (esFlex && typeof nx.envioUnit === 'number' && typeof nx.envio === 'number') nx.envio = Math.round(nx.envioUnit * nx.bultos); return nx; };
-          const setBaldes = (n) => { setEnvases(n); const nx = { ...extras, sinEnvase:false }; if (esFlex) nx.bultos = Math.max(1, n + cajas); setExtras(syncEnvio(nx)); };
-          const setCajas  = (m) => { const nx = { ...extras, cajas: m, sinEnvase:false }; if (esFlex) nx.bultos = Math.max(1, envases + m); setExtras(syncEnvio(nx)); };
-          const elegirSinEnvase = () => { setEnvases(0); const nx = { ...extras, cajas:0, sinEnvase:true }; if (esFlex) nx.bultos = 1; setExtras(syncEnvio(nx)); };
+          // Bultos: el mínimo es baldes + cajas, pero el vendedor puede haber elegido MÁS (ej: tanque o
+          // envase grande cargado como extra, que no cuenta como balde/caja). Si los bultos estaban en el
+          // mínimo anterior (auto), siguen al nuevo mínimo; si estaban por encima (elección manual), se
+          // respetan y solo se suben si quedaran por debajo del nuevo mínimo.
+          const nuevosBultos = (actuales, minAnterior, minNuevo) => (actuales||1) <= minAnterior ? minNuevo : Math.max(actuales, minNuevo);
+          const setBaldes = (n) => { setEnvases(n); const nx = { ...extras, sinEnvase:false }; if (esFlex) nx.bultos = nuevosBultos(extras.bultos, Math.max(1, envases + cajas), Math.max(1, n + cajas)); setExtras(syncEnvio(nx)); };
+          const setCajas  = (m) => { const nx = { ...extras, cajas: m, sinEnvase:false }; if (esFlex) nx.bultos = nuevosBultos(extras.bultos, Math.max(1, envases + cajas), Math.max(1, envases + m)); setExtras(syncEnvio(nx)); };
+          const elegirSinEnvase = () => { setEnvases(0); const nx = { ...extras, cajas:0, sinEnvase:true }; if (esFlex) nx.bultos = nuevosBultos(extras.bultos, Math.max(1, envases + cajas), 1); setExtras(syncEnvio(nx)); };
           return (
             <>
               <div style={{ marginBottom:14 }}>

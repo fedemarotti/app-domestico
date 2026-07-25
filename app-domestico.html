@@ -684,8 +684,12 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
 // PRE-COTIZACIÓN
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial }) => {
+const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioActual }) => {
   const [codigo, setCodigo]   = useState(preloaded?.codigo || null);
+  // Etapa 0 — captura para Gestión: fecha de creación real (no se pisa al editar) y autor de la PRE.
+  // El primer valor gana: una PRE editada por otro usuario conserva su creador original.
+  const tsCreacionRef = React.useRef(preloaded?.tsCreacion || preloaded?.ts || Date.now());
+  const creadorPreRef = React.useRef(preloaded?.creadoPor || usuarioActual?.email || null);
   const [items, setItems]     = useState(preloaded?.items || []);
   const [envases, setEnvases] = useState(() => desgloseEnvases(preloaded?.envases || 0, preloaded?.extras).baldes);
   const [extras, setExtras]   = useState(() => {
@@ -741,7 +745,8 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial }) => {
   const snap = useCallback(() => {
     saveLS({ codigo, tipo:'PRE', items, envases, extras, modalidadPRE, total,
       totales:{ productos:totalProd, envases:totalEnvases, agregados:totalAgr, envio:totalEnvio, total },
-      ts:Date.now(), fecha:new Date().toLocaleString('es-AR') });
+      ts:Date.now(), fecha:new Date().toLocaleString('es-AR'),
+      tsCreacion: tsCreacionRef.current, creadoPor: creadorPreRef.current });
   }, [codigo, items, envases, extras, modalidadPRE, total, totalProd, totalEnvases, totalAgr, totalEnvio]);
 
   // Auto-save: persiste la PRE en localStorage/Supabase cada vez que cambia algo relevante
@@ -2743,7 +2748,7 @@ const VistaDetallePedidoDEF = ({ pedido, onVolver, onNuevoPedido, onPedidoActual
   };
 
   const marcarEntregado = async () => {
-    const pedidoActualizado = { ...pedido, cliente: cl, extras: ex, estado: 'entregado', fechaEntrega: new Date().toLocaleString('es-AR') };
+    const pedidoActualizado = { ...pedido, cliente: cl, extras: ex, estado: 'entregado', fechaEntrega: new Date().toLocaleString('es-AR'), tsEntrega: Date.now() };
     await saveLS(pedidoActualizado);
     if (onPedidoActualizado) onPedidoActualizado(pedidoActualizado);
     setEstadoPedido('entregado');
@@ -3284,6 +3289,543 @@ const ModuloClientes = ({ onNuevoPedido, onVolver, onAbrirPedido }) => {
 // APP PRINCIPAL
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// GESTIÓN — Módulo exclusivo del administrador (Resumen · Comercial · Operación)
+// Solo lectura: nunca llama a saveLS / deleteLS / saveCliente.
+// Reglas de cálculo documentadas en el proyecto "App Venta de Pastas".
+// ═══════════════════════════════════════════════════════════════════════════════
+const GESTION_DEMORA_HH = 48; // horas hábiles (lun a vie) para marcar un pendiente como demorado
+
+// Horas hábiles entre dos timestamps: sábados y domingos no cuentan (AR, UTC-3 fijo)
+const horasHabilesEntre = (desde, hasta) => {
+  if (!desde || !hasta || hasta <= desde) return 0;
+  let h = 0, t = desde, tope = 0;
+  while (t < hasta && tope < 3700) { // tope defensivo ~10 años
+    const dia = new Date(t - AR_OFFSET_MS).getUTCDay(); // 0=domingo, 6=sábado
+    const finDia = arInicioDeDia(t) + 86400000;
+    const tramo = Math.min(hasta, finDia) - t;
+    if (dia !== 0 && dia !== 6) h += tramo / 3600000;
+    t = finDia; tope++;
+  }
+  return h;
+};
+
+const gNum = v => (typeof v === 'number' && isFinite(v)) ? v : 0;
+const gTotal = p => gNum(p?.totales?.total ?? p?.total);
+const gEnvio = p => gNum(p?.totales?.envio);
+const gModalidad = p => p?.extras?.retiraLocal ? 'RETIRO' : p?.extras?.esInterior ? 'INTERIOR' : 'FLEX';
+const gClaveCliente = c => { const tel = (c?.telefono || '').replace(/\D/g, ''); if (tel) return 'T' + tel; const n = (c?.nombre || '').trim().toLowerCase(); return n ? 'N' + n : null; };
+const gVendedor = p => {
+  const em = (p?.creadoPor || '').trim().toLowerCase();
+  const r = ROLES_LIQ.find(x => x.email && x.email.toLowerCase() === em);
+  return r ? r.label : 'Sin atribución';
+};
+const gHora = ts => { const d = new Date(ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+const gDiasDesde = (ts, now) => Math.floor((now - ts) / 86400000);
+const gAntigLabel = (ts, now) => { const dd = gDiasDesde(ts, now); return dd <= 0 ? 'hoy' : dd === 1 ? '1 día' : `${dd} días`; };
+const gPct = (v, prev) => (typeof prev === 'number' && prev > 0) ? Math.round(((v - prev) / prev) * 100) : null;
+const gLts = n => `${Math.round(n).toLocaleString('es-AR')} L`;
+
+const ModuloGestion = ({ onVolver }) => {
+  const VIO = '#a78bfa';
+  const [tab, setTab] = useState('resumen');
+  const [periodo, setPeriodo] = useState('hoy');
+  const [gDesdeISO, setGDesdeISO] = useState('');
+  const [gHastaISO, setGHastaISO] = useState('');
+  const [pedidos, setPedidos] = useState(null);
+  const [sync, setSync] = useState(null);
+  const [detalle, setDetalle] = useState(null);   // pedido en modal solo lectura
+  const [drill, setDrill] = useState(null);        // { titulo, items } listado drill-down
+  const [verEntregados, setVerEntregados] = useState(false);
+
+  const cargar = () => { setPedidos(null); listLS().then(arr => { setPedidos(Array.isArray(arr) ? arr : []); setSync(Date.now()); }); };
+  React.useEffect(() => { cargar(); }, []);
+
+  // ── Rango del período + período anterior equivalente ──
+  const rango = React.useMemo(() => {
+    const now = sync || Date.now();
+    if (periodo === 'hoy') {
+      const d = arInicioDeDia(now);
+      return { desde: d, hasta: now, prevDesde: d - 86400000, prevHasta: now - 86400000, etiqueta: `Hoy · ${fmtFechaDDMMAAAA(now)}`, prevEtiqueta: 'ayer a esta hora' };
+    }
+    if (periodo === '7d') {
+      const d = arInicioDeDia(now) - 6 * 86400000;
+      return { desde: d, hasta: now, prevDesde: d - 7 * 86400000, prevHasta: d - 1, etiqueta: 'Últimos 7 días', prevEtiqueta: 'los 7 días previos' };
+    }
+    if (periodo === 'mes') {
+      const { y, m } = arParts(now);
+      const d = arInicioDeMes(y, m);
+      const pm = m === 0 ? 11 : m - 1, py = m === 0 ? y - 1 : y;
+      const pd = arInicioDeMes(py, pm);
+      return { desde: d, hasta: now, prevDesde: pd, prevHasta: Math.min(pd + (now - d), arFinDeMes(py, pm)), etiqueta: 'Mes actual', prevEtiqueta: 'mismo tramo del mes pasado' };
+    }
+    if (periodo === 'mesant') {
+      const { y, m } = arParts(now);
+      const pm = m === 0 ? 11 : m - 1, py = m === 0 ? y - 1 : y;
+      const ppm = pm === 0 ? 11 : pm - 1, ppy = pm === 0 ? py - 1 : py;
+      return { desde: arInicioDeMes(py, pm), hasta: arFinDeMes(py, pm), prevDesde: arInicioDeMes(ppy, ppm), prevHasta: arFinDeMes(ppy, ppm), etiqueta: 'Mes anterior', prevEtiqueta: 'el mes previo a ese' };
+    }
+    if (gDesdeISO && gHastaISO) {
+      const { desde, hasta } = arRangoDesdeISO(gDesdeISO, gHastaISO);
+      const dur = hasta - desde + 1;
+      return { desde, hasta, prevDesde: desde - dur, prevHasta: desde - 1, etiqueta: `${fmtFechaDDMMAAAA(desde)} al ${fmtFechaDDMMAAAA(hasta)}`, prevEtiqueta: 'la ventana anterior igual' };
+    }
+    return null;
+  }, [periodo, gDesdeISO, gHastaISO, sync]);
+
+  // ── Métricas ──
+  const m = React.useMemo(() => {
+    if (!pedidos || !rango) return null;
+    const now = sync || Date.now();
+    const enR = p => typeof p.ts === 'number' && p.ts >= rango.desde && p.ts <= rango.hasta;
+    const enPrev = p => typeof p.ts === 'number' && p.ts >= rango.prevDesde && p.ts <= rango.prevHasta;
+    const defsAll = pedidos.filter(p => p.tipo === 'DEF');
+    const presAll = pedidos.filter(p => p.tipo === 'PRE');
+    const defs = defsAll.filter(enR);
+    const defsPrev = defsAll.filter(enPrev);
+
+    // Relación PRE→DEF: por codigoPRE, con retrocompatibilidad por código espejo (DEFxxxx ↔ PRExxxx)
+    const presConDef = new Set();
+    defsAll.forEach(p => {
+      if (p.codigoPRE) presConDef.add(p.codigoPRE);
+      else if (p.codigo) presConDef.add('PRE' + p.codigo.slice(3));
+    });
+
+    // KPIs del período
+    const fact = defs.reduce((s, p) => s + gTotal(p), 0);
+    const factPrev = defsPrev.reduce((s, p) => s + gTotal(p), 0);
+    const envioTot = defs.reduce((s, p) => s + gEnvio(p), 0);
+    const ticket = defs.length ? fact / defs.length : null;
+    const ticketPrev = defsPrev.length ? factPrev / defsPrev.length : null;
+
+    // Embudo
+    const fPre = p => (typeof p.tsCreacion === 'number' ? p.tsCreacion : p.ts); // usa creación real si existe (Etapa 0)
+    const presR = presAll.filter(p => { const t = fPre(p); return typeof t === 'number' && t >= rango.desde && t <= rango.hasta; });
+    const defsConv = defs.filter(p => p.codigoPRE && presAll.some(x => x.codigo === p.codigoPRE));
+    const tasa = presR.length ? Math.round((defsConv.length / presR.length) * 100) : null;
+    const abiertas = presAll.filter(p => !presConDef.has(p.codigo)).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    const abiertasTotal = abiertas.reduce((s, p) => s + gTotal(p), 0);
+
+    // Operación (pendientes y demorados son GLOBALES: un pedido viejo sin entregar sigue pendiente)
+    const pendientes = defsAll.filter(p => p.estado !== 'entregado').sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const demorados = pendientes.filter(p => horasHabilesEntre(p.ts, now) > GESTION_DEMORA_HH);
+    const demoradosSet = new Set(demorados.map(p => p.codigo));
+    const entregadosR = defs.filter(p => p.estado === 'entregado');
+    const buckets = { hoy: [], d12: [], d37: [], d7m: [] };
+    pendientes.forEach(p => {
+      const dd = gDiasDesde(p.ts, now);
+      if (dd <= 0) buckets.hoy.push(p); else if (dd <= 2) buckets.d12.push(p); else if (dd <= 7) buckets.d37.push(p); else buckets.d7m.push(p);
+    });
+
+    // Por vendedor (sobre DEF del período) — comisión idéntica a Liquidaciones: 5% del neto sin envío
+    const porVend = {};
+    ['VENDEDOR', 'NEGOCIO', 'ADMINISTRADOR', 'Sin atribución'].forEach(k => porVend[k] = { cant: 0, fact: 0, com: 0, items: [] });
+    defs.forEach(p => {
+      const v = gVendedor(p);
+      if (!porVend[v]) porVend[v] = { cant: 0, fact: 0, com: 0, items: [] };
+      porVend[v].cant += 1; porVend[v].fact += gTotal(p);
+      porVend[v].com += Math.round((gTotal(p) - gEnvio(p)) * 0.05);
+      porVend[v].items.push(p);
+    });
+
+    // Modalidad
+    const porMod = { RETIRO: 0, FLEX: 0, INTERIOR: 0 };
+    defs.forEach(p => { porMod[gModalidad(p)] = (porMod[gModalidad(p)] || 0) + 1; });
+
+    // Por día (para el gráfico)
+    const porDia = {};
+    defs.forEach(p => { const k = fmtFechaDDMMAAAA(p.ts); if (!porDia[k]) porDia[k] = { ts: arInicioDeDia(p.ts), fact: 0, cant: 0 }; porDia[k].fact += gTotal(p); porDia[k].cant += 1; });
+    const dias = Object.entries(porDia).map(([k, v]) => ({ dia: k.slice(0, 5), ...v })).sort((a, b) => a.ts - b.ts).slice(-31);
+
+    // Productos y litros (solo ítems con formato actual; combos: jabón+suav+det+lavandina salvo canje)
+    const prod = {}; let itemsViejos = 0;
+    const addProd = (key, factItem, lts, unidades) => { if (!prod[key]) prod[key] = { fact: 0, lts: 0, u: 0 }; prod[key].fact += factItem; prod[key].lts += lts; prod[key].u += unidades; };
+    const porCalidad = { Inicial: 0, Intermedia: 0, Premium: 0 };
+    defs.forEach(p => (p.items || []).forEach(it => {
+      const esCombo = it.tipoItem === 'combo' || it.tipo === 'combo';
+      const litros = (it.cantidad === 50 || it.cantidad === 200) ? it.cantidad : null;
+      if (esCombo && litros) {
+        const nProd = 3 + (it.canje_lavandina ? 0 : 1);
+        addProd(`Combo ${litros === 50 ? 'Chico' : 'Grande'}${it.calidad ? ' ' + it.calidad : ''}`, gNum(it.precio), litros * nProd, 1);
+        if (it.calidad && porCalidad[it.calidad] !== undefined) porCalidad[it.calidad] += gNum(it.precio);
+      } else if (!esCombo && it.tipo && litros) {
+        const nom = it.tipo.charAt(0).toUpperCase() + it.tipo.slice(1);
+        addProd(`${nom}${it.calidad ? ' ' + it.calidad : ''}`, gNum(it.precio), litros, 1);
+        if (it.calidad && porCalidad[it.calidad] !== undefined) porCalidad[it.calidad] += gNum(it.precio);
+      } else itemsViejos += 1;
+    }));
+    const topProd = Object.entries(prod).map(([k, v]) => ({ nombre: k, ...v })).sort((a, b) => b.fact - a.fact);
+    const calidadTotal = porCalidad.Inicial + porCalidad.Intermedia + porCalidad.Premium;
+
+    // Clientes: nuevo = primera compra DEF de la historia dentro del período; repetidor = 2+ en el período
+    const primera = {};
+    defsAll.forEach(p => { const k = gClaveCliente(p.cliente); if (!k) return; if (!(k in primera) || p.ts < primera[k]) primera[k] = p.ts; });
+    const clavesR = {}; let sinClave = 0;
+    defs.forEach(p => { const k = gClaveCliente(p.cliente); if (!k) { sinClave++; return; } clavesR[k] = (clavesR[k] || 0) + 1; });
+    const nuevos = Object.keys(clavesR).filter(k => primera[k] >= rango.desde && primera[k] <= rango.hasta).length;
+    const repet = Object.values(clavesR).filter(n => n > 1).length;
+    const unicos = Object.keys(clavesR).length;
+
+    // Ventas del día (lista cronológica para período HOY)
+    const ventasHoy = [...defs].sort((a, b) => b.ts - a.ts);
+
+    return { now, defs, defsPrev, fact, factPrev, envioTot, ticket, ticketPrev, presR, defsConv, tasa,
+      abiertas, abiertasTotal, pendientes, demorados, demoradosSet, entregadosR, buckets, porVend, porMod,
+      dias, topProd, itemsViejos, porCalidad, calidadTotal, nuevos, repet, unicos, sinClave, ventasHoy };
+  }, [pedidos, rango, sync]);
+
+  // ── UI helpers ──
+  const chip = (key, label) => (
+    <button key={key} onClick={() => setPeriodo(key)} style={{ padding:'7px 12px', borderRadius:20, fontSize:11, fontWeight:800, letterSpacing:'0.3px', cursor:'pointer', fontFamily:'inherit',
+      background: periodo === key ? 'linear-gradient(135deg,#7c3aed,#6d28d9)' : 'rgba(255,255,255,0.07)',
+      border: periodo === key ? '1px solid transparent' : '1px solid rgba(255,255,255,0.14)',
+      color: periodo === key ? '#fff' : 'rgba(255,255,255,0.7)',
+      boxShadow: periodo === key ? '0 4px 14px rgba(124,58,237,0.5)' : 'none' }}>{label}</button>
+  );
+  const tabBtn = (key, label) => (
+    <button key={key} onClick={() => setTab(key)} style={{ padding:'11px 4px', textAlign:'center', borderRadius:10, fontSize:11, fontWeight:800, letterSpacing:'0.5px', textTransform:'uppercase', cursor:'pointer', fontFamily:'inherit',
+      background: tab === key ? 'rgba(124,58,237,0.3)' : 'rgba(255,255,255,0.06)',
+      border: tab === key ? '1px solid rgba(167,139,250,0.6)' : '1px solid rgba(255,255,255,0.12)',
+      color: tab === key ? '#e9d5ff' : 'rgba(255,255,255,0.6)' }}>{label}</button>
+  );
+  const Kpi = ({ lbl, val, cmp, cmpTxt }) => (
+    <div style={{ background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.13)', borderRadius:16, padding:14 }}>
+      <div style={{ fontSize:10, fontWeight:800, color:'rgba(255,255,255,0.5)', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:5 }}>{lbl}</div>
+      <div style={{ fontSize:21, fontWeight:900, letterSpacing:'-0.5px' }}>{val}</div>
+      {cmp !== undefined && (
+        <div style={{ fontSize:11, fontWeight:700, marginTop:4, color: cmp === null ? 'rgba(255,255,255,0.4)' : cmp >= 0 ? '#4ade80' : '#f87171' }}>
+          {cmp === null ? (cmpTxt || 'sin datos previos') : `${cmp >= 0 ? '▲ +' : '▼ '}${cmp}% ${cmpTxt || ''}`}
+        </div>
+      )}
+    </div>
+  );
+  const Barra = ({ nombre, pct, val, color }) => (
+    <div style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, marginBottom:8 }}>
+      <div style={{ width:96, flexShrink:0, color:'rgba(255,255,255,0.75)', fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{nombre}</div>
+      <div style={{ flex:1, height:14, background:'rgba(255,255,255,0.07)', borderRadius:7, overflow:'hidden' }}>
+        <div style={{ width:`${Math.min(100, Math.max(2, pct))}%`, height:'100%', borderRadius:7, background: color || VIO }} />
+      </div>
+      <div style={{ width:64, textAlign:'right', fontWeight:800, fontSize:11.5, flexShrink:0 }}>{val}</div>
+    </div>
+  );
+  const Mini = ({ v, l, color }) => (
+    <div style={{ borderRadius:14, padding:'12px 8px', textAlign:'center', border:'1px solid rgba(255,255,255,0.12)', background:'rgba(255,255,255,0.07)' }}>
+      <div style={{ fontSize:20, fontWeight:900, color: color || '#fff' }}>{v}</div>
+      <div style={{ fontSize:9.5, fontWeight:800, textTransform:'uppercase', letterSpacing:'0.5px', color:'rgba(255,255,255,0.5)', marginTop:3 }}>{l}</div>
+    </div>
+  );
+  const filaPedido = (p, extraTxt) => (
+    <div key={p.codigo} onClick={() => setDetalle(p)} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', borderRadius:10, marginBottom:7, fontSize:12.5, cursor:'pointer',
+      background: m && m.demoradosSet.has(p.codigo) ? 'rgba(239,68,68,0.10)' : 'rgba(255,255,255,0.05)',
+      border: m && m.demoradosSet.has(p.codigo) ? '1px solid rgba(239,68,68,0.35)' : '1px solid rgba(255,255,255,0.09)' }}>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontWeight:800, fontSize:11.5, letterSpacing:'0.4px', color: p.tipo === 'PRE' ? '#fdba74' : m && m.demoradosSet.has(p.codigo) ? '#fca5a5' : '#fff' }}>
+          {p.codigo}{p.cliente?.nombre ? ` · ${p.cliente.nombre}` : ''}
+        </div>
+        <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.5)', marginTop:2 }}>
+          {fmtFechaDDMMAAAA(p.ts)} · {extraTxt || (p.tipo === 'DEF' ? `${gModalidad(p)} · ${p.estado === 'entregado' ? '✓ entregado' : `⏳ ${gAntigLabel(p.ts, m.now)}`}` : `últ. edición ${gAntigLabel(p.ts, m.now)}`)}
+        </div>
+      </div>
+      {p.tipo === 'DEF' && <span style={{ fontSize:9, fontWeight:800, padding:'2px 8px', borderRadius:12, flexShrink:0,
+        background: p.estado === 'entregado' ? 'rgba(56,189,248,0.15)' : 'rgba(34,197,94,0.15)',
+        color: p.estado === 'entregado' ? '#7dd3fc' : '#4ade80',
+        border: `1px solid ${p.estado === 'entregado' ? 'rgba(56,189,248,0.4)' : 'rgba(34,197,94,0.4)'}` }}>{p.estado === 'entregado' ? 'ENTREGADO' : 'PENDIENTE'}</span>}
+      <div style={{ fontWeight:900, fontSize:13, textAlign:'right', flexShrink:0 }}>{fmt(gTotal(p))}</div>
+    </div>
+  );
+  const card = { background:'rgba(255,255,255,0.08)', backdropFilter:'blur(8px)', border:'1px solid rgba(255,255,255,0.13)', borderRadius:16, padding:16, marginBottom:12 };
+  const cTit = { fontSize:10, fontWeight:800, color:'rgba(255,255,255,0.5)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:10 };
+  const vacio = (msg) => <div style={{ padding:'22px 14px', textAlign:'center', fontSize:13, color:'rgba(255,255,255,0.45)' }}>{msg}</div>;
+
+  const cargando = !pedidos || (!!rango && !m);
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="no-print" style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
+        <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>🏠 Salir</button>
+        <div style={{ flex:1 }} />
+        <button onClick={cargar} style={{ padding:'8px 14px', background:'rgba(74,222,128,0.12)', color:'#4ade80', border:'1px solid rgba(74,222,128,0.4)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>
+          🔄 Actualizar{sync ? ` · ${gHora(sync)}` : ''}
+        </button>
+      </div>
+      <div style={{ fontSize:22, fontWeight:900, letterSpacing:'-0.4px', marginBottom:2 }}>📈 <span style={{ color:VIO }}>GESTIÓN</span></div>
+      <div style={{ fontSize:12, color:'rgba(255,255,255,0.45)', marginBottom:12 }}>{rango ? rango.etiqueta : 'Elegí un período'}{!supaClient ? ' · ⚠️ sin conexión: datos locales' : ''}</div>
+
+      {/* Período */}
+      <div style={{ display:'flex', gap:6, marginBottom:10, flexWrap:'wrap' }}>
+        {chip('hoy','HOY')}{chip('7d','7 DÍAS')}{chip('mes','MES')}{chip('mesant','MES ANT.')}{chip('custom','📅')}
+      </div>
+      {periodo === 'custom' && (
+        <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+          <input type="date" value={gDesdeISO} onChange={e=>setGDesdeISO(e.target.value)} style={{ ...s.inp, flex:1 }} />
+          <input type="date" value={gHastaISO} onChange={e=>setGHastaISO(e.target.value)} style={{ ...s.inp, flex:1 }} />
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6, marginBottom:14 }}>
+        {tabBtn('resumen','Resumen')}{tabBtn('comercial','Comercial')}{tabBtn('operacion','Operación')}
+      </div>
+
+      {cargando && <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'40vh', flexDirection:'column', gap:14, color:'rgba(255,255,255,0.6)' }}>
+        <div style={{ width:38, height:38, border:'3px solid rgba(255,255,255,0.15)', borderTop:`3px solid ${VIO}`, borderRadius:'50%', animation:'spin 0.8s linear infinite' }}></div>
+        Cargando datos…
+      </div>}
+
+      {!cargando && !rango && vacio('Elegí las dos fechas del período personalizado.')}
+
+      {/* ═══ RESUMEN ═══ */}
+      {!cargando && rango && tab === 'resumen' && (
+        <div>
+          {/* Alertas — solo si hay algo que atender */}
+          {m.factPrev > 0 && gPct(m.fact, m.factPrev) !== null && gPct(m.fact, m.factPrev) <= -20 && (
+            <div style={{ borderRadius:12, padding:'10px 14px', fontSize:12.5, fontWeight:700, marginBottom:8, background:'rgba(239,68,68,0.14)', border:'1px solid rgba(239,68,68,0.4)', color:'#fca5a5' }}>
+              🔻 Facturación {gPct(m.fact, m.factPrev)}% vs {rango.prevEtiqueta}
+            </div>
+          )}
+          {m.abiertas.length > 0 && (
+            <div onClick={() => setDrill({ titulo:`PRE abiertas (${m.abiertas.length})`, items: m.abiertas })} style={{ cursor:'pointer', borderRadius:12, padding:'10px 14px', fontSize:12.5, fontWeight:700, marginBottom:8, background:'rgba(249,115,22,0.14)', border:'1px solid rgba(249,115,22,0.4)', color:'#fdba74' }}>
+              ⚠️ {m.abiertas.length} PRE sin convertir · {fmt(m.abiertasTotal)} potenciales <span style={{ fontSize:10, color:VIO }}>ver ›</span>
+            </div>
+          )}
+          {m.demorados.length > 0 && (
+            <div onClick={() => setDrill({ titulo:`Demorados (+${GESTION_DEMORA_HH} hs hábiles)`, items: m.demorados })} style={{ cursor:'pointer', borderRadius:12, padding:'10px 14px', fontSize:12.5, fontWeight:700, marginBottom:8, background:'rgba(239,68,68,0.14)', border:'1px solid rgba(239,68,68,0.4)', color:'#fca5a5' }}>
+              🔴 {m.demorados.length} pedido{m.demorados.length !== 1 ? 's' : ''} con más de {GESTION_DEMORA_HH} hs hábiles sin entregar <span style={{ fontSize:10, color:VIO }}>ver ›</span>
+            </div>
+          )}
+
+          {/* KPIs */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, margin:'12px 0' }}>
+            <Kpi lbl="Facturación" val={fmt(m.fact)} cmp={gPct(m.fact, m.factPrev)} cmpTxt={`vs ${rango.prevEtiqueta}`} />
+            <Kpi lbl="Pedidos DEF" val={m.defs.length} cmp={gPct(m.defs.length, m.defsPrev.length)} />
+            <Kpi lbl="Ticket promedio" val={m.ticket === null ? '—' : fmt(m.ticket)} cmp={m.ticket !== null && m.ticketPrev !== null ? gPct(m.ticket, m.ticketPrev) : null} />
+            <Kpi lbl="Conversión" val={m.tasa === null ? '—' : `${m.tasa}%`} cmp={undefined} cmpTxt="" />
+          </div>
+          <div style={{ fontSize:11, color:'rgba(255,255,255,0.45)', marginTop:-6, marginBottom:12 }}>
+            Neto sin envío: <strong style={{ color:'rgba(255,255,255,0.75)' }}>{fmt(m.fact - m.envioTot)}</strong> · Embudo del período: {m.presR.length} PRE → {m.defsConv.length} DEF
+          </div>
+
+          {/* Embudo */}
+          <div style={card}>
+            <div style={cTit}>Embudo PRE → DEF · {rango.etiqueta}</div>
+            {m.presR.length === 0 && m.defs.length === 0 ? vacio('Sin movimientos en este período.') : (
+              <>
+                <Barra nombre="PRE creadas" pct={100} val={m.presR.length} color="linear-gradient(90deg,#f97316,#fb923c)" />
+                <Barra nombre="Convertidas" pct={m.presR.length ? (m.defsConv.length / m.presR.length) * 100 : 0} val={m.defsConv.length} color="linear-gradient(90deg,#16a34a,#4ade80)" />
+                <div onClick={() => m.abiertas.length && setDrill({ titulo:`PRE abiertas (${m.abiertas.length})`, items: m.abiertas })} style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:6, cursor: m.abiertas.length ? 'pointer' : 'default' }}>
+                  Abiertas (histórico): {m.abiertas.length} · {fmt(m.abiertasTotal)} potenciales {m.abiertas.length > 0 && <span style={{ color:VIO, fontWeight:700 }}>ver ›</span>}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Ventas por día / del día */}
+          <div style={card}>
+            <div style={cTit}>{periodo === 'hoy' ? 'Ventas de hoy' : 'Ventas por día'}</div>
+            {m.defs.length === 0 ? vacio('Sin ventas DEF en este período.') : periodo === 'hoy' ? (
+              m.ventasHoy.map(p => filaPedido(p, `${gHora(p.ts)} · ${gVendedor(p)} · ${gModalidad(p)}`))
+            ) : (
+              <div style={{ display:'flex', alignItems:'flex-end', gap:4, height:76, padding:'4px 2px 0' }}>
+                {m.dias.map(d => {
+                  const max = Math.max(...m.dias.map(x => x.fact), 1);
+                  return (
+                    <div key={d.dia} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:3, minWidth:0 }} title={`${d.dia}: ${fmt(d.fact)} (${d.cant})`}>
+                      <div style={{ width:'100%', borderRadius:'4px 4px 0 0', background:'linear-gradient(180deg,#a78bfa,#7c3aed)', height: `${Math.max(3, (d.fact / max) * 58)}px` }} />
+                      {m.dias.length <= 12 && <div style={{ fontSize:8, color:'rgba(255,255,255,0.4)', fontWeight:700 }}>{d.dia}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Modalidad + estado */}
+          <div style={card}>
+            <div style={cTit}>Modalidad de entrega</div>
+            {m.defs.length === 0 ? vacio('Sin datos.') : ['RETIRO','FLEX','INTERIOR'].map(k => (
+              <Barra key={k} nombre={k === 'RETIRO' ? '🏠 Retiro' : k === 'FLEX' ? '🛵 Flex' : '🚛 Interior'} pct={(m.porMod[k] / m.defs.length) * 100} val={`${m.porMod[k]} (${Math.round((m.porMod[k] / m.defs.length) * 100)}%)`} color={k === 'RETIRO' ? '#4ade80' : k === 'FLEX' ? '#38bdf8' : '#fb923c'} />
+            ))}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:12 }}>
+            <Mini v={m.pendientes.length} l="Pendientes" color="#fdba74" />
+            <Mini v={m.entregadosR.length} l="Entregados" color="#4ade80" />
+            <Mini v={m.demorados.length} l="Demorados" color={m.demorados.length ? '#f87171' : '#4ade80'} />
+          </div>
+        </div>
+      )}
+
+      {/* ═══ COMERCIAL ═══ */}
+      {!cargando && rango && tab === 'comercial' && (
+        <div>
+          <div style={card}>
+            <div style={cTit}>Por vendedor · DEF de {rango.etiqueta}</div>
+            {m.defs.length === 0 ? vacio('Sin ventas DEF en este período.') : Object.entries(m.porVend).filter(([k, v]) => v.cant > 0 || k !== 'Sin atribución').map(([k, v]) => {
+              const rol = ROLES_LIQ.find(r => r.label === k);
+              return (
+                <div key={k} onClick={() => v.cant && setDrill({ titulo:`${k} · ${rango.etiqueta}`, items: v.items })} style={{ display:'flex', alignItems:'center', gap:12, padding:'11px 0', borderBottom:'1px solid rgba(255,255,255,0.08)', cursor: v.cant ? 'pointer' : 'default' }}>
+                  <div style={{ fontSize:22 }}>{rol ? rol.icon : '❓'}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:13, fontWeight:800 }}>{k}</div>
+                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)', marginTop:2 }}>{v.cant} DEF{v.cant ? ` · ticket ${fmt(v.fact / v.cant)}` : ''}</div>
+                  </div>
+                  <div style={{ textAlign:'right' }}>
+                    <div style={{ fontSize:15, fontWeight:900 }}>{fmt(v.fact)}</div>
+                    <div style={{ fontSize:10.5, color:VIO, fontWeight:700, marginTop:2 }}>com. {fmt(v.com)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={card}>
+            <div style={cTit}>PRE abiertas ({m.abiertas.length}) · {fmt(m.abiertasTotal)} potenciales</div>
+            {m.abiertas.length === 0 ? vacio('No hay PRE sin convertir. 👏') : (
+              <>
+                {m.abiertas.slice(0, 8).map(p => filaPedido(p))}
+                {m.abiertas.length > 8 && <div onClick={() => setDrill({ titulo:`PRE abiertas (${m.abiertas.length})`, items: m.abiertas })} style={{ fontSize:11, color:VIO, fontWeight:700, cursor:'pointer', textAlign:'center', padding:6 }}>ver las {m.abiertas.length} ›</div>}
+                <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:6 }}>Antigüedad medida desde la última edición de cada PRE.</div>
+              </>
+            )}
+          </div>
+
+          <div style={card}>
+            <div style={cTit}>Top productos · {rango.etiqueta}</div>
+            {m.topProd.length === 0 ? vacio('Sin ítems con formato actual en este período.') : (
+              <>
+                {m.topProd.slice(0, 8).map(t => (
+                  <Barra key={t.nombre} nombre={t.nombre} pct={(t.fact / (m.topProd[0].fact || 1)) * 100} val={t.nombre.startsWith('Combo') ? `${t.u} u.` : gLts(t.lts)} />
+                ))}
+                <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:4 }}>
+                  Litros totales: {gLts(m.topProd.reduce((s, t) => s + t.lts, 0))}{m.itemsViejos ? ` · ${m.itemsViejos} ítem${m.itemsViejos !== 1 ? 's' : ''} de formato antiguo sin datos de litros` : ''}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div style={card}>
+            <div style={cTit}>Calidad · % de facturación de productos</div>
+            {m.calidadTotal === 0 ? vacio('Sin ítems con calidad en este período.') : ['Inicial','Intermedia','Premium'].map(k => (
+              <Barra key={k} nombre={k} pct={(m.porCalidad[k] / m.calidadTotal) * 100} val={`${Math.round((m.porCalidad[k] / m.calidadTotal) * 100)}%`} color={k === 'Inicial' ? '#94a3b8' : k === 'Intermedia' ? '#38bdf8' : '#fbbf24'} />
+            ))}
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:12 }}>
+            <Mini v={m.nuevos} l="🆕 Nuevos" color="#4ade80" />
+            <Mini v={m.repet} l="🔁 Repiten" color="#4ade80" />
+            <Mini v={m.unicos} l="Únicos" />
+          </div>
+          {m.sinClave > 0 && <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:-6, marginBottom:12 }}>{m.sinClave} pedido{m.sinClave !== 1 ? 's' : ''} sin teléfono ni nombre: excluidos de las métricas de clientes.</div>}
+        </div>
+      )}
+
+      {/* ═══ OPERACIÓN ═══ */}
+      {!cargando && rango && tab === 'operacion' && (
+        <div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:12 }}>
+            <Mini v={m.pendientes.length} l="Pendientes" color="#fdba74" />
+            <Mini v={m.demorados.length} l="Demorados" color={m.demorados.length ? '#f87171' : '#4ade80'} />
+            <Mini v={m.entregadosR.length} l={`Entreg. (${periodo === 'hoy' ? 'hoy' : 'período'})`} color="#4ade80" />
+          </div>
+
+          <div style={card}>
+            <div style={cTit}>Pendientes por antigüedad (todos, no solo el período)</div>
+            {m.pendientes.length === 0 ? vacio('Nada pendiente de entrega. 👏') : (
+              <>
+                <Barra nombre="Hoy" pct={(m.buckets.hoy.length / m.pendientes.length) * 100} val={m.buckets.hoy.length} color="#4ade80" />
+                <Barra nombre="1–2 días" pct={(m.buckets.d12.length / m.pendientes.length) * 100} val={m.buckets.d12.length} color="#fbbf24" />
+                <Barra nombre="3–7 días" pct={(m.buckets.d37.length / m.pendientes.length) * 100} val={m.buckets.d37.length} color="#f87171" />
+                <Barra nombre="+7 días" pct={(m.buckets.d7m.length / m.pendientes.length) * 100} val={m.buckets.d7m.length} color="#ef4444" />
+                <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:4 }}>Demorado = más de {GESTION_DEMORA_HH} hs hábiles (sáb. y dom. no cuentan).</div>
+              </>
+            )}
+          </div>
+
+          <div style={card}>
+            <div style={cTit}>Listado operativo · pendientes primero, más viejos arriba</div>
+            {m.pendientes.length === 0 && m.entregadosR.length === 0 ? vacio('Sin pedidos para mostrar.') : (
+              <>
+                {m.pendientes.map(p => filaPedido(p))}
+                {m.entregadosR.length > 0 && (
+                  <div onClick={() => setVerEntregados(v => !v)} style={{ fontSize:11.5, color:'#7dd3fc', fontWeight:700, cursor:'pointer', textAlign:'center', padding:'8px 0' }}>
+                    {verEntregados ? '▲ Ocultar' : `▼ Ver ${m.entregadosR.length} entregado${m.entregadosR.length !== 1 ? 's' : ''} de ${rango.etiqueta}`}
+                  </div>
+                )}
+                {verEntregados && [...m.entregadosR].sort((a, b) => b.ts - a.ts).map(p => filaPedido(p))}
+                <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:6 }}>Tocar un pedido abre el detalle en modo lectura — desde acá no se puede modificar nada.</div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MODAL DRILL-DOWN ═══ */}
+      {drill && (
+        <div onClick={() => setDrill(null)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', zIndex:300, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+          <div onClick={e => e.stopPropagation()} style={{ width:'100%', maxWidth:640, maxHeight:'82vh', overflowY:'auto', background:'linear-gradient(160deg,#0b3524,#0d5c3a)', borderRadius:'18px 18px 0 0', padding:'16px 16px 30px', border:'1px solid rgba(167,139,250,0.35)' }}>
+            <div style={{ display:'flex', alignItems:'center', marginBottom:12 }}>
+              <div style={{ fontSize:13, fontWeight:900, letterSpacing:'0.3px', color:'#e9d5ff' }}>{drill.titulo}</div>
+              <div style={{ flex:1 }} />
+              <button onClick={() => setDrill(null)} style={{ padding:'6px 12px', background:'rgba(255,255,255,0.08)', color:'#fff', border:'1px solid rgba(255,255,255,0.2)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>✕ Cerrar</button>
+            </div>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)', marginBottom:10 }}>
+              {drill.items.length} pedido{drill.items.length !== 1 ? 's' : ''} · Total {fmt(drill.items.reduce((sx, p) => sx + gTotal(p), 0))}
+            </div>
+            {drill.items.map(p => filaPedido(p))}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MODAL DETALLE SOLO LECTURA ═══ */}
+      {detalle && (
+        <div onClick={() => setDetalle(null)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', zIndex:400, display:'flex', alignItems:'center', justifyContent:'center', padding:14 }}>
+          <div onClick={e => e.stopPropagation()} style={{ width:'100%', maxWidth:480, maxHeight:'86vh', overflowY:'auto', background:'linear-gradient(160deg,#0b3524,#0d5c3a)', borderRadius:16, padding:18, border:'1px solid rgba(167,139,250,0.4)' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, flexWrap:'wrap' }}>
+              <Chip codigo={detalle.codigo} tipo={detalle.tipo} />
+              <span style={{ fontSize:10, fontWeight:800, padding:'2px 10px', borderRadius:12, background:'rgba(124,58,237,0.25)', color:'#e9d5ff', border:'1px solid rgba(167,139,250,0.5)' }}>SOLO LECTURA</span>
+              <div style={{ flex:1 }} />
+              <button onClick={() => setDetalle(null)} style={{ padding:'6px 12px', background:'rgba(255,255,255,0.08)', color:'#fff', border:'1px solid rgba(255,255,255,0.2)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>✕</button>
+            </div>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)', marginBottom:10 }}>{detalle.fecha || fmtFechaDDMMAAAA(detalle.ts)} · {gVendedor(detalle)}</div>
+            {detalle.cliente?.nombre && (
+              <div style={{ marginBottom:10, padding:'10px 12px', background:'rgba(255,255,255,0.06)', borderRadius:10 }}>
+                <div style={{ fontSize:13, fontWeight:800 }}>{detalle.cliente.nombre}</div>
+                <div style={{ fontSize:11, color:'rgba(255,255,255,0.55)', marginTop:2 }}>
+                  {[detalle.cliente.telefono, detalle.cliente.localidad || detalle.cliente.ciudad].filter(Boolean).join(' · ')}
+                </div>
+                {detalle.cliente.observaciones && <div style={{ fontSize:11.5, fontWeight:800, color:'#fbbf24', marginTop:6, textTransform:'uppercase' }}>⚠️ {detalle.cliente.observaciones}</div>}
+              </div>
+            )}
+            {(detalle.items || []).map((it, i) => (
+              <div key={i} style={{ display:'flex', justifyContent:'space-between', gap:8, fontSize:12, padding:'7px 0', borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
+                <div>
+                  <div style={{ fontWeight:700 }}>{it.nombre}</div>
+                  {(it.color || it.fragancia) && <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.5)' }}>{[it.color && `Color: ${it.color}`, it.fragancia && `Frag.: ${it.fragancia}`].filter(Boolean).join(' · ')}</div>}
+                </div>
+                <div style={{ fontWeight:800, flexShrink:0 }}>{fmt(gNum(it.precio))}</div>
+              </div>
+            ))}
+            <div style={{ marginTop:10, fontSize:12, color:'rgba(255,255,255,0.7)' }}>
+              {[
+                ['Productos', detalle.totales?.productos], ['Envases', detalle.totales?.envases],
+                ['Extras', detalle.totales?.agregados], ['Envío', detalle.totales?.envio],
+              ].filter(([, v]) => gNum(v) > 0).map(([l, v]) => (
+                <div key={l} style={{ display:'flex', justifyContent:'space-between', padding:'3px 0' }}><span>{l}</span><span style={{ fontWeight:700 }}>{fmt(gNum(v))}</span></div>
+              ))}
+              <div style={{ display:'flex', justifyContent:'space-between', padding:'8px 0 0', fontSize:16, fontWeight:900, color:C.na }}>
+                <span>TOTAL</span><span>{fmt(gTotal(detalle))}</span>
+              </div>
+            </div>
+            <div style={{ marginTop:10, fontSize:11.5, color:'rgba(255,255,255,0.6)' }}>
+              {detalle.tipo === 'DEF' ? `${gModalidad(detalle)} · ${detalle.estado === 'entregado' ? `✓ Entregado ${detalle.fechaEntrega || ''}` : `⏳ Pendiente · ${gAntigLabel(detalle.ts, m ? m.now : Date.now())}`}` : `PRE · modalidad ${detalle.modalidadPRE || '—'}`}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   const [etapa, setEtapa]         = useState('inicio');
   const [busqueda, setBusqueda]   = useState('');
@@ -3442,6 +3984,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
             {esAdmin(usuarioActual) && (
               <G gap={12} style={{ marginBottom:28 }}>
                 <button onClick={()=>setEtapa('liquidaciones')} className="sel-btn" style={s.bLiq}>📊 LIQUIDACIONES</button>
+                <button onClick={()=>setEtapa('gestion')} className="sel-btn" style={{ width:'100%', padding:'15px 20px', background:'linear-gradient(135deg,#7c3aed,#6d28d9)', color:'#fff', border:'none', borderRadius:12, fontWeight:800, fontSize:15, cursor:'pointer', boxShadow:'0 4px 18px rgba(124,58,237,0.45)', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' }}>📈 GESTIÓN</button>
               </G>
             )}
 
@@ -3502,11 +4045,11 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
         )}
 
         {/* ── PRE NUEVA ── */}
-        {etapa==='pre' && <PreCotizacion onVolver={irInicio} onIrDEF={(cod, cli, mod)=>{ setCodigoPRE(cod); if(cli) setClientePreload(cli); if(mod) setModalidadPreload(mod); setEtapa('def'); }} clienteInicial={clientePreload} />}
+        {etapa==='pre' && <PreCotizacion onVolver={irInicio} onIrDEF={(cod, cli, mod)=>{ setCodigoPRE(cod); if(cli) setClientePreload(cli); if(mod) setModalidadPreload(mod); setEtapa('def'); }} clienteInicial={clientePreload} usuarioActual={usuarioActual} />}
 
         {/* ── PRE CARGADA ── */}
         {esPRECargado && preLoadingCargado && <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'60vh',color:'rgba(255,255,255,0.6)',fontSize:16,flexDirection:'column',gap:14}}><div style={{width:38,height:38,border:'3px solid rgba(255,255,255,0.15)',borderTop:'3px solid rgba(255,255,255,0.8)',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}></div>Cargando pre-cotización...</div>}
-        {esPRECargado && !preLoadingCargado && <PreCotizacion onVolver={irInicio} onIrDEF={(cod, cli, mod)=>{ setCodigoPRE(cod); if(cli) setClientePreload(cli); if(mod) setModalidadPreload(mod); setEtapa('def'); }} preloaded={codigoCargado} />}
+        {esPRECargado && !preLoadingCargado && <PreCotizacion onVolver={irInicio} onIrDEF={(cod, cli, mod)=>{ setCodigoPRE(cod); if(cli) setClientePreload(cli); if(mod) setModalidadPreload(mod); setEtapa('def'); }} preloaded={codigoCargado} usuarioActual={usuarioActual} />}
 
         {/* ── CLIENTES ── */}
         {etapa==='clientes' && <ModuloClientes onNuevoPedido={nuevoPedidoDesdeCli} onVolver={irInicio} onAbrirPedido={(p)=>{ if(p.tipo==='PRE'){ setEtapa('pre_cargado_'+p.codigo); } else { setPedidoVer(p); setEtapa('ver_pedido'); } }} />}
@@ -3517,6 +4060,9 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 
         {/* ── LIQUIDACIONES (solo admin) ── */}
         {etapa==='liquidaciones' && <ModuloLiquidaciones onVolver={irInicio} />}
+
+        {/* ── GESTIÓN (solo admin) ── */}
+        {etapa==='gestion' && esAdmin(usuarioActual) && <ModuloGestion onVolver={irInicio} />}
 
       </div>
     </div>
@@ -3604,6 +4150,9 @@ function ModuloLiquidaciones({ onVolver }) {
     return out;
   }, []);
 
+  // refreshKey: fuerza recarga de datos y recálculo del rango "hoy" sin salir de la pantalla
+  const [refreshKey, setRefreshKey] = React.useState(0);
+  const [ultimaSync, setUltimaSync] = React.useState(null);
   React.useEffect(() => {
     if (step === 'lista') {
       setCargando(true);
@@ -3611,9 +4160,9 @@ function ModuloLiquidaciones({ onVolver }) {
       setExpandidos(new Set());
       setConfirmarBorrar(null);
       setErrorBorrado(null);
-      listLS().then(arr => { setPedidosData(Array.isArray(arr) ? arr : []); setCargando(false); });
+      listLS().then(arr => { setPedidosData(Array.isArray(arr) ? arr : []); setCargando(false); setUltimaSync(Date.now()); });
     }
-  }, [step]);
+  }, [step, refreshKey]);
 
   const rango = React.useMemo(() => {
     if (tipo === 'hoy') {
@@ -3630,7 +4179,7 @@ function ModuloLiquidaciones({ onVolver }) {
       return { desde, hasta, etiqueta: `Cierre mensual · ${mesSel.label}` };
     }
     return null;
-  }, [tipo, desdeISO, hastaISO, mesSel]);
+  }, [tipo, desdeISO, hastaISO, mesSel, refreshKey]);
 
   const rolInfo = ROLES_LIQ.find(r => r.key === rol);
   const esTotal = rolInfo && !rolInfo.email;
@@ -3747,6 +4296,11 @@ function ModuloLiquidaciones({ onVolver }) {
     <div className="no-print" style={{ display:'flex', alignItems:'center', gap:8, marginBottom:20 }}>
       <button onClick={atras} disabled={!puedeAtras} style={{ padding:'8px 14px', background:puedeAtras?'rgba(56,189,248,0.15)':'rgba(255,255,255,0.05)', color:puedeAtras?'#7dd3fc':'rgba(255,255,255,0.25)', border:`1px solid ${puedeAtras?'rgba(56,189,248,0.4)':'rgba(255,255,255,0.1)'}`, borderRadius:8, fontWeight:700, fontSize:12, cursor:puedeAtras?'pointer':'default' }}>← Atrás</button>
       <div style={{ flex:1 }} />
+      {step === 'lista' && (
+        <button onClick={()=>setRefreshKey(k=>k+1)} style={{ padding:'8px 14px', background:'rgba(74,222,128,0.12)', color:'#4ade80', border:'1px solid rgba(74,222,128,0.4)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>
+          🔄 Actualizar{ultimaSync ? ` · ${String(new Date(ultimaSync).getHours()).padStart(2,'0')}:${String(new Date(ultimaSync).getMinutes()).padStart(2,'0')}` : ''}
+        </button>
+      )}
       <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>🏠 Salir</button>
     </div>
   );

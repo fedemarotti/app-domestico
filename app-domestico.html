@@ -786,9 +786,9 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
       `📦 *MODALIDAD DE ENTREGA*`,
       (extras.retiraLocal||modalidadPRE==='retiro')?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:(extras.esInterior||modalidadPRE==='interior')?`🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`:typeof extras.envio==='number'&&extras.localidad?`🚚 *ENVÍO FLEX AMBA* — ${extras.localidad} — *${fmt(extras.envio)}*`:zona?`🚚 *ENVÍO FLEX AMBA* — ${extras.localidad} (${zona.zona}) · ${extras.bultos} bulto${extras.bultos!==1?'s':''} — *${fmt(totalEnvio)}*`:(extras.localidad||modalidadPRE==='flex')?`🚚 *ENVÍO FLEX AMBA*${extras.localidad?` — ${extras.localidad}`:''}`:null,``,
       `━━━━━━━━━━━━━━━━`,`💰 *TOTAL: ${fmt(total)}*`,`━━━━━━━━━━━━━━━━`,``,
-      `📌 _Te adjunto esta cotización para que la revises. Si hay algo para modificar, avisame._`,``,
-      `💳 _Una vez que nos envíes el comprobante de pago, te pediremos los detalles: colores, fragancias y datos de envío._`,``,
-      `🙏 _¡Gracias por confiar en nosotros! Aguardamos tu confirmación._`,``,
+      `🏷️ _Este valor incluye un 15% de descuento y se mantiene durante 48 horas._`,``,
+      `💳 _Cuando decidas avanzar, te enviamos los datos de pago. Una vez recibido el comprobante, definimos colores, fragancias y datos de envío._`,``,
+      `Está bien esta opción o querés que ajustemos algo?`,``,
       `_Doméstico · Química de Limpieza · Moreno, Bs. As._`,
     ].filter(l=>l!==null).join('\n');
     setWaMensaje(lineas); setPaso('wa');
@@ -812,7 +812,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
           {/* Selector de modalidad */}
           {!modalidadPRE && (
             <div style={{ marginBottom:20 }}>
-              <div style={{ fontSize:13, fontWeight:700, color:'rgba(255,255,255,0.7)', marginBottom:12 }}>¿Cómo recibe el pedido?</div>
+              <div style={{ fontSize:13, fontWeight:700, color:'rgba(255,255,255,0.7)', marginBottom:12 }}>Cómo recibe el pedido?</div>
               <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:14 }}>
                 {/* RETIRO EN PLANTA */}
                 <button onClick={()=>{ setModalidadPRE('retiro'); setExtras(e=>({...e,retiraLocal:true,esInterior:false})); }}
@@ -872,7 +872,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
       {paso==='tipo' && (
         <div>
           <button onClick={()=>setPaso('inicio')} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.75)', border:'1px solid rgba(255,255,255,0.14)', borderRadius:8, fontWeight:600, fontSize:12, cursor:'pointer', marginBottom:18 }}>← Atrás</button>
-          <SH step="Pre-cotización · Paso 1" title="¿Qué producto?" />
+          <SH step="Pre-cotización · Paso 1" title="Qué producto?" />
           {/* Fila 1: Jabón + Suavizante */}
           <div style={{ display:'flex', gap:12, justifyContent:'center', marginBottom:12 }}>
             <button onClick={()=>{ setCur({...cur,tipo:'jabon'}); setPaso('cantidad'); }}
@@ -909,7 +909,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
       {paso==='cantidad' && (
         <div>
           <button onClick={()=>setPaso('tipo')} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.75)', border:'1px solid rgba(255,255,255,0.14)', borderRadius:8, fontWeight:600, fontSize:12, cursor:'pointer', marginBottom:18 }}>← Atrás</button>
-          <SH step="Pre-cotización · Paso 2" title="¿Cuántos litros?" />
+          <SH step="Pre-cotización · Paso 2" title="Cuántos litros?" />
           <G cols={2} gap={14}>
             {[50,200].map(lts=>(
               <button key={lts} onClick={()=>{ setCur({...cur,cantidad:lts}); setPaso(['jabon','suavizante','detergente'].includes(cur.tipo)?'calidad':'confirmar'); }}
@@ -945,7 +945,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
       {paso==='confirmar' && (
         <div>
           <button onClick={()=>setPaso(['jabon','suavizante','detergente'].includes(cur.tipo)?'calidad':'cantidad')} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.75)', border:'1px solid rgba(255,255,255,0.14)', borderRadius:8, fontWeight:600, fontSize:12, cursor:'pointer', marginBottom:18 }}>← Atrás</button>
-          <SH step="Pre-cotización · Confirmar" title="¿Agregar este producto?" />
+          <SH step="Pre-cotización · Confirmar" title="Agregar este producto?" />
           <div style={{...s.card,textAlign:'center',marginBottom:20}}>
             <div style={{ fontSize:18, fontWeight:800, marginBottom:8 }}>{cur.tipo?.charAt(0).toUpperCase()+cur.tipo?.slice(1)} {cur.calidad?`${cur.calidad} `:''}{cur.cantidad}lts</div>
             <div style={s.tot}>{fmt((cur.tipo==='lavandina'||cur.tipo==='desodorante')?PRECIOS[cur.tipo]?.[cur.cantidad]:PRECIOS[cur.tipo]?.[cur.cantidad]?.[cur.calidad]||0)}</div>
@@ -1012,7 +1012,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
           <button onClick={()=>navigator.clipboard.writeText(waMensaje).then(()=>alert('✓ Copiado'))} style={{...s.bP, background:'linear-gradient(135deg,#25d366,#128c7e)', marginBottom:10}}>📋 Copiar para WhatsApp</button>
           {/* Opciones post-PRE */}
           <div style={{...s.card, background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.12)', marginTop:6}}>
-            <div style={s.cTit}>¿Qué hacemos ahora?</div>
+            <div style={s.cTit}>Qué hacemos ahora?</div>
             <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
               <button onClick={()=>onIrDEF && onIrDEF(codigo, clienteInicial, modalidadPRE)} className="sel-btn" style={s.bV}>📦 Pasar al Pedido Definitivo ({toDEF(codigo)})</button>
               <button onClick={onVolver} className="sel-btn" style={s.bS}>🏠 Volver al inicio</button>
@@ -1062,7 +1062,7 @@ const DetalleDEF = ({ itemPRE, onConfirm }) => {
             <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)' }}>Incluye activador en polvo + activador líquido amarillo</div>
           </div>
           <div style={s.card}>
-            <div style={s.cTit}>🔄 ¿Canjear lavandina por desodorante?</div>
+            <div style={s.cTit}>🔄 Canjear lavandina por desodorante?</div>
             <div style={{ fontSize:13, color:'rgba(255,255,255,0.6)', marginBottom:14 }}>
               Mismo precio · Da crédito de <strong>{cantidad}lts</strong> en desodorante de piso con fragancia a elección
             </div>
@@ -1439,7 +1439,7 @@ const DetalleDEFCombo = ({ itemPRE, onConfirm }) => {
             <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)' }}>Incluye activador en polvo + activador líquido amarillo</div>
           </div>
           <div style={s.card}>
-            <div style={s.cTit}>🔄 ¿Canjear lavandina por desodorante?</div>
+            <div style={s.cTit}>🔄 Canjear lavandina por desodorante?</div>
             <div style={{ fontSize:13, color:'rgba(255,255,255,0.6)', marginBottom:14 }}>
               {canje
                 ? <span style={{ color:'#4ade80', fontWeight:700 }}>✓ Canjeada — sumás <strong>{cantidad}lts</strong> extra de desodorante</span>
@@ -2408,12 +2408,12 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
       {paso==='cliente' && (
         <div>
           <button onClick={()=>setPaso('detalles')} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.75)', border:'1px solid rgba(255,255,255,0.14)', borderRadius:8, fontWeight:600, fontSize:12, cursor:'pointer', marginBottom:18 }}>← Atrás</button>
-          <SH step="Datos del cliente" title="¿A quién le vendés?" />
+          <SH step="Datos del cliente" title="A quién le vendés?" />
 
           {/* Selector modalidad — primera pregunta */}
           {!modalidadEntrega && (
             <div style={{ marginBottom:20 }}>
-              <div style={{ fontSize:13, fontWeight:700, color:'rgba(255,255,255,0.7)', marginBottom:10 }}>¿Cómo recibe el pedido?</div>
+              <div style={{ fontSize:13, fontWeight:700, color:'rgba(255,255,255,0.7)', marginBottom:10 }}>Cómo recibe el pedido?</div>
               <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
                 <button onClick={()=>{ setModalidadEntrega('local'); setExtras(e=>({...e,retiraLocal:true,esInterior:false})); }} className="sel-btn" style={{ textAlign:'left', padding:'14px 16px', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:12, color:'#fff', cursor:'pointer' }}>
                   <div style={{ fontWeight:700, fontSize:14 }}>🏪 Retira en planta</div>
@@ -2479,6 +2479,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
 
                     {/* 10. Dato extra */}
                     <div><label style={s.lbl}>Dato extra</label>
+                      <div style={{fontSize:11,color:'rgba(255,255,255,0.4)',marginTop:-2,marginBottom:6}}>Ej: entre calles / no funciona el timbre</div>
                       <input type="text" value={cliente.datoExtra||''} onChange={e=>setCliente({...cliente,datoExtra:e.target.value})} style={s.inp} placeholder="Información adicional del cliente" /></div>
 
                     {/* 11. Observaciones — siempre al final */}
@@ -2670,6 +2671,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
               cl.cp ? `📮 CP: ${cl.cp}` : null,
               cl.ciudad ? `🏙️ Ciudad: ${cl.ciudad}` : null,
               cl.provincia ? `🗺️ Provincia: ${cl.provincia}` : null,
+              cl.datoExtra ? `ℹ️ Dato extra: ${cl.datoExtra}` : null,
               cl.observaciones ? `⚠️ *OBSERVACIONES: ${cl.observaciones.toUpperCase()}*` : null,
               ``,
               `━━━━━━━━━━━━━━━━`,
@@ -2775,7 +2777,7 @@ Ante cualquier inconsistencia, contactá a tu vendedor.
 Pedile a tu vendedor el instructivo de preparación — son concentrados y hay que respetar las proporciones para que funcionen bien.
 
 Estamos para lo que necesités.
-¡Éxito! 🙌
+Éxito! 🙌
 _Doméstico · Moreno, Bs. As._`,
     interior: `📦 *Doméstico · Química de Limpieza*
 
@@ -2791,7 +2793,7 @@ Tu pedido fue despachado y está en camino hacia vos a través de ${empresaTrans
 📋 *Antes de preparar los productos:*
 Pedile a tu vendedor el instructivo de dilución — son concentrados y hay que respetar las proporciones.
 
-Ante cualquier consulta, estamos disponibles. ¡Éxito con tu emprendimiento! 💪
+Ante cualquier consulta, estamos disponibles. Éxito con tu emprendimiento! 💪
 _Doméstico · Moreno, Bs. As._`,
     retiro: `✅ *Doméstico · Química de Limpieza*
 
@@ -2802,7 +2804,7 @@ Tu pedido está listo para retirar en nuestra planta en Moreno, Bs. As.
 📋 *Antes de preparar los productos:*
 Pedile a tu vendedor el instructivo de preparación — son concentrados y hay que respetar las proporciones para que funcionen bien.
 
-¡Te esperamos! Cualquier consulta, estamos para ayudarte. 🙌
+Te esperamos! Cualquier consulta, estamos para ayudarte. 🙌
 _Doméstico · Moreno, Bs. As._`
   }[modalidadEntrega];
 
@@ -3057,7 +3059,7 @@ _Doméstico · Moreno, Bs. As._`
             </div>
             <pre style={{ fontFamily:'"Segoe UI",sans-serif', fontSize:12, whiteSpace:'pre-wrap', color:'rgba(255,255,255,0.85)', lineHeight:1.6, margin:'0 0 14px', background:'rgba(255,255,255,0.04)', borderRadius:10, padding:'12px' }}>{mensajeEntregado}</pre>
             <button onClick={()=>{ navigator.clipboard.writeText(mensajeEntregado).then(()=>{ setCopiadoEntregado(true); setTimeout(()=>setCopiadoEntregado(false),2500); }); }} style={{ width:'100%', padding:'12px', background:'linear-gradient(135deg,#25d366,#128c7e)', color:'#fff', border:'none', borderRadius:10, fontWeight:800, fontSize:14, cursor:'pointer' }}>
-              {copiadoEntregado ? '✓ ¡Copiado!' : '📋 Copiar para WhatsApp'}
+              {copiadoEntregado ? '✓ Copiado!' : '📋 Copiar para WhatsApp'}
             </button>
           </div>
         </div>
@@ -3253,7 +3255,7 @@ const ModuloClientes = ({ onNuevoPedido, onVolver, onAbrirPedido }) => {
         {confirmDel && (
           <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100, padding:20 }}>
             <div style={{ background:'#1e293b', border:'1px solid rgba(239,68,68,0.4)', borderRadius:16, padding:24, maxWidth:340, width:'100%' }}>
-              <div style={{ fontWeight:800, fontSize:16, marginBottom:8 }}>¿Eliminar cliente?</div>
+              <div style={{ fontWeight:800, fontSize:16, marginBottom:8 }}>Eliminar cliente?</div>
               <div style={{ fontSize:13, color:'rgba(255,255,255,0.6)', marginBottom:20 }}>Se eliminará la ficha de <strong>{confirmDel.nombre}</strong>. Los pedidos no se borran.</div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
                 <button onClick={()=>setConfirmDel(null)} style={{...s.bS}}>Cancelar</button>
@@ -3927,8 +3929,8 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   }, [busqueda, pedidos]);
 
   const abrir = (p) => {
-    setBusResults([]); setBusqueda(''); setBusError('');
-    if (p.tipo==='PRE') { setCodigoPRE(null); setEtapa('pre_cargado_'+p.codigo); }
+    setBusError('');
+    if (p.tipo==='PRE') { setBusResults([]); setBusqueda(''); setCodigoPRE(null); setEtapa('pre_cargado_'+p.codigo); }
     else { setPedidoVer(p); setPedidoVerOrigen('search'); setEtapa('ver_pedido'); }
   };
 
@@ -4313,7 +4315,7 @@ function ModuloLiquidaciones({ onVolver }) {
       {/* ── PANTALLA DE INICIO: elección de rol ── */}
       {step === 'rol' && (
         <div>
-          <div style={{ fontSize:19, fontWeight:900, color:'#fff', marginBottom:20 }}>¿De quién querés ver las ventas?</div>
+          <div style={{ fontSize:19, fontWeight:900, color:'#fff', marginBottom:20 }}>De quién querés ver las ventas?</div>
           {/* 3 botones lado a lado */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:12 }}>
             {ROLES_LIQ.filter(r => r.key !== 'total').map(r => (
@@ -4361,7 +4363,7 @@ function ModuloLiquidaciones({ onVolver }) {
               <div style={{ fontSize:17, fontWeight:900, color:'#fff' }}>{rolInfo?.label}</div>
             </div>
           </div>
-          <div style={{ fontSize:14, color:'rgba(255,255,255,0.6)', marginBottom:14 }}>¿Qué período querés ver?</div>
+          <div style={{ fontSize:14, color:'rgba(255,255,255,0.6)', marginBottom:14 }}>Qué período querés ver?</div>
           <G gap={10}>
             <button onClick={()=>elegirTipo('hoy')} className="sel-btn" style={s.bLiqO}>📅 &nbsp;Ventas de Hoy</button>
             <button onClick={()=>elegirTipo('periodo')} className="sel-btn" style={s.bLiqO}>🗓️ &nbsp;Por Período</button>

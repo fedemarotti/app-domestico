@@ -2724,7 +2724,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
 // ═══════════════════════════════════════════════════════════════════════════════
 // VISTA DE SOLO LECTURA — PEDIDO DEF YA FINALIZADO
 // ═══════════════════════════════════════════════════════════════════════════════
-const VistaDetallePedidoDEF = ({ pedido, onVolver, onNuevoPedido, onPedidoActualizado }) => {
+const VistaDetallePedidoDEF = ({ pedido, onVolver, onNuevoPedido, onPedidoActualizado, onVerTracking }) => {
   const { codigo, fecha, items, envases:env, totales:tot, zonaEnvio } = pedido;
   const fmt = v => '$'+Math.round(v||0).toLocaleString('es-AR');
 
@@ -3033,11 +3033,13 @@ _Doméstico · Moreno, Bs. As._`
         <button onClick={()=>imprimirPedido(pedido)} style={{ width:'100%', padding:'10px', background:'linear-gradient(135deg,#0d5c3a,#1a7a52)', color:'#fff', border:'none', borderRadius:8, fontWeight:700, fontSize:13, cursor:'pointer' }}>🖨️ Imprimir todos los documentos</button>
       </div>
 
-      {/* Botón PEDIDO ENTREGADO */}
+      {/* Estado del pedido — el entregado se marca desde el tracking */}
       {estadoPedido !== 'entregado' ? (
-        <button onClick={marcarEntregado} style={{ width:'100%', padding:'14px', marginBottom:10, background:'linear-gradient(135deg,#0ea5e9,#0284c7)', color:'#fff', border:'none', borderRadius:12, fontWeight:800, fontSize:15, cursor:'pointer', letterSpacing:0.3 }}>
-          🚚 PEDIDO ENTREGADO
+        onVerTracking ? (
+        <button onClick={onVerTracking} style={{ width:'100%', padding:'14px', marginBottom:10, background:'linear-gradient(135deg,#0ea5e9,#0284c7)', color:'#fff', border:'none', borderRadius:12, fontWeight:800, fontSize:15, cursor:'pointer', letterSpacing:0.3 }}>
+          📍 ESTADO DEL PEDIDO — VER TRACKING
         </button>
+        ) : null
       ) : (
         <div style={{ width:'100%', padding:'12px', marginBottom:10, background:'rgba(56,189,248,0.12)', border:'1px solid rgba(56,189,248,0.4)', borderRadius:12, textAlign:'center' }}>
           <div style={{ fontWeight:800, color:'#38bdf8', fontSize:14 }}>✅ Pedido marcado como entregado</div>
@@ -3828,6 +3830,224 @@ const ModuloGestion = ({ onVolver }) => {
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRACKING DE PEDIDOS — estados por modalidad, avance con auditoría, mensaje WA
+// ═══════════════════════════════════════════════════════════════════════════════
+const TRK_ROL = (email) => {
+  const e = (email || '').trim().toLowerCase();
+  const r = ROLES_LIQ.find(x => x.email && x.email.toLowerCase() === e);
+  return r ? r.label : (e ? e.split('@')[0].toUpperCase() : '');
+};
+const trkModalidad = (p) => { const ex = p.extras || {}; return ex.retiraLocal ? 'retiro' : ex.esInterior ? 'interior' : 'flex'; };
+const TRK_BASE = [
+  { k:'confirmado', ico:'✅', tit:'Pedido confirmado', desc:'Ingresó al sistema y está en cola de producción.' },
+  { k:'produccion', ico:'🧪', tit:'En producción', desc:'La planta está elaborando los productos.' },
+  { k:'armado', ico:'📦', tit:'Consolidado y armado', desc:'Producción terminó. Control y armado del pedido.' },
+];
+const TRK_PASOS = {
+  retiro: [...TRK_BASE,
+    { k:'listo', ico:'🏪', tit:'Listo para retirar', desc:'Retirable en planta (Moreno, Bs. As.).', dato:'fechaRetiro' },
+    { k:'entregado', ico:'🤝', tit:'Entregado en planta', desc:'El cliente ya lo retiró. Pedido cerrado.', final:true },
+  ],
+  flex: [...TRK_BASE,
+    { k:'sale', ico:'🛵', tit:'Sale con la logística', desc:'La empresa de reparto lo retira de planta después del mediodía.' },
+    { k:'reparto', ico:'🚚', tit:'En reparto (15 a 21 hs)', desc:'La logística lo está llevando al domicilio del cliente.' },
+    { k:'entregado', ico:'✔️', tit:'Entregado', desc:'El cliente lo recibió. Pedido cerrado.', final:true },
+  ],
+  interior: [...TRK_BASE,
+    { k:'listoDespacho', ico:'🏷️', tit:'Listo para despachar', desc:'Se entrega al transporte el día que elige el operador.', dato:'diaDespacho' },
+    { k:'despachado', ico:'🚛', tit:'Despachado al transporte', desc:'En manos de Vía Cargo / Andreani, en viaje a la localidad del cliente. El flete lo abona el cliente al recibir.', final:true },
+  ],
+};
+const trkEstado = (p) => {
+  if (Array.isArray(p.tracking) && p.tracking.length) return p.tracking;
+  const base = [{ k:'confirmado', ts: p.ts || 0, por: p.creadoPor || '' }];
+  if (p.estado === 'entregado') {
+    const pasos = TRK_PASOS[trkModalidad(p)];
+    base.push({ k: pasos[pasos.length-1].k, ts: p.tsEntrega || p.ts || 0, por: '' });
+  }
+  return base;
+};
+const trkIdx = (p) => {
+  const pasos = TRK_PASOS[trkModalidad(p)];
+  const t = trkEstado(p);
+  const i = pasos.findIndex(x => x.k === (t[t.length-1] || {}).k);
+  return i < 0 ? 0 : i;
+};
+const trkFmtTs = (ts) => ts ? new Date(ts).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
+const trkWA = (p) => {
+  const mod = trkModalidad(p);
+  const i = trkIdx(p);
+  const t = trkEstado(p);
+  const ult = t[t.length-1] || {};
+  const d = p.trackingDatos || {};
+  const dia = d.diaDespacho === 'HOY' ? 'hoy' : d.diaDespacho === 'MAÑANA' ? 'mañana' : 'el próximo día hábil';
+  const seg = d.nroSeguimiento ? `\n🔎 N° de seguimiento: *${d.nroSeguimiento}*` : '';
+  const c1 = `✅ Tu pedido está *confirmado* y en cola de producción. Te vamos avisando los avances.`;
+  const c2 = `🧪 Tu pedido ya está *en producción*. La planta está elaborando tus productos.`;
+  const c3 = `📦 Producción terminó. Tu pedido está en *consolidado y armado*, en control final.`;
+  const gracias = `Gracias por confiar en Doméstico. Cualquier consulta sobre el uso de los productos, estamos acá.`;
+  const cuerpos = {
+    retiro: [c1, c2, c3,
+      `🏪 *Tu pedido está listo.* Podés retirarlo en planta (Moreno, Bs. As.) a partir de: *${d.fechaRetiro || 'a coordinar'}*.\n\nCualquier cambio de día u horario, avisanos por acá.`,
+      `🤝 *Pedido entregado.* ${gracias}`,
+    ],
+    flex: [c1, c2, c3,
+      `🛵 *Tu pedido sale hoy.* La empresa de logística lo retira de nuestra planta después del mediodía y estará *en reparto entre las 15 y las 21 hs*.\n\nPor favor asegurate de que haya alguien para recibirlo.`,
+      `🚚 *Tu pedido está en reparto.* La logística lo entrega hoy entre las *15 y las 21 hs* en tu domicilio.`,
+      `✔️ *Pedido entregado.* ${gracias}`,
+    ],
+    interior: [c1, c2, c3,
+      `🏷️ *Tu pedido está finalizado.* Lo entregamos a la empresa de transporte (Vía Cargo / Andreani) *${dia}* para el traslado a tu localidad. _(El flete se abona al recibir.)_`,
+      `🚛 *Tu pedido ya está en manos del transporte* (Vía Cargo / Andreani), en viaje a tu localidad. El tiempo de traslado depende de la empresa transportista. _(El flete se abona al recibir.)_${seg}`,
+    ],
+  };
+  return `📦 *DOMÉSTICO · Estado de tu pedido*\n📋 *${p.codigo}*\n🕐 Novedad: ${trkFmtTs(ult.ts)}\n\n${cuerpos[mod][i]}\n\n_Doméstico · Química de Limpieza · Moreno, Bs. As._`;
+};
+
+const ModuloTracking = ({ pedido, onVolver, onPedidoActualizado, usuarioActual }) => {
+  const [ped, setPed] = React.useState(pedido);
+  const d0 = pedido.trackingDatos || {};
+  const [fechaRetiro, setFechaRetiro] = React.useState(d0.fechaRetiro || '');
+  const [diaDespacho, setDiaDespacho] = React.useState(d0.diaDespacho || 'HOY');
+  const [nroSeguimiento, setNroSeguimiento] = React.useState(d0.nroSeguimiento || '');
+  const [guardando, setGuardando] = React.useState(false);
+  const [aviso, setAviso] = React.useState('');
+  const [copiado, setCopiado] = React.useState(false);
+
+  const mod = trkModalidad(ped);
+  const pasos = TRK_PASOS[mod];
+  const t = trkEstado(ped);
+  const i = trkIdx(ped);
+  const fin = i === pasos.length - 1;
+  const sig = pasos[i + 1];
+  const modLabel = mod === 'retiro' ? '🏪 RETIRO EN PLANTA' : mod === 'interior' ? '🚛 INTERIOR DEL PAÍS' : '🛵 ENVÍO FLEX AMBA';
+
+  const avanzar = async () => {
+    if (!sig || guardando) return;
+    const datos = { ...(ped.trackingDatos || {}) };
+    if (sig.dato === 'fechaRetiro') {
+      if (!fechaRetiro.trim()) { setAviso('Completá desde cuándo se puede retirar (ej: mañana desde las 9)'); return; }
+      datos.fechaRetiro = fechaRetiro.trim();
+    }
+    if (sig.dato === 'diaDespacho') datos.diaDespacho = diaDespacho;
+    if (sig.k === 'despachado' && nroSeguimiento.trim()) datos.nroSeguimiento = nroSeguimiento.trim();
+    setGuardando(true);
+    const ahora = Date.now();
+    const quien = (usuarioActual && usuarioActual.email) || '';
+    const nuevo = { ...ped,
+      tracking: [...t, { k: sig.k, ts: ahora, por: quien }],
+      trackingDatos: datos,
+      trackingHist: [...(ped.trackingHist || []), { a:'avanza', k: sig.k, ts: ahora, por: quien }],
+    };
+    if (sig.final) { nuevo.estado = 'entregado'; nuevo.fechaEntrega = new Date().toLocaleString('es-AR'); nuevo.tsEntrega = ahora; }
+    await saveLS(nuevo);
+    setPed(nuevo); if (onPedidoActualizado) onPedidoActualizado(nuevo);
+    setGuardando(false); setAviso('');
+  };
+
+  const retroceder = async () => {
+    if (t.length <= 1 || guardando) return;
+    setGuardando(true);
+    const ahora = Date.now();
+    const quien = (usuarioActual && usuarioActual.email) || '';
+    const quitado = t[t.length-1];
+    const nuevo = { ...ped,
+      tracking: t.slice(0, -1),
+      trackingHist: [...(ped.trackingHist || []), { a:'retrocede', k: quitado.k, ts: ahora, por: quien }],
+    };
+    if (quitado.k === pasos[pasos.length-1].k) { nuevo.estado = 'pendiente'; nuevo.fechaEntrega = null; nuevo.tsEntrega = null; }
+    await saveLS(nuevo);
+    setPed(nuevo); if (onPedidoActualizado) onPedidoActualizado(nuevo);
+    setGuardando(false);
+  };
+
+  const copiarWA = () => {
+    navigator.clipboard.writeText(trkWA(ped)).then(() => { setCopiado(true); setTimeout(() => setCopiado(false), 1500); });
+  };
+
+  return (
+    <div>
+      <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(56,189,248,0.15)', color:'#7dd3fc', border:'1px solid rgba(56,189,248,0.4)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', marginBottom:16 }}>← Atrás</button>
+      <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', marginBottom:6 }}>
+        <Chip codigo={ped.codigo} tipo="DEF" />
+        <span style={{ fontSize:11, fontWeight:800, color:'#7dd3fc', background:'rgba(56,189,248,0.12)', border:'1px solid rgba(56,189,248,0.35)', borderRadius:20, padding:'3px 10px', letterSpacing:0.4 }}>{modLabel}</span>
+      </div>
+      <div style={{ fontSize:17, fontWeight:900, marginBottom:2 }}>📍 Estado del pedido</div>
+      <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginBottom:16 }}>{(ped.cliente && ped.cliente.nombre) || ''}{ped.fecha ? ` · ${ped.fecha}` : ''}</div>
+
+      <div style={{ ...s.card }}>
+        {pasos.map((p2, j) => {
+          const done = j < i || (j === i && fin);
+          const cur = j === i && !fin;
+          const m = t.find(x => x.k === p2.k) || null;
+          const dd = ped.trackingDatos || {};
+          let desc = p2.desc;
+          if (p2.dato === 'fechaRetiro' && j <= i && dd.fechaRetiro) desc = 'Retirable a partir de: ' + dd.fechaRetiro;
+          if (p2.dato === 'diaDespacho' && j <= i && dd.diaDespacho) desc = 'Entrega al transporte: ' + dd.diaDespacho;
+          if (p2.k === 'despachado' && j <= i && dd.nroSeguimiento) desc = desc + ' · N° seguimiento: ' + dd.nroSeguimiento;
+          return (
+            <div key={p2.k} style={{ display:'flex', gap:14 }}>
+              <div style={{ display:'flex', flexDirection:'column', alignItems:'center', width:34, flexShrink:0 }}>
+                <div style={{ width:34, height:34, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, background: done ? 'rgba(34,197,94,0.18)' : cur ? 'rgba(249,115,22,0.2)' : 'rgba(255,255,255,0.07)', border: done ? '2px solid #4ade80' : cur ? '2px solid #f97316' : '2px solid rgba(255,255,255,0.15)', boxShadow: cur ? '0 0 14px rgba(249,115,22,0.65)' : 'none' }}>{p2.ico}</div>
+                {j < pasos.length-1 && <div style={{ width:2, flex:1, minHeight:20, background: j < i ? '#4ade80' : 'rgba(255,255,255,0.12)' }} />}
+              </div>
+              <div style={{ padding:'4px 0 18px', flex:1, minWidth:0 }}>
+                <div style={{ fontSize:13.5, fontWeight:800, color: done ? '#4ade80' : cur ? '#fdba74' : 'rgba(255,255,255,0.45)' }}>{p2.tit}</div>
+                <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.4)', marginTop:2, lineHeight:1.45 }}>{desc}</div>
+                {m && m.ts ? (
+                  <div style={{ fontSize:10.5, marginTop:4, fontWeight:600, color: done ? 'rgba(74,222,128,0.75)' : 'rgba(253,186,116,0.85)' }}>✓ {trkFmtTs(m.ts)}{TRK_ROL(m.por) ? ' · ' + TRK_ROL(m.por) : ''}</div>
+                ) : (cur ? <div style={{ fontSize:10.5, marginTop:4, fontWeight:600, color:'rgba(253,186,116,0.85)' }}>● Estado actual</div> : null)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ ...s.card }}>
+        <div style={s.cTit}>Avanzar estado</div>
+        {sig && sig.dato === 'fechaRetiro' && (
+          <div style={{ marginBottom:12 }}>
+            <label style={{ display:'block', fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.6)', marginBottom:6 }}>Retirable en planta a partir de:</label>
+            <input value={fechaRetiro} onChange={e => { setFechaRetiro(e.target.value); setAviso(''); }} placeholder="Ej: mañana desde las 9:00" style={{ width:'100%', padding:'11px 12px', background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:10, color:'#fff', fontSize:13, fontWeight:700, boxSizing:'border-box' }} />
+          </div>
+        )}
+        {sig && sig.dato === 'diaDespacho' && (
+          <div style={{ marginBottom:12 }}>
+            <label style={{ display:'block', fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.6)', marginBottom:6 }}>Se entrega al transporte:</label>
+            <div style={{ display:'flex', gap:6 }}>
+              {['HOY','MAÑANA','PRÓX. DÍA HÁBIL'].map(dOpt => (
+                <div key={dOpt} onClick={() => setDiaDespacho(dOpt)} style={{ flex:1, padding:'9px 4px', borderRadius:10, fontSize:10.5, fontWeight:800, textAlign:'center', cursor:'pointer', background: diaDespacho === dOpt ? 'rgba(249,115,22,0.25)' : 'rgba(255,255,255,0.07)', border: diaDespacho === dOpt ? '1px solid #f97316' : '1px solid rgba(255,255,255,0.16)', color: diaDespacho === dOpt ? '#fdba74' : 'rgba(255,255,255,0.6)' }}>{dOpt}</div>
+              ))}
+            </div>
+          </div>
+        )}
+        {sig && sig.k === 'despachado' && (
+          <div style={{ marginBottom:12 }}>
+            <label style={{ display:'block', fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.6)', marginBottom:6 }}>N° de seguimiento del transporte (opcional)</label>
+            <input value={nroSeguimiento} onChange={e => setNroSeguimiento(e.target.value)} placeholder="Se incluye en el mensaje al cliente" style={{ width:'100%', padding:'11px 12px', background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:10, color:'#fff', fontSize:13, fontWeight:700, boxSizing:'border-box' }} />
+          </div>
+        )}
+        {aviso && <div style={{ fontSize:12, color:'#fdba74', fontWeight:700, marginBottom:10 }}>⚠️ {aviso}</div>}
+        <button onClick={avanzar} disabled={!sig || guardando} style={{ width:'100%', padding:15, border:'none', borderRadius:12, cursor: sig && !guardando ? 'pointer' : 'default', background: sig ? 'linear-gradient(135deg,#f97316,#ea580c)' : 'rgba(34,197,94,0.25)', color: sig ? '#fff' : '#4ade80', fontWeight:900, fontSize:14, letterSpacing:0.4, boxShadow: sig ? '0 4px 18px rgba(249,115,22,0.4)' : 'none', opacity: guardando ? 0.6 : 1, marginBottom:8 }}>
+          {guardando ? '⏳ Guardando…' : sig ? '▶ MARCAR: ' + sig.ico + ' ' + sig.tit.toUpperCase() : '✓ PEDIDO FINALIZADO'}
+        </button>
+        {t.length > 1 && (
+          <button onClick={retroceder} disabled={guardando} style={{ width:'100%', padding:'9px', background:'rgba(255,255,255,0.05)', color:'rgba(255,255,255,0.55)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:10, fontWeight:700, fontSize:11.5, cursor:'pointer' }}>↩ Retroceder un paso (corregir un error)</button>
+        )}
+        <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.35)', textAlign:'center', marginTop:8 }}>Cada cambio queda registrado con usuario, fecha y hora</div>
+      </div>
+
+      <div style={{ background:'rgba(37,211,102,0.1)', border:'1px solid rgba(37,211,102,0.28)', borderRadius:14, padding:14 }}>
+        <div style={{ fontWeight:800, fontSize:12.5, color:'rgba(255,255,255,0.6)', marginBottom:8 }}>💬 Mensaje para el cliente · novedad: {trkFmtTs((t[t.length-1] || {}).ts)}</div>
+        <pre style={{ fontFamily:'"Segoe UI",system-ui,sans-serif', fontSize:11.5, whiteSpace:'pre-wrap', color:'rgba(255,255,255,0.85)', lineHeight:1.55, margin:'0 0 10px', maxHeight:260, overflowY:'auto' }}>{trkWA(ped)}</pre>
+        <button onClick={copiarWA} style={{ width:'100%', padding:11, background:'linear-gradient(135deg,#25d366,#128c7e)', color:'#fff', border:'none', borderRadius:9, fontWeight:800, fontSize:13, cursor:'pointer' }}>{copiado ? '✓ Copiado' : '📋 Copiar para WhatsApp'}</button>
+        <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.35)', marginTop:8, lineHeight:1.5 }}>El mensaje se arma con el estado actual y la hora de la novedad. Copialo y envialo al cliente cuando corresponda — nada sale automático.</div>
+      </div>
+    </div>
+  );
+};
+
 const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   const [etapa, setEtapa]         = useState('inicio');
   const [busqueda, setBusqueda]   = useState('');
@@ -3839,6 +4059,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   const [pedidoVer, setPedidoVer] = useState(null); // pedido DEF a ver en modo lectura
   const [pedidoVerOrigen, setPedidoVerOrigen] = useState('clientes'); // 'search' | 'clientes'
   const [pedidos, setPedidos] = useState([]);
+  const [pedidoTrack, setPedidoTrack] = useState(null); // pedido DEF en pantalla de tracking
 
   useEffect(() => { listLS().then(arr => setPedidos(Array.isArray(arr) ? arr : [])); }, []);
 
@@ -3934,6 +4155,8 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
     else { setPedidoVer(p); setPedidoVerOrigen('search'); setEtapa('ver_pedido'); }
   };
 
+  const abrirTracking = (p) => { setBusError(''); setPedidoTrack(p); setEtapa('tracking'); };
+
   const irPreNuevo = () => { setCodigoPRE(null); setEtapa('pre'); };
   const irDefNuevo = () => { setCodigoPRE(null); setClientePreload(null); setModalidadPreload(null); setEtapa('pre'); };
   const irDefDesdePRE = (cod, mod) => { setCodigoPRE(cod); if (mod) setModalidadPreload(mod); setEtapa('def'); };
@@ -4020,12 +4243,12 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
                         {res.tipo==='PRE' && (
                           <span style={{ marginLeft:'auto', fontSize:10, fontWeight:800, color:'#fb923c', background:'rgba(249,115,22,0.15)', border:'1px solid rgba(249,115,22,0.4)', borderRadius:20, padding:'2px 8px', letterSpacing:0.3 }}>PRE</span>
                         )}
-                        {res.tipo==='DEF' && res.estado!=='entregado' && (
-                          <span style={{ marginLeft:'auto', fontSize:10, fontWeight:800, color:'#4ade80', background:'rgba(34,197,94,0.15)', border:'1px solid rgba(34,197,94,0.4)', borderRadius:20, padding:'2px 8px', letterSpacing:0.3 }}>✓ CONFIRMADO</span>
-                        )}
-                        {res.tipo==='DEF' && res.estado==='entregado' && (
-                          <span style={{ marginLeft:'auto', fontSize:10, fontWeight:800, color:'#38bdf8', background:'rgba(56,189,248,0.15)', border:'1px solid rgba(56,189,248,0.4)', borderRadius:20, padding:'2px 8px', letterSpacing:0.3 }}>🚚 ENTREGADO</span>
-                        )}
+                        {res.tipo==='DEF' && (() => {
+                          const pasosT = TRK_PASOS[trkModalidad(res)]; const iT = trkIdx(res); const finT = iT === pasosT.length - 1;
+                          return (
+                            <span style={{ marginLeft:'auto', fontSize:10, fontWeight:800, color: finT ? '#38bdf8' : iT === 0 ? '#4ade80' : '#fdba74', background: finT ? 'rgba(56,189,248,0.15)' : iT === 0 ? 'rgba(34,197,94,0.15)' : 'rgba(249,115,22,0.15)', border: finT ? '1px solid rgba(56,189,248,0.4)' : iT === 0 ? '1px solid rgba(34,197,94,0.4)' : '1px solid rgba(249,115,22,0.4)', borderRadius:20, padding:'2px 8px', letterSpacing:0.3 }}>{pasosT[iT].ico} {pasosT[iT].tit.toUpperCase()}</span>
+                          );
+                        })()}
                       </div>
                       {res.cliente?.nombre && (
                         <div style={{ fontSize:14, fontWeight:700, color:'#fff', marginBottom:2 }}>{res.cliente.nombre}</div>
@@ -4033,9 +4256,23 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 
 
                       <div style={{ fontSize:15, fontWeight:800, color:'#fff', marginBottom:10 }}>{fmt(res.totales?.total || res.total || 0)}</div>
-                      <G cols={res.tipo==='PRE'?3:2} gap={8}>
+                      {res.tipo==='DEF' && (() => {
+                        const pasosT = TRK_PASOS[trkModalidad(res)]; const iT = trkIdx(res); const finT = iT === pasosT.length - 1;
+                        return (
+                          <div style={{ display:'flex', alignItems:'center', marginBottom:10 }}>
+                            {pasosT.map((_, j) => (
+                              <React.Fragment key={j}>
+                                <div style={{ width:11, height:11, borderRadius:'50%', flexShrink:0, background: (j < iT || finT) ? '#4ade80' : j === iT ? '#f97316' : 'rgba(255,255,255,0.15)', boxShadow: (j === iT && !finT) ? '0 0 8px rgba(249,115,22,0.9)' : 'none' }} />
+                                {j < pasosT.length-1 && <div style={{ flex:1, height:2, background: j < iT ? '#4ade80' : 'rgba(255,255,255,0.12)' }} />}
+                              </React.Fragment>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                      <G cols={3} gap={8}>
                         <button onClick={()=>abrir(res)} className="sel-btn" style={res.tipo==='PRE'?s.bS:s.bV}>{res.tipo==='PRE'?'✏️ Editar PRE':'👁 Ver pedido'}</button>
                         {res.tipo==='PRE' && <button onClick={()=>irDefDesdePRE(res.codigo, res.modalidadPRE)} className="sel-btn" style={s.bP}>→ Confirmar DEF</button>}
+                        {res.tipo==='DEF' && <button onClick={()=>abrirTracking(res)} className="sel-btn" style={{ padding:'10px 8px', background:'linear-gradient(135deg,#0284c7,#38bdf8)', color:'#fff', border:'none', borderRadius:10, fontWeight:800, fontSize:12, cursor:'pointer', boxShadow:'0 3px 12px rgba(56,189,248,0.35)' }}>📍 Estado</button>}
                         <button onClick={()=>setBusResults(r=>r.filter((_,i)=>i!==idx))} className="sel-btn" style={s.bS}>✕</button>
                       </G>
                     </div>
@@ -4058,7 +4295,10 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 
         {/* ── DEF ── */}
         {etapa==='def' && <PedidoDefinitivo onVolver={irInicio} codigoPRE={codigoPRE} clientePreload={clientePreload} modalidadPreload={modalidadPreload} usuarioActual={usuarioActual} />}
-        {etapa==='ver_pedido' && pedidoVer && <VistaDetallePedidoDEF pedido={pedidoVer} onVolver={()=>{ setPedidoVer(null); setEtapa(pedidoVerOrigen==='search'?'inicio':'clientes'); }} onNuevoPedido={(cli)=>{ setPedidoVer(null); nuevoPedidoDesdeCli(cli); }} onPedidoActualizado={(p)=>{ setPedidoVer(p); setPedidos(prev=>prev.map(x=>x.codigo===p.codigo?p:x)); }} />}
+        {etapa==='ver_pedido' && pedidoVer && <VistaDetallePedidoDEF pedido={pedidoVer} onVolver={()=>{ setPedidoVer(null); setEtapa(pedidoVerOrigen==='search'?'inicio':'clientes'); }} onNuevoPedido={(cli)=>{ setPedidoVer(null); nuevoPedidoDesdeCli(cli); }} onPedidoActualizado={(p)=>{ setPedidoVer(p); setPedidos(prev=>prev.map(x=>x.codigo===p.codigo?p:x)); }} onVerTracking={()=>{ setPedidoTrack(pedidoVer); setEtapa('tracking'); }} />}
+
+        {/* ── TRACKING DE PEDIDO ── */}
+        {etapa==='tracking' && pedidoTrack && <ModuloTracking pedido={pedidoTrack} usuarioActual={usuarioActual} onVolver={()=>{ setPedidoTrack(null); setEtapa('inicio'); }} onPedidoActualizado={(p)=>{ setPedidoTrack(p); setPedidos(prev=>prev.map(x=>x.codigo===p.codigo?p:x)); if (pedidoVer && pedidoVer.codigo===p.codigo) setPedidoVer(p); }} />}
 
         {/* ── LIQUIDACIONES (solo admin) ── */}
         {etapa==='liquidaciones' && <ModuloLiquidaciones onVolver={irInicio} />}

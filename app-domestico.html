@@ -316,19 +316,40 @@ const loadLS = async (c) => {
   }
   try { return JSON.parse(localStorage.getItem('dom9_pedidos')||'{}')[c?.toUpperCase()] || null; } catch { return null; }
 };
+// Estado de la última lectura de pedidos: para avisar cuando se muestran datos locales viejos.
+window.__LIST_SYNC = { fuente: 'local', ts: 0 };
+function AvisoSync({ nonce }) {
+  const s = window.__LIST_SYNC || {};
+  if (!supaClient || s.fuente === 'nube') return null;
+  const msg = s.fuente === 'sin-sesion'
+    ? '⚠️ Tu sesión venció: estás viendo datos guardados en este dispositivo, pueden faltar ventas. Recargá la página e ingresá de nuevo.'
+    : '⚠️ Sin conexión con la nube: estás viendo datos guardados en este dispositivo, pueden faltar ventas. Revisá tu internet y tocá Actualizar.';
+  return (
+    <div style={{ background:'#fef3c7', border:'2px solid #f59e0b', color:'#92400e', padding:'10px 14px', borderRadius:10, fontSize:13, fontWeight:700, margin:'10px 0' }}>{msg}</div>
+  );
+}
 const listLS = async () => {
   if (supaClient) {
     try {
       const timeout = new Promise((_, r) => setTimeout(() => r(new Error('timeout')), 4000));
       const query = supaClient.from('pedidos').select('data').order('ts', { ascending: false });
-      const { data } = await Promise.race([query, timeout]);
+      const { data, error } = await Promise.race([query, timeout]);
+      if (error) throw error;
       if (data && data.length > 0) {
         const all = {};
         data.forEach(r => { if (r.data?.codigo) all[r.data.codigo] = r.data; });
         localStorage.setItem('dom9_pedidos', JSON.stringify(all));
+        window.__LIST_SYNC = { fuente: 'nube', ts: Date.now() };
         return data.map(r => r.data).filter(Boolean);
       }
-    } catch{}
+      // 0 filas: o la base está realmente vacía, o la sesión se cayó y RLS filtra todo
+      let sinSesion = false;
+      try { const { data: s } = await supaClient.auth.getSession(); sinSesion = !(s && s.session); } catch {}
+      if (!sinSesion) { window.__LIST_SYNC = { fuente: 'nube', ts: Date.now() }; return []; }
+      window.__LIST_SYNC = { fuente: 'sin-sesion', ts: Date.now() };
+    } catch(e) {
+      window.__LIST_SYNC = { fuente: 'local', ts: Date.now() };
+    }
   }
   try { return Object.values(JSON.parse(localStorage.getItem('dom9_pedidos')||'{}')).sort((a,b)=>(b.ts||0)-(a.ts||0)); } catch { return []; }
 };
@@ -3545,6 +3566,7 @@ const ModuloGestion = ({ onVolver }) => {
 
   return (
     <div>
+      <AvisoSync nonce={sync} />
       {/* Header */}
       <div className="no-print" style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
         <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>🏠 Salir</button>
@@ -4435,7 +4457,7 @@ function ModuloLiquidaciones({ onVolver }) {
         if (p.tipo !== 'DEF') return false;
         if (typeof p.ts !== 'number' || p.ts < rango.desde || p.ts > rango.hasta) return false;
         const email = (p.creadoPor || '').trim().toLowerCase();
-        if (esTotal) return emailsRolesConocidos.includes(email);
+        if (esTotal) return true; // VENTAS TOTALES: cuentan TODOS los DEF, incluso los históricos sin creadoPor
         return email === rolInfo.email.toLowerCase();
       })
       .sort((a, b) => a.ts - b.ts)
@@ -4550,6 +4572,7 @@ function ModuloLiquidaciones({ onVolver }) {
   return (
     <div>
       <NavHeader />
+      {step === 'lista' && <AvisoSync nonce={ultimaSync} />}
       <div style={{ fontSize:11, fontWeight:800, color:'#7dd3fc', textTransform:'uppercase', letterSpacing:'1px', marginBottom:18 }}>📊 Liquidaciones</div>
 
       {/* ── PANTALLA DE INICIO: elección de rol ── */}

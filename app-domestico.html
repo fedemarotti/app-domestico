@@ -77,6 +77,9 @@
     .liq-table th:nth-child(2), .liq-table td:nth-child(2),
     .liq-table th:nth-child(3), .liq-table td:nth-child(3) { text-align:left; }
     .liq-table thead th { background:#0c4a6e; color:#fff; font-size:10.5px; text-transform:uppercase; letter-spacing:0.4px; }
+    .liq-table.flex-tb th:nth-child(4), .liq-table.flex-tb td:nth-child(4),
+    .liq-table.flex-tb th:nth-child(9), .liq-table.flex-tb td:nth-child(9) { text-align:left; }
+    .liq-table.flex-tb thead th { background:#7c2d12; }
     .liq-table tbody tr:nth-child(even) { background:rgba(2,132,199,0.06); }
     .liq-table tfoot td { font-weight:800; background:rgba(2,132,199,0.14); }
   </style>
@@ -4231,6 +4234,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
             {esAdmin(usuarioActual) && (
               <G gap={12} style={{ marginBottom:28 }}>
                 <button onClick={()=>setEtapa('liquidaciones')} className="sel-btn" style={s.bLiq}>📊 LIQUIDACIONES</button>
+                <button onClick={()=>setEtapa('liquidacion_flex')} className="sel-btn" style={{ width:'100%', padding:'15px 20px', background:'linear-gradient(135deg,#fb923c,#ea580c)', color:'#fff', border:'none', borderRadius:12, fontWeight:800, fontSize:15, cursor:'pointer', boxShadow:'0 4px 18px rgba(249,115,22,0.45)', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' }}>🛵 LIQUIDACIÓN FLEX</button>
                 <button onClick={()=>setEtapa('gestion')} className="sel-btn" style={{ width:'100%', padding:'15px 20px', background:'linear-gradient(135deg,#7c3aed,#6d28d9)', color:'#fff', border:'none', borderRadius:12, fontWeight:800, fontSize:15, cursor:'pointer', boxShadow:'0 4px 18px rgba(124,58,237,0.45)', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' }}>📈 GESTIÓN</button>
               </G>
             )}
@@ -4324,6 +4328,9 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 
         {/* ── LIQUIDACIONES (solo admin) ── */}
         {etapa==='liquidaciones' && <ModuloLiquidaciones onVolver={irInicio} />}
+
+        {/* ── LIQUIDACIÓN FLEX (solo admin) ── */}
+        {etapa==='liquidacion_flex' && esAdmin(usuarioActual) && <ModuloLiquidacionFlex onVolver={irInicio} />}
 
         {/* ── GESTIÓN (solo admin) ── */}
         {etapa==='gestion' && esAdmin(usuarioActual) && <ModuloGestion onVolver={irInicio} />}
@@ -4975,6 +4982,533 @@ function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrar
               </tr>
             </tfoot>
           </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MÓDULO LIQUIDACIÓN FLEX — solo admin. Liquida a la empresa de logística Flex.
+// Universo: DEF con modalidad FLEX (ni retiro en planta ni interior) del período.
+// El importe a pagar a Flex es el mismo que se le cobró al cliente por el envío,
+// tal como quedó guardado en el pedido (histórico correcto aunque cambien tarifas).
+// Las correcciones se guardan en p.flexLiq (override) SIN tocar el pedido original,
+// así Liquidaciones y Gestión siguen dando exactamente los mismos números.
+// ═══════════════════════════════════════════════════════════════════════════════
+const FLEX_NA = '#fb923c';
+
+// Zona de un pedido flex: 1) override manual  2) por localidad  3) inferida por $/bulto
+function zonaDePedidoFlex(localidad, unit) {
+  const porLoc = detectarZona(localidad);
+  if (porLoc) return { zona: porLoc.zona, color: porLoc.color, precio: porLoc.precio, origen: 'localidad' };
+  const u = Math.round(Number(unit) || 0);
+  if (u > 0) {
+    const porPrecio = ZONAS_ENVIO.find(z => z.precio === u);
+    if (porPrecio) return { zona: porPrecio.zona, color: porPrecio.color, precio: porPrecio.precio, origen: 'importe' };
+  }
+  return { zona: 'Sin zona', color: '#94a3b8', precio: 0, origen: 'sin' };
+}
+
+function ModuloLiquidacionFlex({ onVolver }) {
+  const [stack, setStack] = React.useState(['tipo']);
+  const [pos, setPos]     = React.useState(0);
+  const step = stack[pos];
+
+  const [tipo, setTipo]         = React.useState(null);
+  const [desdeISO, setDesdeISO] = React.useState('');
+  const [hastaISO, setHastaISO] = React.useState('');
+  const [mesSel, setMesSel]     = React.useState(null);
+  const [errorFechas, setErrorFechas] = React.useState('');
+  const [pedidosData, setPedidosData] = React.useState(null);
+  const [cargando, setCargando] = React.useState(false);
+  const [refreshKey, setRefreshKey] = React.useState(0);
+  const [ultimaSync, setUltimaSync] = React.useState(null);
+
+  const [expandidos, setExpandidos] = React.useState(new Set());
+  const [editando, setEditando]     = React.useState(null);   // código en edición
+  const [borrador, setBorrador]     = React.useState(null);   // valores del formulario
+  const [guardando, setGuardando]   = React.useState(null);
+  const [errorGuardar, setErrorGuardar] = React.useState(null);
+  const [confirmarQuitar, setConfirmarQuitar] = React.useState(null);
+
+  const irA = (n) => { setStack(prev => [...prev.slice(0, pos+1), n]); setPos(p => p+1); };
+  const atras = () => setPos(p => Math.max(0, p-1));
+  const puedeAtras = pos > 0;
+
+  const elegirTipo = (t) => {
+    setTipo(t); setErrorFechas('');
+    if (t === 'hoy') irA('lista');
+    else if (t === 'periodo') irA('calendario');
+    else irA('mes');
+  };
+  const generarPeriodo = () => {
+    if (!desdeISO || !hastaISO) { setErrorFechas('Elegí las dos fechas.'); return; }
+    if (hastaISO < desdeISO) { setErrorFechas('La fecha "hasta" no puede ser anterior a "desde".'); return; }
+    setErrorFechas(''); irA('lista');
+  };
+  const elegirMes = (m) => { setMesSel(m); irA('lista'); };
+
+  const mesesDisponibles = React.useMemo(() => {
+    const { y, m } = arParts(Date.now());
+    const out = [];
+    for (let i = 0; i <= 12; i++) {
+      let mm = m - i, yy = y;
+      while (mm < 0) { mm += 12; yy -= 1; }
+      out.push({ y: yy, m: mm, label: `${MESES_NOMBRE[mm]} ${yy}${i === 0 ? ' (en curso)' : ''}` });
+    }
+    return out;
+  }, []);
+
+  React.useEffect(() => {
+    if (step === 'lista') {
+      setCargando(true); setPedidosData(null); setExpandidos(new Set());
+      setEditando(null); setBorrador(null); setConfirmarQuitar(null); setErrorGuardar(null);
+      listLS().then(arr => { setPedidosData(Array.isArray(arr) ? arr : []); setCargando(false); setUltimaSync(Date.now()); });
+    }
+  }, [step, refreshKey]);
+
+  const rango = React.useMemo(() => {
+    if (tipo === 'hoy') {
+      const ahora = Date.now();
+      return { desde: arInicioDeDia(ahora), hasta: ahora, etiqueta: `Envíos de hoy · ${fmtFechaDDMMAAAA(ahora)}` };
+    }
+    if (tipo === 'periodo' && desdeISO && hastaISO) {
+      const { desde, hasta } = arRangoDesdeISO(desdeISO, hastaISO);
+      return { desde, hasta, etiqueta: `${fmtFechaDDMMAAAA(desde)} al ${fmtFechaDDMMAAAA(hasta)}` };
+    }
+    if (tipo === 'cierre' && mesSel) {
+      return { desde: arInicioDeMes(mesSel.y, mesSel.m), hasta: arFinDeMes(mesSel.y, mesSel.m), etiqueta: `Cierre mensual · ${mesSel.label}` };
+    }
+    return null;
+  }, [tipo, desdeISO, hastaISO, mesSel, refreshKey]);
+
+  // ── Filas del informe ──────────────────────────────────────────────────────
+  const filas = React.useMemo(() => {
+    if (!pedidosData || !rango) return [];
+    return pedidosData
+      .filter(p => {
+        if (p.tipo !== 'DEF') return false;
+        if (typeof p.ts !== 'number' || p.ts < rango.desde || p.ts > rango.hasta) return false;
+        const ex = p.extras || {};
+        if (ex.retiraLocal || ex.esInterior) return false;   // solo ENVÍO FLEX AMBA
+        if (p.flexLiq?.excluido) return false;               // quitado a mano del informe
+        return true;
+      })
+      .sort((a, b) => a.ts - b.ts)
+      .map(p => {
+        const ex  = p.extras || {};
+        const ov  = p.flexLiq || {};
+        const localidadBase = (ex.localidad || p.cliente?.localidad || '').trim();
+        const localidad = (ov.localidad ?? localidadBase) || '—';
+        const bultosBase = Math.max(1, Number(ex.bultos) || 1);
+        const bultos = Math.max(1, Number(ov.bultos ?? bultosBase) || 1);
+        const totalBase = Number(p.totales?.envio ?? (typeof ex.envio === 'number' ? ex.envio : 0)) || 0;
+        const unitBase = Number(ex.envioUnit) > 0 ? Number(ex.envioUnit)
+                       : (bultosBase > 0 && totalBase > 0 ? Math.round(totalBase / bultosBase) : 0);
+        const unit  = Number(ov.unit ?? unitBase) || 0;
+        const total = ov.unit != null || ov.bultos != null ? Math.round(unit * bultos) : (totalBase || Math.round(unit * bultos));
+        const z = ov.zona ? { zona: ov.zona, color: (ZONAS_ENVIO.find(x => x.zona === ov.zona)?.color) || FLEX_NA, origen: 'manual' }
+                          : zonaDePedidoFlex(localidadBase, unit);
+        return {
+          codigo: p.codigo, ts: p.ts, fecha: fmtFechaDDMMAAAA(p.ts),
+          hora: (() => { const d = new Date(p.ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })(),
+          cliente: p.cliente?.nombre || p.cliente?.telefono || 'Sin datos',
+          importePedido: Number(p.totales?.total ?? p.total ?? 0),
+          localidad, zona: z.zona, zonaColor: z.color, zonaOrigen: z.origen,
+          unit, bultos, total,
+          editado: !!(ov.zona || ov.localidad != null || ov.bultos != null || ov.unit != null),
+          pedido: p,
+        };
+      });
+  }, [pedidosData, rango]);
+
+  const totales = React.useMemo(() => filas.reduce((a, f) => ({
+    envios: a.envios + 1, bultos: a.bultos + f.bultos, total: a.total + f.total, pedidos: a.pedidos + f.importePedido,
+  }), { envios:0, bultos:0, total:0, pedidos:0 }), [filas]);
+
+  const porZona = React.useMemo(() => {
+    const m = {};
+    filas.forEach(f => { if (!m[f.zona]) m[f.zona] = { zona:f.zona, color:f.zonaColor, envios:0, bultos:0, total:0 };
+      m[f.zona].envios += 1; m[f.zona].bultos += f.bultos; m[f.zona].total += f.total; });
+    return Object.values(m).sort((a,b) => b.total - a.total);
+  }, [filas]);
+
+  const excluidos = React.useMemo(() => {
+    if (!pedidosData || !rango) return [];
+    return pedidosData.filter(p => p.tipo === 'DEF' && typeof p.ts === 'number' && p.ts >= rango.desde && p.ts <= rango.hasta
+      && !(p.extras?.retiraLocal) && !(p.extras?.esInterior) && p.flexLiq?.excluido);
+  }, [pedidosData, rango]);
+
+  const fmtM = v => '$' + Math.round(v || 0).toLocaleString('es-AR');
+
+  // ── Guardado de correcciones (override, no toca el pedido original) ────────
+  const persistir = async (pedido, flexLiq) => {
+    setGuardando(pedido.codigo); setErrorGuardar(null);
+    const nuevo = { ...pedido, flexLiq };
+    let ok = true;
+    try { const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}'); all[nuevo.codigo] = nuevo; localStorage.setItem('dom9_pedidos', JSON.stringify(all)); } catch {}
+    if (supaClient) {
+      try {
+        const { error } = await supaClient.from('pedidos').upsert({ codigo: nuevo.codigo, data: nuevo, ts: nuevo.ts || Date.now() });
+        if (error) { console.warn('Error guardando corrección Flex:', error); ok = false; }
+      } catch (e) { console.warn('Error guardando corrección Flex:', e); ok = false; }
+    }
+    setGuardando(null);
+    if (!ok) { setErrorGuardar(pedido.codigo); return false; }
+    setPedidosData(prev => (prev || []).map(x => x.codigo === pedido.codigo ? nuevo : x));
+    return true;
+  };
+
+  const abrirEdicion = (f) => {
+    const ov = f.pedido.flexLiq || {};
+    setEditando(f.codigo);
+    setBorrador({ zona: ov.zona || (f.zonaOrigen === 'sin' ? '' : f.zona), localidad: f.localidad === '—' ? '' : f.localidad,
+                  bultos: String(f.bultos), unit: String(f.unit), nota: ov.nota || '' });
+  };
+
+  const guardarEdicion = async (f) => {
+    const b = borrador || {};
+    const flexLiq = {
+      ...(f.pedido.flexLiq || {}),
+      zona: b.zona || undefined,
+      localidad: (b.localidad || '').trim() || undefined,
+      bultos: Math.max(1, parseInt(b.bultos, 10) || 1),
+      unit: Math.max(0, Math.round(parseFloat(String(b.unit).replace(/[^\d.-]/g, '')) || 0)),
+      nota: (b.nota || '').trim() || undefined,
+      editadoTs: Date.now(),
+    };
+    const ok = await persistir(f.pedido, flexLiq);
+    if (ok) { setEditando(null); setBorrador(null); }
+  };
+
+  const quitarDelInforme = async (f) => {
+    setConfirmarQuitar(null);
+    await persistir(f.pedido, { ...(f.pedido.flexLiq || {}), excluido: true, excluidoTs: Date.now() });
+  };
+  const reincorporar = async (p) => {
+    const ov = { ...(p.flexLiq || {}) }; delete ov.excluido; delete ov.excluidoTs;
+    await persistir(p, ov);
+  };
+
+  const inp = { width:'100%', padding:'8px 10px', background:'rgba(255,255,255,0.07)', border:'1px solid rgba(251,146,60,0.35)', borderRadius:8, color:'#fff', fontSize:13, fontFamily:'inherit', boxSizing:'border-box' };
+  const lblMini = { fontSize:10, fontWeight:800, color:'rgba(255,255,255,0.45)', textTransform:'uppercase', display:'block', marginBottom:3 };
+  const bFlex = { width:'100%', padding:'15px 20px', background:'linear-gradient(135deg,#fb923c,#ea580c)', color:'#fff', border:'none', borderRadius:12, fontWeight:800, fontSize:15, cursor:'pointer', boxShadow:'0 4px 18px rgba(249,115,22,0.4)', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' };
+  const bFlexO = { width:'100%', padding:'13px 16px', background:'rgba(249,115,22,0.10)', color:'#fed7aa', border:'1px solid rgba(249,115,22,0.4)', borderRadius:12, fontWeight:700, fontSize:14, cursor:'pointer', textAlign:'left', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' };
+
+  const NavHeader = () => (
+    <div className="no-print" style={{ display:'flex', alignItems:'center', gap:8, marginBottom:20 }}>
+      <button onClick={atras} disabled={!puedeAtras} style={{ padding:'8px 14px', background:puedeAtras?'rgba(249,115,22,0.15)':'rgba(255,255,255,0.05)', color:puedeAtras?'#fdba74':'rgba(255,255,255,0.25)', border:`1px solid ${puedeAtras?'rgba(249,115,22,0.4)':'rgba(255,255,255,0.1)'}`, borderRadius:8, fontWeight:700, fontSize:12, cursor:puedeAtras?'pointer':'default' }}>← Atrás</button>
+      <div style={{ flex:1 }} />
+      {step === 'lista' && (
+        <button onClick={()=>setRefreshKey(k=>k+1)} style={{ padding:'8px 14px', background:'rgba(74,222,128,0.12)', color:'#4ade80', border:'1px solid rgba(74,222,128,0.4)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>
+          🔄 Actualizar{ultimaSync ? ` · ${String(new Date(ultimaSync).getHours()).padStart(2,'0')}:${String(new Date(ultimaSync).getMinutes()).padStart(2,'0')}` : ''}
+        </button>
+      )}
+      <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>🏠 Salir</button>
+    </div>
+  );
+
+  return (
+    <div>
+      <NavHeader />
+      {step === 'lista' && <AvisoSync nonce={ultimaSync} />}
+      {step !== 'informe' && (
+        <div className="no-print" style={{ fontSize:11, fontWeight:800, color:'#fdba74', textTransform:'uppercase', letterSpacing:'1px', marginBottom:18 }}>🛵 Liquidación Flex</div>
+      )}
+
+      {/* ── TIPO DE INFORME ── */}
+      {step === 'tipo' && (
+        <div style={s.card}>
+          <div style={s.cTit}>Qué querés liquidarle a Flex</div>
+          <G gap={10}>
+            <button onClick={()=>elegirTipo('hoy')}     className="sel-btn" style={bFlex}>📅 Día de hoy</button>
+            <button onClick={()=>elegirTipo('periodo')} className="sel-btn" style={bFlexO}>🗓️ Período (desde / hasta)</button>
+            <button onClick={()=>elegirTipo('cierre')}  className="sel-btn" style={bFlexO}>📆 Mes completo</button>
+          </G>
+        </div>
+      )}
+
+      {/* ── CALENDARIO ── */}
+      {step === 'calendario' && (
+        <div style={s.card}>
+          <div style={s.cTit}>Elegí el período</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 }}>
+            <div><label style={s.lbl}>Desde</label><input type="date" value={desdeISO} onChange={e=>setDesdeISO(e.target.value)} style={s.inp} /></div>
+            <div><label style={s.lbl}>Hasta</label><input type="date" value={hastaISO} onChange={e=>setHastaISO(e.target.value)} style={s.inp} /></div>
+          </div>
+          {errorFechas && <div style={{ color:'#f87171', fontSize:13, marginBottom:12 }}>⚠️ {errorFechas}</div>}
+          <button onClick={generarPeriodo} className="sel-btn" style={bFlex}>Ver envíos</button>
+        </div>
+      )}
+
+      {/* ── MES ── */}
+      {step === 'mes' && (
+        <div style={s.card}>
+          <div style={s.cTit}>Elegí el mes a liquidar</div>
+          <G gap={8}>
+            {mesesDisponibles.map((m, i) => (
+              <button key={i} onClick={()=>elegirMes(m)} className="sel-btn" style={bFlexO}>{m.label}</button>
+            ))}
+          </G>
+        </div>
+      )}
+
+      {/* ── LISTA UNO POR UNO ── */}
+      {step === 'lista' && (
+        <div>
+          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, padding:'10px 14px', background:'rgba(249,115,22,0.08)', borderRadius:10, border:'1px solid rgba(249,115,22,0.25)' }}>
+            <span style={{ fontSize:22 }}>🛵</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', fontWeight:700, textTransform:'uppercase' }}>Envíos Flex</div>
+              <div style={{ fontSize:14, fontWeight:800, color:'#fdba74' }}>{rango?.etiqueta}</div>
+            </div>
+          </div>
+
+          {errorGuardar && (
+            <div style={{ marginBottom:14, padding:'12px 14px', background:'rgba(220,38,38,0.12)', border:'1px solid rgba(220,38,38,0.4)', borderRadius:10, fontSize:13, fontWeight:700, color:'#fca5a5' }}>
+              ⚠️ No se pudo guardar el cambio del pedido <span style={{ fontFamily:'monospace' }}>{errorGuardar}</span>. Verificá la conexión y reintentá.
+            </div>
+          )}
+
+          {cargando && <div style={{ padding:'40px 0', textAlign:'center', color:'rgba(255,255,255,0.5)' }}>⏳ Cargando envíos...</div>}
+          {!cargando && filas.length === 0 && (
+            <div style={{ padding:'40px 0', textAlign:'center', color:'rgba(255,255,255,0.35)', fontSize:14 }}>Sin envíos Flex en este período.</div>
+          )}
+
+          {!cargando && filas.length > 0 && (
+            <>
+              <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:16 }}>
+                {filas.map((f, i) => {
+                  const exp = expandidos.has(f.codigo);
+                  const edit = editando === f.codigo;
+                  return (
+                    <div key={f.codigo} style={{ background:'rgba(255,255,255,0.04)', border:`1px solid ${f.zonaOrigen==='sin' ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.09)'}`, borderRadius:12, overflow:'hidden' }}>
+                      <div style={{ display:'flex', alignItems:'center', padding:'11px 12px', cursor:'pointer', gap:6 }}
+                        onClick={() => setExpandidos(prev => { const n = new Set(prev); n.has(f.codigo) ? n.delete(f.codigo) : n.add(f.codigo); return n; })}>
+                        <div style={{ minWidth:22, fontSize:11, fontWeight:800, color:'rgba(255,255,255,0.22)', flexShrink:0 }}>#{i+1}</div>
+                        <div style={{ flex:1, minWidth:0, marginRight:6 }}>
+                          <div style={{ fontSize:10, color:'rgba(255,255,255,0.3)', fontFamily:'monospace', marginBottom:1 }}>{f.codigo}{f.editado && <span style={{ color:'#fdba74' }}> · corregido</span>}</div>
+                          <div style={{ fontSize:14, fontWeight:700, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.localidad}</div>
+                          <div style={{ fontSize:11, marginTop:2 }}>
+                            <span style={{ padding:'2px 8px', borderRadius:20, fontWeight:800, background:`${f.zonaColor}22`, color:f.zonaColor }}>{f.zona}</span>
+                            <span style={{ color:'rgba(255,255,255,0.45)', marginLeft:8 }}>{fmtM(f.unit)} × {f.bultos} bulto{f.bultos!==1?'s':''}</span>
+                          </div>
+                        </div>
+                        <div style={{ textAlign:'right', marginRight:8, flexShrink:0 }}>
+                          <div style={{ fontSize:11, color:'rgba(255,255,255,0.45)' }}>{f.fecha}</div>
+                          <div style={{ fontSize:10, color:'rgba(255,255,255,0.25)' }}>{f.hora}</div>
+                        </div>
+                        <div style={{ fontSize:15, fontWeight:800, color:FLEX_NA, marginRight:6, flexShrink:0, whiteSpace:'nowrap' }}>{fmtM(f.total)}</div>
+                        <div style={{ fontSize:10, color:'rgba(255,255,255,0.22)', flexShrink:0, transition:'transform 0.18s', transform:exp?'rotate(180deg)':'none' }}>▼</div>
+                      </div>
+
+                      {exp && !edit && (
+                        <div style={{ padding:'10px 14px 12px 40px', borderTop:'1px solid rgba(255,255,255,0.06)' }}>
+                          <div style={{ display:'flex', flexWrap:'wrap', gap:16, marginBottom:10 }}>
+                            <div><div style={lblMini}>Cliente</div><div style={{ fontSize:13, fontWeight:700 }}>{f.cliente}</div></div>
+                            <div><div style={lblMini}>Importe del pedido</div><div style={{ fontSize:13, fontWeight:700, color:'#4ade80' }}>{fmtM(f.importePedido)}</div></div>
+                            <div><div style={lblMini}>Zona detectada por</div><div style={{ fontSize:13, fontWeight:700, color:f.zonaOrigen==='sin'?'#f87171':'rgba(255,255,255,0.8)' }}>{f.zonaOrigen==='localidad'?'localidad':f.zonaOrigen==='importe'?'importe por bulto':f.zonaOrigen==='manual'?'corrección manual':'no se pudo determinar'}</div></div>
+                            <div><div style={lblMini}>Total del envío</div><div style={{ fontSize:13, fontWeight:800, color:FLEX_NA }}>{fmtM(f.unit)} × {f.bultos} = {fmtM(f.total)}</div></div>
+                          </div>
+                          {f.pedido.flexLiq?.nota && (
+                            <div style={{ padding:'8px 12px', background:'rgba(251,146,60,0.10)', border:'1px solid rgba(251,146,60,0.3)', borderRadius:8, fontSize:12.5, color:'#fed7aa', marginBottom:10 }}>📝 {f.pedido.flexLiq.nota}</div>
+                          )}
+                          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                            <button onClick={()=>abrirEdicion(f)} style={{ padding:'8px 14px', background:'rgba(251,146,60,0.15)', color:'#fdba74', border:'1px solid rgba(251,146,60,0.4)', borderRadius:8, fontWeight:800, fontSize:12, cursor:'pointer' }}>✏️ Corregir</button>
+                            {confirmarQuitar === f.codigo ? (
+                              <>
+                                <button onClick={()=>quitarDelInforme(f)} style={{ padding:'8px 14px', background:'#dc2626', color:'#fff', border:'none', borderRadius:8, fontWeight:800, fontSize:12, cursor:'pointer' }}>✓ Sí, quitar</button>
+                                <button onClick={()=>setConfirmarQuitar(null)} style={{ padding:'8px 12px', background:'rgba(255,255,255,0.08)', color:'#ccc', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontSize:12, cursor:'pointer' }}>✗ No</button>
+                              </>
+                            ) : (
+                              <button onClick={()=>setConfirmarQuitar(f.codigo)} style={{ padding:'8px 14px', background:'rgba(220,38,38,0.12)', color:'#f87171', border:'1px solid rgba(220,38,38,0.3)', borderRadius:8, fontWeight:800, fontSize:12, cursor:'pointer' }}>🗑️ Quitar del informe</button>
+                            )}
+                            {guardando === f.codigo && <span style={{ fontSize:12, color:'rgba(255,255,255,0.5)', alignSelf:'center' }}>⏳ Guardando...</span>}
+                          </div>
+                          <div style={{ fontSize:10, color:'rgba(255,255,255,0.3)', marginTop:8 }}>Quitar solo lo saca de esta liquidación. La venta no se borra y Liquidaciones/Gestión no cambian.</div>
+                        </div>
+                      )}
+
+                      {exp && edit && borrador && (
+                        <div style={{ padding:'12px 14px', borderTop:'1px solid rgba(251,146,60,0.25)', background:'rgba(249,115,22,0.05)' }}>
+                          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
+                            <div>
+                              <label style={lblMini}>Zona</label>
+                              <select value={borrador.zona} onChange={e=>{ const z=e.target.value; const zz=ZONAS_ENVIO.find(x=>x.zona===z); setBorrador(b=>({ ...b, zona:z, unit: zz ? String(zz.precio) : b.unit })); }} style={inp}>
+                                <option value="">— Sin zona —</option>
+                                {ZONAS_ENVIO.map(z => <option key={z.zona} value={z.zona}>{z.zona} · ${z.precio.toLocaleString('es-AR')}/bulto</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label style={lblMini}>Localidad</label>
+                              <input value={borrador.localidad} onChange={e=>setBorrador(b=>({ ...b, localidad:e.target.value }))} style={inp} placeholder="Ej: Merlo" />
+                            </div>
+                            <div>
+                              <label style={lblMini}>Importe por bulto</label>
+                              <input value={borrador.unit} onChange={e=>setBorrador(b=>({ ...b, unit:e.target.value }))} style={inp} inputMode="numeric" />
+                            </div>
+                            <div>
+                              <label style={lblMini}>Cantidad de bultos</label>
+                              <input value={borrador.bultos} onChange={e=>setBorrador(b=>({ ...b, bultos:e.target.value }))} style={inp} inputMode="numeric" />
+                            </div>
+                          </div>
+                          <div style={{ marginBottom:10 }}>
+                            <label style={lblMini}>Anotación (aparece en el informe)</label>
+                            <input value={borrador.nota} onChange={e=>setBorrador(b=>({ ...b, nota:e.target.value }))} style={inp} placeholder="Ej: reclamado, entrega reprogramada" />
+                          </div>
+                          <div style={{ fontSize:13, fontWeight:800, color:FLEX_NA, marginBottom:10 }}>
+                            Total: {fmtM((parseFloat(String(borrador.unit).replace(/[^\d.-]/g,'')) || 0) * (parseInt(borrador.bultos,10) || 0))}
+                          </div>
+                          <div style={{ display:'flex', gap:8 }}>
+                            <button onClick={()=>guardarEdicion(f)} disabled={guardando===f.codigo} style={{ padding:'9px 16px', background:'linear-gradient(135deg,#fb923c,#ea580c)', color:'#fff', border:'none', borderRadius:8, fontWeight:800, fontSize:13, cursor:'pointer' }}>{guardando===f.codigo ? '⏳ Guardando...' : '💾 Guardar'}</button>
+                            <button onClick={()=>{ setEditando(null); setBorrador(null); }} style={{ padding:'9px 14px', background:'rgba(255,255,255,0.08)', color:'#ccc', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontSize:13, cursor:'pointer' }}>Cancelar</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Totales */}
+              <div style={{ background:'rgba(249,115,22,0.08)', border:'1px solid rgba(249,115,22,0.25)', borderRadius:12, padding:'14px 16px', marginBottom:14 }}>
+                <div style={{ fontSize:11, fontWeight:800, color:'#fdba74', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:10 }}>
+                  A pagar a Flex · {totales.envios} envío{totales.envios!==1?'s':''} · {totales.bultos} bulto{totales.bultos!==1?'s':''}
+                </div>
+                <div style={{ fontSize:28, fontWeight:900, color:FLEX_NA, marginBottom:10 }}>{fmtM(totales.total)}</div>
+                <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                  {porZona.map(z => (
+                    <div key={z.zona} style={{ display:'flex', alignItems:'center', gap:8, fontSize:12.5 }}>
+                      <span style={{ width:10, height:10, borderRadius:'50%', background:z.color, flexShrink:0 }} />
+                      <span style={{ flex:1, color:'rgba(255,255,255,0.75)', fontWeight:700 }}>{z.zona}</span>
+                      <span style={{ color:'rgba(255,255,255,0.45)' }}>{z.envios} env · {z.bultos} bulto{z.bultos!==1?'s':''}</span>
+                      <span style={{ fontWeight:800, color:'#fff', minWidth:90, textAlign:'right' }}>{fmtM(z.total)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {excluidos.length > 0 && (
+                <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12, padding:'12px 14px', marginBottom:14 }}>
+                  <div style={{ fontSize:11, fontWeight:800, color:'rgba(255,255,255,0.45)', textTransform:'uppercase', marginBottom:8 }}>Quitados de esta liquidación ({excluidos.length})</div>
+                  {excluidos.map(p => (
+                    <div key={p.codigo} style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, marginBottom:6 }}>
+                      <span style={{ fontFamily:'monospace', color:'rgba(255,255,255,0.4)', flex:1 }}>{p.codigo} · {fmtFechaDDMMAAAA(p.ts)}</span>
+                      <button onClick={()=>reincorporar(p)} style={{ padding:'5px 10px', background:'rgba(74,222,128,0.12)', color:'#4ade80', border:'1px solid rgba(74,222,128,0.35)', borderRadius:6, fontSize:11, fontWeight:700, cursor:'pointer' }}>↩ Reincorporar</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button onClick={() => irA('informe')} className="sel-btn" style={{ ...bFlex, display:'flex', alignItems:'center', justifyContent:'center', gap:10, fontSize:14 }}>
+                🖨️ Informe Completo (imprimible)
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── INFORME IMPRIMIBLE ── */}
+      {step === 'informe' && !cargando && (
+        <InformeFlex etiquetaPeriodo={rango?.etiqueta} filas={filas} totales={totales} porZona={porZona} onCerrar={atras} />
+      )}
+    </div>
+  );
+}
+
+function InformeFlex({ etiquetaPeriodo, filas, totales, porZona, onCerrar }) {
+  const fmtM = v => '$' + Math.round(v || 0).toLocaleString('es-AR');
+  const maxZona = porZona.length ? Math.max(...porZona.map(z => z.total)) : 0;
+  return (
+    <div>
+      <div className="no-print" style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
+        <button onClick={onCerrar} style={{ padding:'10px 16px', background:'rgba(255,255,255,0.08)', color:'#fff', border:'1px solid rgba(255,255,255,0.18)', borderRadius:8, fontWeight:700, fontSize:13, cursor:'pointer' }}>← Volver a la lista</button>
+        <button onClick={()=>window.print()} style={{ padding:'10px 16px', background:'linear-gradient(135deg,#fed7aa,#fb923c)', color:'#7c2d12', border:'none', borderRadius:8, fontWeight:800, fontSize:13, cursor:'pointer' }}>🖨️ Imprimir</button>
+      </div>
+
+      <div className="liq-print-area" style={{ background:'#fff', color:'#0f172a', borderRadius:12, padding:20, overflowX:'auto' }}>
+        <div style={{ marginBottom:14 }}>
+          <div style={{ fontSize:12, fontWeight:800, color:'#c2410c', textTransform:'uppercase', letterSpacing:'1px' }}>Liquidación Flex · Envíos AMBA</div>
+          <div style={{ fontSize:18, fontWeight:900 }}>{etiquetaPeriodo}</div>
+        </div>
+
+        {filas.length === 0 ? (
+          <div style={{ padding:'20px 0', color:'#64748b', fontSize:14 }}>No hay envíos Flex en el período seleccionado.</div>
+        ) : (
+          <>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:10, marginBottom:16 }}>
+              <div style={{ background:'linear-gradient(135deg,#fff7ed,#ffedd5)', border:'1px solid #fed7aa', borderRadius:10, padding:'12px 14px' }}>
+                <div style={{ fontSize:10, fontWeight:800, color:'#c2410c', textTransform:'uppercase', marginBottom:4 }}>Total a pagar a Flex</div>
+                <div style={{ fontSize:24, fontWeight:900, color:'#ea580c' }}>{fmtM(totales.total)}</div>
+              </div>
+              <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px' }}>
+                <div style={{ fontSize:10, fontWeight:800, color:'#0369a1', textTransform:'uppercase', marginBottom:4 }}>Envíos / bultos</div>
+                <div style={{ fontSize:20, fontWeight:900 }}>{totales.envios} <span style={{ fontSize:13, color:'#475569' }}>envíos</span> · {totales.bultos} <span style={{ fontSize:13, color:'#475569' }}>bultos</span></div>
+              </div>
+              <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px' }}>
+                <div style={{ fontSize:10, fontWeight:800, color:'#0369a1', textTransform:'uppercase', marginBottom:4 }}>Facturado en esos pedidos</div>
+                <div style={{ fontSize:20, fontWeight:900, color:'#16a34a' }}>{fmtM(totales.pedidos)}</div>
+              </div>
+            </div>
+
+            <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px', marginBottom:16 }}>
+              <div style={{ fontSize:10, fontWeight:800, color:'#c2410c', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8 }}>📍 Envíos por zona</div>
+              {porZona.map(z => (
+                <BarraInforme key={z.zona} label={z.zona} valor={z.total} max={maxZona} color={z.color}
+                  texto={`${fmtM(z.total)} (${z.envios}e · ${z.bultos}b)`} />
+              ))}
+            </div>
+
+            <div style={{ fontSize:13, fontWeight:900, color:'#0f172a', textTransform:'uppercase', letterSpacing:'0.5px', borderBottom:'2px solid #c2410c', paddingBottom:6, marginBottom:12 }}>
+              📋 Detalle de envíos
+            </div>
+
+            <table className="liq-table flex-tb">
+              <thead>
+                <tr>
+                  <th>N° DEF</th>
+                  <th>Fecha</th>
+                  <th>Localidad</th>
+                  <th>Zona</th>
+                  <th>Importe pedido</th>
+                  <th>$ / bulto</th>
+                  <th>Bultos</th>
+                  <th>Total envío</th>
+                  <th>Anotación</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filas.map(f => (
+                  <tr key={f.codigo}>
+                    <td style={{ fontFamily:'monospace' }}>{f.codigo}</td>
+                    <td>{f.fecha}</td>
+                    <td>{f.localidad}</td>
+                    <td>{f.zona}</td>
+                    <td>{fmtM(f.importePedido)}</td>
+                    <td>{fmtM(f.unit)}</td>
+                    <td>{f.bultos}</td>
+                    <td>{fmtM(f.total)}</td>
+                    <td style={{ textAlign:'left', fontSize:11 }}>{f.pedido.flexLiq?.nota || ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={4}>TOTAL ({filas.length} envío{filas.length!==1?'s':''})</td>
+                  <td>{fmtM(totales.pedidos)}</td>
+                  <td></td>
+                  <td>{totales.bultos}</td>
+                  <td>{fmtM(totales.total)}</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+
+            <div style={{ marginTop:16, paddingTop:12, borderTop:'1px dashed #cbd5e1', fontSize:11, color:'#475569' }}>
+              Doméstico · Química de Limpieza — Liquidación de envíos Flex AMBA. Importe por bulto según zona; total = importe por bulto × cantidad de bultos.
+            </div>
+          </>
         )}
       </div>
     </div>

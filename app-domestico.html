@@ -68,9 +68,25 @@
 
     /* ── LIQUIDACIONES: impresión ── */
     @media print {
+      @page { size: A4 portrait; margin: 8mm; }
       .no-print { display: none !important; }
       body { background: #fff !important; }
-      .liq-print-area { background:#fff !important; color:#000 !important; }
+      .liq-print-area { background:#fff !important; color:#000 !important; overflow:visible !important; padding:0 !important; border-radius:0 !important; }
+      /* La tabla completa tiene que entrar en la hoja: sin esto se cortaban
+         las columnas de la derecha (neto, envíos, comisión). */
+      .liq-table { font-size:7.4px !important; table-layout:fixed; width:100% !important; }
+      .liq-table th, .liq-table td { padding:2px 3px !important; word-break:break-word; overflow-wrap:anywhere; }
+      /* los importes no se parten en dos líneas */
+      .liq-table tfoot td, .liq-table td:nth-child(n+5) { white-space:nowrap; }
+      /* el marco oscuro de la app no se imprime */
+      #root, #root > div, #root > div > div { background:#fff !important; background-image:none !important; box-shadow:none !important; }
+      /* el informe usa todo el ancho de la hoja, no los 640px de la app */
+      #root > div > div { max-width:none !important; padding:0 !important; }
+      .liq-print-area { max-width:none !important; width:100% !important; }
+      .liq-table thead th { font-size:6.4px !important; letter-spacing:0 !important; padding:3px 2px !important; }
+      /* tfoot se repetía en cada hoja: el TOTAL aparecía a mitad del listado */
+      .liq-table tfoot { display: table-row-group; }
+      .liq-table tr { page-break-inside: avoid; }
     }
     .liq-table { width:100%; border-collapse:collapse; font-size:12.5px; }
     .liq-table th, .liq-table td { border:1px solid rgba(0,0,0,0.15); padding:6px 8px; text-align:right; }
@@ -83,6 +99,14 @@
     .liq-table.flex-tb thead th { background:#7c2d12; }
     .liq-table tbody tr:nth-child(even) { background:rgba(2,132,199,0.06); }
     .liq-table tfoot td { font-weight:800; background:rgba(2,132,199,0.14); }
+    /* En pantalla chica la tabla no entra: se achica y se avisa que se desliza */
+    @media (max-width: 760px) {
+      .liq-table { font-size:10.5px; }
+      .liq-table th, .liq-table td { padding:4px 5px; }
+      .liq-table thead th { font-size:9px; letter-spacing:0; }
+    }
+    .liq-scroll-hint { font-size:11px; color:#64748b; margin-bottom:8px; font-weight:700; }
+    @media (min-width: 900px) { .liq-scroll-hint { display:none; } }
   </style>
 </head>
 <body>
@@ -174,6 +198,9 @@ const arParts = (ts) => {
   return { y: d.getUTCFullYear(), m: d.getUTCMonth(), day: d.getUTCDate() }; // m: 0-11
 };
 const pad2 = (n) => String(n).padStart(2, '0');
+// Hora en horario de Argentina (no la del dispositivo): si el celular está en otra
+// zona, la hora mostrada tiene que seguir coincidiendo con la fecha de al lado.
+const arHora = (ts) => { const d = new Date(ts - AR_OFFSET_MS); return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`; };
 const fmtFechaDDMMAAAA = (ts) => { const { y, m, day } = arParts(ts); return `${pad2(day)}/${pad2(m + 1)}/${y}`; };
 const arInicioDeDia = (ts) => { const { y, m, day } = arParts(ts); return Date.UTC(y, m, day, 0, 0, 0, 0) + AR_OFFSET_MS; };
 const arInicioDeMes = (y, m) => Date.UTC(y, m, 1, 0, 0, 0, 0) + AR_OFFSET_MS;
@@ -1890,7 +1917,8 @@ function imprimirPedido(pedido, solo=null) {
             prodBody += `<div style="margin-top:3px;font-size:10px;font-weight:700;color:#475569;">Fraccionado en ${divs.length} bolsas de 50 Lts:</div>`;
             prodBody += divs.map((d,i)=>`<div style="margin-top:2px;"><span style="font-size:9px;color:#64748b;">F${i+1}:</span> ${chipColor(d.color,50)}</div>`).join('');
           } else if (colInfo) {
-            prodBody += `<div style="margin-top:4px;">${chipColor(colInfo.label,200)}</div>`;
+            // FIX: usaba 200 fijo — la orden de produccion mostraba 200 Lts en pedidos de 50.
+            prodBody += `<div style="margin-top:4px;">${chipColor(colInfo.label, item.cantidad)}</div>`;
           }
           const frPiso = (item.fragancias_piso||[]);
           const frDivs = (item.divisiones||[]).filter(d=>d.fragancia);
@@ -1931,19 +1959,25 @@ function imprimirPedido(pedido, solo=null) {
     // ── ETIQUETA (bultos prominente) ──────────────────────────────────────────
     const tipoEnvioEtiq = esR ? 'RETIRA EN PLANTA' : esI ? 'INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI' : `ENVÍO FLEX AMBA — ${cliente.localidad||ex.localidad||''}`;
     const colorEnvio = esR ? '#0d5c3a' : esI ? '#7c3aed' : '#0284c7';
-    const htmlEtiq = `<div style="width:100mm;min-height:150mm;background:#fff;color:#1e293b;font-family:Arial;padding:8mm;box-sizing:border-box;display:flex;flex-direction:column;">
-      <div style="text-align:center;border-bottom:4px solid #0d5c3a;padding-bottom:4mm;margin-bottom:4mm;">
-        <div style="font-size:22px;font-weight:900;color:#0d5c3a;letter-spacing:1px;">DOMÉSTICO</div>
-        <div style="font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">Química de Limpieza · Moreno, Bs. As.</div>
+    const htmlEtiq = `<div style="width:100mm;height:150mm;max-height:150mm;overflow:hidden;background:#fff;color:#1e293b;font-family:Arial;padding:7mm;box-sizing:border-box;display:flex;flex-direction:column;page-break-inside:avoid;page-break-after:avoid;">
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:6px;border-bottom:4px solid #0d5c3a;padding-bottom:2.5mm;margin-bottom:3mm;">
+        <div style="text-align:left;">
+          <div style="font-size:20px;font-weight:900;color:#0d5c3a;letter-spacing:1px;line-height:1;">DOMÉSTICO</div>
+          <div style="font-size:8px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">Química de Limpieza · Moreno, Bs. As.</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0;">
+          <div style="font-size:8px;font-weight:700;color:#94a3b8;text-transform:uppercase;line-height:1;">Pedido</div>
+          <div style="font-size:15px;font-weight:900;color:#0f172a;letter-spacing:0.3px;line-height:1.1;">${codigo}</div>
+        </div>
       </div>
-      <div style="background:${colorEnvio};color:#fff;border-radius:6px;padding:7px 10px;text-align:center;margin-bottom:5mm;">
+      <div style="background:${colorEnvio};color:#fff;border-radius:6px;padding:6px 10px;text-align:center;margin-bottom:3.5mm;">
         <div style="font-size:13px;font-weight:900;letter-spacing:0.5px;">${tipoEnvioEtiq}</div>
       </div>
       <div style="flex:1;">
         <div style="font-size:20px;font-weight:900;line-height:1.15;margin-bottom:5px;">${cliente.nombre}</div>
         ${cliente.dni?`<div style="margin-bottom:2px;"><span style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;">DNI: </span><span style="font-size:12px;font-weight:600;">${cliente.dni}</span></div>`:''}
         ${cliente.telefono?`<div style="margin-bottom:2px;"><span style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Teléfono: </span><span style="font-size:12px;font-weight:600;">${cliente.telefono}</span></div>`:''}
-        ${cliente.email?`<div style="margin-bottom:2px;"><span style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Mail: </span><span style="font-size:11px;">${cliente.email}</span></div>`:''}
+        ${cliente.email?`<div style="margin-bottom:2px;word-break:break-all;"><span style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Mail: </span><span style="font-size:10px;">${cliente.email}</span></div>`:''}
         ${cliente.direccion?`<div style="margin-bottom:2px;"><span style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Dirección: </span><span style="font-size:12px;font-weight:600;">${cliente.direccion}</span></div>`:''}
         ${cliente.localidad?`<div style="margin-bottom:2px;"><span style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Localidad/Partido: </span><span style="font-size:12px;font-weight:600;">${cliente.localidad}</span></div>`:''}
         ${cliente.ciudad?`<div style="margin-bottom:2px;"><span style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;">Ciudad: </span><span style="font-size:12px;font-weight:700;">${cliente.ciudad}</span></div>`:''}
@@ -1960,17 +1994,22 @@ function imprimirPedido(pedido, solo=null) {
       </div>`:''}${dBaldes===0&&dCajas===0?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #b45309;border-radius:6px;text-align:center;">
         <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#b45309;line-height:1.5;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS<br/>POR ELECCIÓN DEL CLIENTE.</div>
       </div>`:''}
-      ${esR?`<div style="margin-top:4mm;border-top:2px dashed #0d5c3a;padding-top:4mm;">
-        <div style="font-size:9px;font-weight:700;color:#0d5c3a;text-transform:uppercase;margin-bottom:2mm;">DNI: ${cliente.dni||'__________________'}</div>
-        <div style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:8mm;">Firma del cliente:</div>
+      ${esR?`<div style="margin-top:3mm;border-top:2px dashed #0d5c3a;padding-top:2.5mm;">
+        <div style="font-size:9px;font-weight:700;color:#0d5c3a;text-transform:uppercase;margin-bottom:1mm;">DNI: ${cliente.dni||'__________________'}</div>
+        <div style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:6mm;">Firma del cliente:</div>
         <div style="border-bottom:1.5px solid #1e293b;width:100%;"></div>
-        <div style="font-size:8px;color:#94a3b8;margin-top:2mm;text-align:center;">Recibí el pedido completo y en conformidad</div>
+        <div style="font-size:8px;color:#94a3b8;margin-top:1mm;text-align:center;">Recibí el pedido completo y en conformidad</div>
       </div>`:''}
-      <div style="border-top:2px solid #e2e8f0;padding-top:3mm;display:flex;justify-content:space-between;align-items:flex-end;margin-top:${esR?'3mm':'5mm'}">
-        <div style="font-size:9px;"><div style="font-weight:700;">${codigo}</div><div style="color:#64748b;">${fecha.split(',')[0]}</div></div>
+      <div style="border-top:2px solid #e2e8f0;padding-top:2mm;display:flex;justify-content:space-between;align-items:flex-end;margin-top:2mm;flex-shrink:0;">
+        <div style="font-size:10px;font-weight:700;color:#64748b;">${fecha.split(',')[0]}</div>
         <div style="font-size:9px;color:#94a3b8;">Doméstico · Moreno</div>
       </div>
-      <style>@media print{@page{size:100mm 150mm;margin:0;}body{margin:0;}}</style>
+      <style>@media print{
+        @page{size:100mm 150mm;margin:0;}
+        /* Sin esto el padding del contenedor empujaba el pie a una SEGUNDA hoja:
+           salía una etiqueta extra con solo el código del pedido. */
+        html,body{margin:0 !important;padding:0 !important;width:100mm;height:150mm;overflow:hidden;}
+      }</style>
     </div>`;
 
     // ── CHECKLIST (con activadores y extras) ──────────────────────────────────
@@ -3369,7 +3408,7 @@ const gVendedor = p => {
   const r = ROLES_LIQ.find(x => x.email && x.email.toLowerCase() === em);
   return r ? r.label : 'Sin atribución';
 };
-const gHora = ts => { const d = new Date(ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+const gHora = ts => arHora(ts);
 const gDiasDesde = (ts, now) => Math.floor((now - ts) / 86400000);
 const gAntigLabel = (ts, now) => { const dd = gDiasDesde(ts, now); return dd <= 0 ? 'hoy' : dd === 1 ? '1 día' : `${dd} días`; };
 const gPct = (v, prev) => (typeof prev === 'number' && prev > 0) ? Math.round(((v - prev) / prev) * 100) : null;
@@ -4184,7 +4223,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
       } else { addR(p); }
     });
     if (resultado.length > 0) { setBusResults(resultado); setBusError(''); }
-    else { setBusResults([]); setBusError(`Sin resultados para "${raw}"`); }
+    else { setBusResults([]); setBusError(`Sin resultados para "${raw.length > 60 ? raw.slice(0,60)+'…' : raw}"`); }
   };
 
   // Búsqueda en tiempo real con debounce 350ms
@@ -4276,7 +4315,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
               <div style={{ fontSize:11, color:'rgba(255,255,255,0.35)', marginBottom:10 }}>
                 Buscá por código, fecha (DDMM), nombre del cliente, o escribí <em>ultimos</em> para ver los últimos 10 pedidos
               </div>
-              {busError && <div style={{ fontSize:13, color:'#f87171', marginBottom:8 }}>⚠️ {busError}</div>}
+              {busError && <div style={{ fontSize:13, color:'#f87171', marginBottom:8, overflowWrap:'anywhere', wordBreak:'break-word' }}>⚠️ {busError}</div>}
               {busResults.length > 0 && (
                 <div>
                   <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', marginBottom:8 }}>
@@ -4348,7 +4387,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
         {etapa==='tracking' && pedidoTrack && <ModuloTracking pedido={pedidoTrack} usuarioActual={usuarioActual} onVolver={()=>{ setPedidoTrack(null); setEtapa('inicio'); }} onPedidoActualizado={(p)=>{ setPedidoTrack(p); setPedidos(prev=>prev.map(x=>x.codigo===p.codigo?p:x)); if (pedidoVer && pedidoVer.codigo===p.codigo) setPedidoVer(p); }} />}
 
         {/* ── LIQUIDACIONES (solo admin) ── */}
-        {etapa==='liquidaciones' && <ModuloLiquidaciones onVolver={irInicio} />}
+        {etapa==='liquidaciones' && esAdmin(usuarioActual) && <ModuloLiquidaciones onVolver={irInicio} />}
 
         {/* ── LIQUIDACIÓN FLEX (solo admin) ── */}
         {etapa==='liquidacion_flex' && esAdmin(usuarioActual) && <ModuloLiquidacionFlex onVolver={irInicio} />}
@@ -4456,6 +4495,17 @@ function ModuloLiquidaciones({ onVolver }) {
     }
   }, [step, refreshKey]);
 
+  // Refresco automático al volver a la pantalla (cambiar de app, bloquear el
+  // teléfono, volver de otra pestaña): las ventas del día tienen que estar al día
+  // sin depender de que alguien toque "Actualizar".
+  React.useEffect(() => {
+    if (step !== 'lista') return;
+    const alVolver = () => { if (!document.hidden) setRefreshKey(k => k + 1); };
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
+    return () => { document.removeEventListener('visibilitychange', alVolver); window.removeEventListener('focus', alVolver); };
+  }, [step]);
+
   const rango = React.useMemo(() => {
     if (tipo === 'hoy') {
       const ahora = Date.now();
@@ -4499,7 +4549,7 @@ function ModuloLiquidaciones({ onVolver }) {
         const emailCreador = (p.creadoPor || '').trim().toLowerCase();
         const vendedorInfo = ROLES_LIQ.find(r => r.email && r.email.toLowerCase() === emailCreador);
         const vendedor = vendedorInfo ? vendedorInfo.label : 'Sin datos';
-        const hora = p.ts ? (() => { const d = new Date(p.ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })() : '--:--';
+        const hora = p.ts ? arHora(p.ts) : '--:--';
         return { codigo: p.codigo, comprador, modalidad, transferido, neto, envioFlex, comision, vendedor, hora, fecha: fmtFechaDDMMAAAA(p.ts), ts: p.ts };
       });
   }, [pedidosData, rango, rolInfo, esTotal, emailsRolesConocidos, borrados]);
@@ -4590,7 +4640,7 @@ function ModuloLiquidaciones({ onVolver }) {
       <div style={{ flex:1 }} />
       {step === 'lista' && (
         <button onClick={()=>setRefreshKey(k=>k+1)} style={{ padding:'8px 14px', background:'rgba(74,222,128,0.12)', color:'#4ade80', border:'1px solid rgba(74,222,128,0.4)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>
-          🔄 Actualizar{ultimaSync ? ` · ${String(new Date(ultimaSync).getHours()).padStart(2,'0')}:${String(new Date(ultimaSync).getMinutes()).padStart(2,'0')}` : ''}
+          🔄 Actualizar{ultimaSync ? ` · ${arHora(ultimaSync)}` : ''}
         </button>
       )}
       <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>🏠 Salir</button>
@@ -4841,7 +4891,7 @@ function ModuloLiquidaciones({ onVolver }) {
 function BarraInforme({ label, valor, max, color, texto }) {
   return (
     <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
-      <div style={{ width:78, fontSize:10, fontWeight:700, color:'#475569', textAlign:'right', flexShrink:0, whiteSpace:'nowrap' }}>{label}</div>
+      <div style={{ width:96, fontSize:10, fontWeight:700, color:'#475569', textAlign:'right', flexShrink:0, lineHeight:1.15, overflowWrap:'anywhere' }}>{label}</div>
       <div style={{ flex:1, background:'#f1f5f9', borderRadius:4, height:16, overflow:'hidden' }}>
         <div style={{ width:`${max ? Math.max(2, (valor / max) * 100) : 0}%`, background:color, height:'100%', borderRadius:4 }} />
       </div>
@@ -4964,6 +5014,8 @@ function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrar
         {filas.length === 0 ? (
           <div style={{ padding:'20px 0', color:'#64748b', fontSize:14 }}>No hay ventas DEF registradas en el período seleccionado.</div>
         ) : (
+          <>
+          <div className="liq-scroll-hint no-print">→ Deslizá la tabla hacia el costado para ver todas las columnas. Al imprimir salen todas.</div>
           <table className="liq-table">
             <thead>
               <tr>
@@ -5003,6 +5055,7 @@ function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrar
               </tr>
             </tfoot>
           </table>
+          </>
         )}
       </div>
     </div>
@@ -5052,6 +5105,7 @@ function ModuloLiquidacionFlex({ onVolver }) {
   const [guardando, setGuardando]   = React.useState(null);
   const [errorGuardar, setErrorGuardar] = React.useState(null);
   const [confirmarQuitar, setConfirmarQuitar] = React.useState(null);
+  const [errorEdit, setErrorEdit]   = React.useState(null);
 
   const irA = (n) => { setStack(prev => [...prev.slice(0, pos+1), n]); setPos(p => p+1); };
   const atras = () => setPos(p => Math.max(0, p-1));
@@ -5088,6 +5142,15 @@ function ModuloLiquidacionFlex({ onVolver }) {
       listLS().then(arr => { setPedidosData(Array.isArray(arr) ? arr : []); setCargando(false); setUltimaSync(Date.now()); });
     }
   }, [step, refreshKey]);
+
+  // Mismo refresco automático que Liquidaciones al volver a la pantalla.
+  React.useEffect(() => {
+    if (step !== 'lista') return;
+    const alVolver = () => { if (!document.hidden) setRefreshKey(k => k + 1); };
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
+    return () => { document.removeEventListener('visibilitychange', alVolver); window.removeEventListener('focus', alVolver); };
+  }, [step]);
 
   const rango = React.useMemo(() => {
     if (tipo === 'hoy') {
@@ -5133,7 +5196,7 @@ function ModuloLiquidacionFlex({ onVolver }) {
                           : zonaDePedidoFlex(localidadBase, unit);
         return {
           codigo: p.codigo, ts: p.ts, fecha: fmtFechaDDMMAAAA(p.ts),
-          hora: (() => { const d = new Date(p.ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })(),
+          hora: arHora(p.ts),
           cliente: p.cliente?.nombre || p.cliente?.telefono || 'Sin datos',
           importePedido: Number(p.totales?.total ?? p.total ?? 0),
           localidad, zona: z.zona, zonaColor: z.color, zonaOrigen: z.origen,
@@ -5183,19 +5246,36 @@ function ModuloLiquidacionFlex({ onVolver }) {
 
   const abrirEdicion = (f) => {
     const ov = f.pedido.flexLiq || {};
+    setErrorEdit(null);
     setEditando(f.codigo);
     setBorrador({ zona: ov.zona || (f.zonaOrigen === 'sin' ? '' : f.zona), localidad: f.localidad === '—' ? '' : f.localidad,
                   bultos: String(f.bultos), unit: String(f.unit), nota: ov.nota || '' });
   };
 
+  // Valores efectivos de la edición: lo que se ve en el preview es exactamente
+  // lo que se guarda. Devuelve error si el importe o los bultos no son válidos.
+  const valoresEdicion = (b) => {
+    const unitTxt = String(b?.unit ?? '').replace(/\./g,'').replace(',','.').replace(/[^\d.]/g,'');
+    const bultTxt = String(b?.bultos ?? '').replace(/[^\d]/g,'');
+    const unit = unitTxt === '' ? NaN : Math.round(parseFloat(unitTxt));
+    const bultos = bultTxt === '' ? NaN : parseInt(bultTxt, 10);
+    let error = '';
+    if (!Number.isFinite(unit) || unit < 0) error = 'El importe por bulto tiene que ser un número (por ejemplo 5500).';
+    else if (!Number.isFinite(bultos) || bultos < 1) error = 'La cantidad de bultos tiene que ser 1 o más.';
+    return { unit, bultos, error, total: (Number.isFinite(unit) && Number.isFinite(bultos)) ? unit * bultos : 0 };
+  };
+
   const guardarEdicion = async (f) => {
     const b = borrador || {};
+    const v = valoresEdicion(b);
+    if (v.error) { setErrorEdit(v.error); return; }
+    setErrorEdit(null);
     const flexLiq = {
       ...(f.pedido.flexLiq || {}),
       zona: b.zona || undefined,
       localidad: (b.localidad || '').trim() || undefined,
-      bultos: Math.max(1, parseInt(b.bultos, 10) || 1),
-      unit: Math.max(0, Math.round(parseFloat(String(b.unit).replace(/[^\d.-]/g, '')) || 0)),
+      bultos: v.bultos,
+      unit: v.unit,
       nota: (b.nota || '').trim() || undefined,
       editadoTs: Date.now(),
     };
@@ -5223,7 +5303,7 @@ function ModuloLiquidacionFlex({ onVolver }) {
       <div style={{ flex:1 }} />
       {step === 'lista' && (
         <button onClick={()=>setRefreshKey(k=>k+1)} style={{ padding:'8px 14px', background:'rgba(74,222,128,0.12)', color:'#4ade80', border:'1px solid rgba(74,222,128,0.4)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>
-          🔄 Actualizar{ultimaSync ? ` · ${String(new Date(ultimaSync).getHours()).padStart(2,'0')}:${String(new Date(ultimaSync).getMinutes()).padStart(2,'0')}` : ''}
+          🔄 Actualizar{ultimaSync ? ` · ${arHora(ultimaSync)}` : ''}
         </button>
       )}
       <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>🏠 Salir</button>
@@ -5313,7 +5393,7 @@ function ModuloLiquidacionFlex({ onVolver }) {
                           <div style={{ fontSize:14, fontWeight:700, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.localidad}</div>
                           <div style={{ fontSize:11, marginTop:2 }}>
                             <span style={{ padding:'2px 8px', borderRadius:20, fontWeight:800, background:`${f.zonaColor}22`, color:f.zonaColor }}>{f.zona}</span>
-                            <span style={{ color:'rgba(255,255,255,0.45)', marginLeft:8 }}>{fmtM(f.unit)} × {f.bultos} bulto{f.bultos!==1?'s':''}</span>
+                            <span style={{ color:'rgba(255,255,255,0.45)', marginLeft:8, whiteSpace:'nowrap' }}>&nbsp;{fmtM(f.unit)} × {f.bultos} bulto{f.bultos!==1?'s':''}</span>
                           </div>
                         </div>
                         <div style={{ textAlign:'right', marginRight:8, flexShrink:0 }}>
@@ -5378,12 +5458,21 @@ function ModuloLiquidacionFlex({ onVolver }) {
                             <label style={lblMini}>Anotación (aparece en el informe)</label>
                             <input value={borrador.nota} onChange={e=>setBorrador(b=>({ ...b, nota:e.target.value }))} style={inp} placeholder="Ej: reclamado, entrega reprogramada" />
                           </div>
-                          <div style={{ fontSize:13, fontWeight:800, color:FLEX_NA, marginBottom:10 }}>
-                            Total: {fmtM((parseFloat(String(borrador.unit).replace(/[^\d.-]/g,'')) || 0) * (parseInt(borrador.bultos,10) || 0))}
-                          </div>
+                          {(() => { const v = valoresEdicion(borrador); return (
+                            <>
+                              <div style={{ fontSize:13, fontWeight:800, color: v.error ? '#f87171' : FLEX_NA, marginBottom:10 }}>
+                                {v.error ? 'Total: —' : `Total: ${fmtM(v.total)}`}
+                              </div>
+                              {(v.error || errorEdit) && (
+                                <div style={{ padding:'8px 12px', marginBottom:10, borderRadius:8, fontSize:12.5, fontWeight:700, background:'rgba(220,38,38,0.12)', border:'1px solid rgba(220,38,38,0.35)', color:'#fca5a5' }}>
+                                  ⚠️ {v.error || errorEdit}
+                                </div>
+                              )}
+                            </>
+                          ); })()}
                           <div style={{ display:'flex', gap:8 }}>
                             <button onClick={()=>guardarEdicion(f)} disabled={guardando===f.codigo} style={{ padding:'9px 16px', background:'linear-gradient(135deg,#fb923c,#ea580c)', color:'#fff', border:'none', borderRadius:8, fontWeight:800, fontSize:13, cursor:'pointer' }}>{guardando===f.codigo ? '⏳ Guardando...' : '💾 Guardar'}</button>
-                            <button onClick={()=>{ setEditando(null); setBorrador(null); }} style={{ padding:'9px 14px', background:'rgba(255,255,255,0.08)', color:'#ccc', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontSize:13, cursor:'pointer' }}>Cancelar</button>
+                            <button onClick={()=>{ setEditando(null); setBorrador(null); setErrorEdit(null); }} style={{ padding:'9px 14px', background:'rgba(255,255,255,0.08)', color:'#ccc', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontSize:13, cursor:'pointer' }}>Cancelar</button>
                           </div>
                         </div>
                       )}
@@ -5485,6 +5574,7 @@ function InformeFlex({ etiquetaPeriodo, filas, totales, porZona, onCerrar }) {
               📋 Detalle de envíos
             </div>
 
+            <div className="liq-scroll-hint no-print">→ Deslizá la tabla hacia el costado para ver todas las columnas. Al imprimir salen todas.</div>
             <table className="liq-table flex-tb">
               <thead>
                 <tr>

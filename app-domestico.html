@@ -105,6 +105,9 @@
       .liq-table th, .liq-table td { padding:4px 5px; }
       .liq-table thead th { font-size:9px; letter-spacing:0; }
     }
+    /* el iconito del calendario, visible sobre fondo oscuro */
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); opacity:0.85; cursor:pointer; }
+    input[type="date"] { color-scheme: dark; }
     .liq-scroll-hint { font-size:11px; color:#64748b; margin-bottom:8px; font-weight:700; }
     @media (min-width: 900px) { .liq-scroll-hint { display:none; } }
   </style>
@@ -530,6 +533,23 @@ const s = {
 const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
 const uid = () => Math.random().toString(36).substr(2,9);
 const G = ({ cols=1, gap=10, children, style }) => <div style={{ display:'grid', gridTemplateColumns:`repeat(${cols},1fr)`, gap, ...style }}>{children}</div>;
+// Campo de fecha: en Chrome el calendario solo se abre tocando el iconito.
+// abrirPicker lo abre al tocar cualquier parte del campo.
+const abrirPicker = (e) => { try { if (e.target.showPicker) e.target.showPicker(); } catch(_) {} };
+const InputFecha = ({ value, onChange, style }) => (
+  <input type="date" value={value} onChange={onChange} onClick={abrirPicker} onFocus={abrirPicker}
+    style={{ ...style, cursor:'pointer', colorScheme:'dark' }} />
+);
+// Atajos de período: desde/hasta en formato ISO (YYYY-MM-DD) en horario argentino
+const isoAR = (ts) => { const { y, m, day } = arParts(ts); return `${y}-${pad2(m+1)}-${pad2(day)}`; };
+const ATAJOS_PERIODO = [
+  { label: 'Últimos 7 días',  calc: () => { const h = Date.now(); return { desde: isoAR(h - 6*86400000), hasta: isoAR(h) }; } },
+  { label: 'Últimos 15 días', calc: () => { const h = Date.now(); return { desde: isoAR(h - 14*86400000), hasta: isoAR(h) }; } },
+  { label: 'Este mes',        calc: () => { const h = Date.now(); const { y, m } = arParts(h); return { desde: `${y}-${pad2(m+1)}-01`, hasta: isoAR(h) }; } },
+  { label: 'Mes pasado',      calc: () => { const { y, m } = arParts(Date.now()); const my = m === 0 ? y-1 : y; const mm = m === 0 ? 11 : m-1;
+      const ult = new Date(Date.UTC(my, mm+1, 0)).getUTCDate(); return { desde: `${my}-${pad2(mm+1)}-01`, hasta: `${my}-${pad2(mm+1)}-${pad2(ult)}` }; } },
+];
+
 const SH = ({ step, title }) => <div style={{ marginBottom:20 }}><div style={s.sLbl}>{step}</div><div style={s.sTit}>{title}</div></div>;
 
 // Chip de código
@@ -4717,10 +4737,18 @@ function ModuloLiquidaciones({ onVolver }) {
       {step === 'calendario' && (
         <div style={s.card}>
           <div style={s.cTit}>Elegí el período</div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 }}>
-            <div><label style={s.lbl}>Desde</label><input type="date" value={desdeISO} onChange={e=>setDesdeISO(e.target.value)} style={s.inp} /></div>
-            <div><label style={s.lbl}>Hasta</label><input type="date" value={hastaISO} onChange={e=>setHastaISO(e.target.value)} style={s.inp} /></div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:12 }}>
+            {ATAJOS_PERIODO.map(a => (
+              <button key={a.label} onClick={()=>{ const r = a.calc(); setDesdeISO(r.desde); setHastaISO(r.hasta); setErrorFechas(''); }}
+                style={{ padding:'8px 13px', borderRadius:20, fontSize:12.5, fontWeight:700, cursor:'pointer', fontFamily:'inherit',
+                         background:'rgba(96,165,250,0.14)', border:'1px solid rgba(96,165,250,0.34)', color:'#bfdbfe' }}>{a.label}</button>
+            ))}
           </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 }}>
+            <div><label style={s.lbl}>Desde</label><InputFecha value={desdeISO} onChange={e=>{setDesdeISO(e.target.value); setErrorFechas('');}} style={s.inp} /></div>
+            <div><label style={s.lbl}>Hasta</label><InputFecha value={hastaISO} onChange={e=>{setHastaISO(e.target.value); setErrorFechas('');}} style={s.inp} /></div>
+          </div>
+          <div style={{ fontSize:11.5, color:C.tx3, marginBottom:12 }}>Tocá el campo y se abre el calendario.</div>
           {errorFechas && <div style={{ color:'#f87171', fontSize:13, marginBottom:12 }}>⚠️ {errorFechas}</div>}
           <button onClick={generarPeriodo} className="sel-btn" style={s.bLiq}>Ver ventas</button>
         </div>
@@ -5334,10 +5362,18 @@ function ModuloLiquidacionFlex({ onVolver }) {
       {step === 'calendario' && (
         <div style={s.card}>
           <div style={s.cTit}>Elegí el período</div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 }}>
-            <div><label style={s.lbl}>Desde</label><input type="date" value={desdeISO} onChange={e=>setDesdeISO(e.target.value)} style={s.inp} /></div>
-            <div><label style={s.lbl}>Hasta</label><input type="date" value={hastaISO} onChange={e=>setHastaISO(e.target.value)} style={s.inp} /></div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:12 }}>
+            {ATAJOS_PERIODO.map(a => (
+              <button key={a.label} onClick={()=>{ const r = a.calc(); setDesdeISO(r.desde); setHastaISO(r.hasta); setErrorFechas(''); }}
+                style={{ padding:'8px 13px', borderRadius:20, fontSize:12.5, fontWeight:700, cursor:'pointer', fontFamily:'inherit',
+                         background:'rgba(249,115,22,0.14)', border:'1px solid rgba(249,115,22,0.34)', color:'#fed7aa' }}>{a.label}</button>
+            ))}
           </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 }}>
+            <div><label style={s.lbl}>Desde</label><InputFecha value={desdeISO} onChange={e=>{setDesdeISO(e.target.value); setErrorFechas('');}} style={s.inp} /></div>
+            <div><label style={s.lbl}>Hasta</label><InputFecha value={hastaISO} onChange={e=>{setHastaISO(e.target.value); setErrorFechas('');}} style={s.inp} /></div>
+          </div>
+          <div style={{ fontSize:11.5, color:C.tx3, marginBottom:12 }}>Tocá el campo y se abre el calendario.</div>
           {errorFechas && <div style={{ color:'#f87171', fontSize:13, marginBottom:12 }}>⚠️ {errorFechas}</div>}
           <button onClick={generarPeriodo} className="sel-btn" style={bFlex}>Ver envíos</button>
         </div>

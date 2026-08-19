@@ -10,10 +10,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #062918; }
-    input::placeholder { color: rgba(255,255,255,0.35); }
-    textarea::placeholder { color: rgba(255,255,255,0.35); }
-    select option { background: #0d5c3a; color: #fff; }
+    html { background: #080B10; }
+    body { background: #080B10; -webkit-font-smoothing: antialiased; letter-spacing: -0.01em; }
+    input::placeholder { color: #6B7A8D; }
+    textarea::placeholder { color: #6B7A8D; }
+    select option { background: #131B26; color: #EEF2F7; }
 
     /* ── Botones de selección (todos los que eligen algo) ── */
     .sel-btn {
@@ -458,25 +459,45 @@ const seedDatosPrueba = () => {
 // ESTILOS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const C = { vd:'#0d5c3a', vdO:'#062918', vdM:'#1a7a52', na:'#f97316', naO:'#c2520a' };
+// Paleta: fondo grafito/azul noche + acentos de marca (naranja Doméstico, verde, celeste, violeta).
+const C = { bg0:'#080B10', bg1:'#0E141C', bg2:'#0A0F16', tx:'#EEF2F7', tx2:'#9AA7B8', tx3:'#6B7A8D',
+            ln:'rgba(255,255,255,0.10)', ln2:'rgba(255,255,255,0.06)', gl:'rgba(255,255,255,0.045)',
+            vd:'#34d399', vdO:'#062918', vdM:'#1a7a52', na:'#f97316', naO:'#c2520a' };
+// Botón de vidrio con tinte de color (r,g,b). Mismo molde para todos los botones de la app.
+const glassBtn = (rgb, { pad='15px 20px', size=15, weight=750, radius=16, align='center' } = {}) => ({
+  width:'100%', padding:pad, borderRadius:radius, cursor:'pointer', textAlign:align,
+  fontFamily:'inherit', fontSize:size, fontWeight:weight, letterSpacing:'-0.015em', color:C.tx,
+  background:rgb ? `linear-gradient(180deg,rgba(${rgb},0.16) 0%,rgba(${rgb},0.06) 100%)`
+                 : 'linear-gradient(180deg,rgba(255,255,255,0.085) 0%,rgba(255,255,255,0.035) 100%)',
+  border:`1px solid ${rgb ? `rgba(${rgb},0.34)` : C.ln}`,
+  backdropFilter:'blur(14px) saturate(130%)', WebkitBackdropFilter:'blur(14px) saturate(130%)',
+  boxShadow:`inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.25), 0 10px 26px rgba(0,0,0,0.42)${rgb ? `, 0 10px 28px rgba(${rgb},0.16)` : ''}`,
+  transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease, border-color 0.15s ease',
+});
+const RGB = { na:'249,115,22', vd:'52,211,153', az:'96,165,250', vi:'167,139,250' };
 const s = {
-  app: { minHeight:'100vh', background:`linear-gradient(160deg,${C.vdO} 0%,${C.vd} 55%,${C.vdM} 100%)`, fontFamily:'"Inter","Segoe UI",system-ui,sans-serif', color:'#fff', paddingBottom:50 },
-  hdr: { background:'rgba(0,0,0,0.3)', backdropFilter:'blur(14px)', borderBottom:'1px solid rgba(255,255,255,0.1)', padding:'0 20px', position:'sticky', top:0, zIndex:100, height:56, display:'flex', alignItems:'center' },
+  app: { minHeight:'100vh', backgroundColor:C.bg0, backgroundImage:`radial-gradient(120% 30% at 50% 0%, rgba(96,165,250,0.10) 0%, transparent 60%), linear-gradient(180deg,${C.bg1} 0%,${C.bg2} 30%,${C.bg0} 100%)`, backgroundRepeat:'no-repeat', fontFamily:'"Inter","SF Pro Text","Segoe UI",system-ui,sans-serif', color:C.tx, paddingBottom:50 },
+  hdr: { background:'rgba(10,15,22,0.72)', backdropFilter:'blur(18px) saturate(140%)', WebkitBackdropFilter:'blur(18px) saturate(140%)', borderBottom:`1px solid ${C.ln2}`, padding:'0 20px', position:'sticky', top:0, zIndex:100, height:56, display:'flex', alignItems:'center' },
   hIn: { maxWidth:640, margin:'0 auto', width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 },
   wrap: { maxWidth:640, margin:'0 auto', padding:'20px 16px' },
-  card: { background:'rgba(255,255,255,0.08)', backdropFilter:'blur(8px)', border:'1px solid rgba(255,255,255,0.13)', borderRadius:16, padding:18, marginBottom:14 },
-  cTit: { fontSize:11, fontWeight:800, color:'rgba(255,255,255,0.5)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:12 },
-  sLbl: { fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.45)', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:4 },
-  sTit: { fontSize:22, fontWeight:900, letterSpacing:'-0.4px', marginBottom:20 },
-  bP: { width:'100%', padding:'15px 20px', background:`linear-gradient(135deg,${C.na},${C.naO})`, color:'#fff', border:'none', borderRadius:12, fontWeight:800, fontSize:15, cursor:'pointer', boxShadow:'0 4px 18px rgba(249,115,22,0.45)', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' },
-  bS: { width:'100%', padding:'13px 20px', background:'rgba(255,255,255,0.09)', color:'#fff', border:'1px solid rgba(255,255,255,0.18)', borderRadius:12, fontWeight:600, fontSize:14, cursor:'pointer', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' },
-  bV: { width:'100%', padding:'15px 20px', background:'linear-gradient(135deg,#16a34a,#15803d)', color:'#fff', border:'none', borderRadius:12, fontWeight:800, fontSize:15, cursor:'pointer', boxShadow:'0 4px 18px rgba(22,163,74,0.35)', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' },
-  bO: { width:'100%', padding:'13px 16px', background:'rgba(255,255,255,0.07)', color:'#fff', border:'1px solid rgba(255,255,255,0.14)', borderRadius:12, fontWeight:600, fontSize:14, cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', justifyContent:'space-between', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease, background 0.15s ease' },
-  bLiq: { width:'100%', padding:'15px 20px', background:'linear-gradient(135deg,#bae6fd,#7dd3fc)', color:'#1d4ed8', border:'none', borderRadius:12, fontWeight:800, fontSize:15, cursor:'pointer', boxShadow:'0 4px 18px rgba(56,189,248,0.35)', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' },
-  bLiqO: { width:'100%', padding:'13px 16px', background:'rgba(56,189,248,0.10)', color:'#e0f2fe', border:'1px solid rgba(56,189,248,0.4)', borderRadius:12, fontWeight:700, fontSize:14, cursor:'pointer', textAlign:'left', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' },
-  inp: { width:'100%', padding:'12px 14px', background:'rgba(255,255,255,0.08)', color:'#fff', border:'1px solid rgba(255,255,255,0.2)', borderRadius:10, fontSize:14, boxSizing:'border-box', outline:'none', fontFamily:'inherit' },
-  lbl: { display:'block', fontSize:12, fontWeight:600, color:'rgba(255,255,255,0.65)', marginBottom:5 },
-  tot: { fontSize:28, fontWeight:900, color:C.na, letterSpacing:'-0.5px' },
+  card: { background:C.gl, backdropFilter:'blur(14px)', WebkitBackdropFilter:'blur(14px)', border:`1px solid ${C.ln}`, borderRadius:18, padding:18, marginBottom:14, boxShadow:'inset 0 1px 0 rgba(255,255,255,0.07), 0 10px 30px rgba(0,0,0,0.30)' },
+  cTit: { fontSize:11.5, fontWeight:750, color:C.tx3, textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:12 },
+  sLbl: { fontSize:11.5, fontWeight:750, color:C.tx3, textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:5 },
+  sTit: { fontSize:25, fontWeight:800, letterSpacing:'-0.035em', marginBottom:20, color:C.tx },
+  bP: { width:'100%', padding:'15px 20px', borderRadius:16, cursor:'pointer', fontFamily:'inherit',
+        fontSize:15.5, fontWeight:800, letterSpacing:'-0.015em', color:'#fff',
+        background:'linear-gradient(165deg,#FB923C 0%,#F97316 48%,#DB6209 100%)',
+        border:'1px solid rgba(255,255,255,0.22)',
+        boxShadow:'inset 0 1px 0 rgba(255,255,255,0.42), 0 12px 30px rgba(249,115,22,0.34), 0 4px 12px rgba(0,0,0,0.4)',
+        transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' },
+  bS: glassBtn(null, { pad:'13px 20px', size:14, weight:650 }),
+  bV: glassBtn(RGB.vd, { size:15.5, weight:750 }),
+  bO: { ...glassBtn(null, { pad:'13px 16px', size:14, weight:650, align:'left' }), display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 },
+  bLiq: glassBtn(RGB.az, { size:15.5, weight:750 }),
+  bLiqO: glassBtn(RGB.az, { pad:'13px 16px', size:14, weight:700, align:'left' }),
+  inp: { width:'100%', padding:'13px 15px', background:'rgba(0,0,0,0.28)', color:C.tx, border:`1px solid ${C.ln}`, borderRadius:13, fontSize:14.5, fontWeight:600, boxSizing:'border-box', outline:'none', fontFamily:'inherit' },
+  lbl: { display:'block', fontSize:12.5, fontWeight:600, color:C.tx2, marginBottom:6 },
+  tot: { fontSize:29, fontWeight:900, color:'#FDBA74', letterSpacing:'-0.04em' },
 };
 
 const fmt = n => '$' + Math.round(n).toLocaleString('es-AR');
@@ -840,18 +861,18 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
               <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:14 }}>
                 {/* RETIRO EN PLANTA */}
                 <button onClick={()=>{ setModalidadPRE('retiro'); setExtras(e=>({...e,retiraLocal:true,esInterior:false})); }}
-                  className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:16, overflow:'hidden', border:'none', cursor:'pointer', padding:0, display:'block', flexShrink:0 }}>
-                  <div style={{ position:'absolute', inset:0, backgroundImage:"url('RETIRO EN PLANTA.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
+                  className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0, display:'block', flexShrink:0 }}>
+                  <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('RETIRO EN PLANTA.PNG')", backgroundSize:'contain', backgroundRepeat:'no-repeat', backgroundPosition:'center' }} />
                 </button>
                 {/* ENVÍO FLEX */}
                 <button onClick={()=>{ setModalidadPRE('flex'); setExtras(e=>({...e,retiraLocal:false,esInterior:false})); }}
-                  className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:16, overflow:'hidden', border:'none', cursor:'pointer', padding:0, display:'block', flexShrink:0 }}>
-                  <div style={{ position:'absolute', inset:0, backgroundImage:"url('ENVIOS FLEX.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
+                  className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0, display:'block', flexShrink:0 }}>
+                  <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('ENVIOS FLEX.PNG')", backgroundSize:'contain', backgroundRepeat:'no-repeat', backgroundPosition:'center' }} />
                 </button>
                 {/* INTERIOR */}
                 <button onClick={()=>{ setModalidadPRE('interior'); setExtras(e=>({...e,retiraLocal:false,esInterior:true})); }}
-                  className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:16, overflow:'hidden', border:'none', cursor:'pointer', padding:0, display:'block', flexShrink:0 }}>
-                  <div style={{ position:'absolute', inset:0, backgroundImage:"url('ENVIOS AL INTERIOR.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
+                  className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0, display:'block', flexShrink:0 }}>
+                  <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('ENVIOS AL INTERIOR.PNG')", backgroundSize:'contain', backgroundRepeat:'no-repeat', backgroundPosition:'center' }} />
                 </button>
               </div>
             </div>
@@ -900,30 +921,30 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
           {/* Fila 1: Jabón + Suavizante */}
           <div style={{ display:'flex', gap:12, justifyContent:'center', marginBottom:12 }}>
             <button onClick={()=>{ setCur({...cur,tipo:'jabon'}); setPaso('cantidad'); }}
-              className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:16, overflow:'hidden', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
-              <div style={{ position:'absolute', inset:0, backgroundImage:"url('JABON LIQUIDO ROPA.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
+              className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0, flexShrink:0 }}>
+              <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('JABON LIQUIDO ROPA.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
             </button>
             <button onClick={()=>{ setCur({...cur,tipo:'suavizante'}); setPaso('cantidad'); }}
-              className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:16, overflow:'hidden', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
-              <div style={{ position:'absolute', inset:0, backgroundImage:"url('SUAVIZANTE ROPA.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
+              className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0, flexShrink:0 }}>
+              <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('SUAVIZANTE ROPA.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
             </button>
           </div>
           {/* Fila 2: Desodorante + Lavandina */}
           <div style={{ display:'flex', gap:12, justifyContent:'center', marginBottom:12 }}>
             <button onClick={()=>{ setCur({...cur,tipo:'desodorante'}); setPaso('cantidad'); }}
-              className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:16, overflow:'hidden', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
-              <div style={{ position:'absolute', inset:0, backgroundImage:"url('DESODORANTE PISOS.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
+              className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0, flexShrink:0 }}>
+              <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('DESODORANTE PISOS.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
             </button>
             <button onClick={()=>{ setCur({...cur,tipo:'lavandina'}); setPaso('cantidad'); }}
-              className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:16, overflow:'hidden', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
-              <div style={{ position:'absolute', inset:0, backgroundImage:"url('LAVANDINA.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
+              className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0, flexShrink:0 }}>
+              <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('LAVANDINA.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
             </button>
           </div>
           {/* Fila 3: Detergente centrado */}
           <div style={{ display:'flex', justifyContent:'center' }}>
             <button onClick={()=>{ setCur({...cur,tipo:'detergente'}); setPaso('cantidad'); }}
-              className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:16, overflow:'hidden', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
-              <div style={{ position:'absolute', inset:0, backgroundImage:"url('DETERGENTE LIMON.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
+              className="img-btn" style={{ position:'relative', width:175, height:175, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0, flexShrink:0 }}>
+              <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('DETERGENTE LIMON.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
             </button>
           </div>
         </div>
@@ -985,12 +1006,12 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
           <SH step="Combo · Tamaño" title="Tamaño del combo" />
           <div style={{ display:'flex', gap:14, justifyContent:'center' }}>
             <button className="img-btn" onClick={()=>{ setCur({...cur,cantidad:50}); setPaso('c_cal'); }}
-              style={{ position:'relative', width:175, height:175, borderRadius:16, overflow:'hidden', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
-              <div style={{ position:'absolute', inset:0, backgroundImage:"url('BOTON COMBO CHICO .PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
+              style={{ position:'relative', width:175, height:175, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0, flexShrink:0 }}>
+              <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('BOTON COMBO CHICO .PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
             </button>
             <button className="img-btn" onClick={()=>{ setCur({...cur,cantidad:200}); setPaso('c_cal'); }}
-              style={{ position:'relative', width:175, height:175, borderRadius:16, overflow:'hidden', border:'none', cursor:'pointer', padding:0, flexShrink:0 }}>
-              <div style={{ position:'absolute', inset:0, backgroundImage:"url('BOTON COMBO GRANDE.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
+              style={{ position:'relative', width:175, height:175, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0, flexShrink:0 }}>
+              <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('BOTON COMBO GRANDE.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
             </button>
           </div>
         </div>
@@ -4234,8 +4255,8 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
             {esAdmin(usuarioActual) && (
               <G gap={12} style={{ marginBottom:28 }}>
                 <button onClick={()=>setEtapa('liquidaciones')} className="sel-btn" style={s.bLiq}>📊 LIQUIDACIONES</button>
-                <button onClick={()=>setEtapa('liquidacion_flex')} className="sel-btn" style={{ width:'100%', padding:'15px 20px', background:'linear-gradient(135deg,#fb923c,#ea580c)', color:'#fff', border:'none', borderRadius:12, fontWeight:800, fontSize:15, cursor:'pointer', boxShadow:'0 4px 18px rgba(249,115,22,0.45)', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' }}>🛵 LIQUIDACIÓN FLEX</button>
-                <button onClick={()=>setEtapa('gestion')} className="sel-btn" style={{ width:'100%', padding:'15px 20px', background:'linear-gradient(135deg,#7c3aed,#6d28d9)', color:'#fff', border:'none', borderRadius:12, fontWeight:800, fontSize:15, cursor:'pointer', boxShadow:'0 4px 18px rgba(124,58,237,0.45)', transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' }}>📈 GESTIÓN</button>
+                <button onClick={()=>setEtapa('liquidacion_flex')} className="sel-btn" style={glassBtn(RGB.na, { size:15.5, weight:750 })}>🛵 LIQUIDACIÓN FLEX</button>
+                <button onClick={()=>setEtapa('gestion')} className="sel-btn" style={glassBtn(RGB.vi, { size:15.5, weight:750 })}>📈 GESTIÓN</button>
               </G>
             )}
 

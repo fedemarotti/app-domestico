@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Doméstico · Fórmulas / Producción</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { -webkit-font-smoothing:antialiased; }
+  .sel-btn:active { transform:scale(0.97); filter:brightness(1.1); }
+  input:focus, textarea:focus, select:focus { border-color:rgba(249,115,22,0.55) !important; }
+  ::placeholder { color:#5b6b7d; }
+  .print-only { display:none; }
+  @media print {
+    @page { size:A4; margin:14mm; }
+    .screen-ui { display:none !important; }
+    .print-only { display:block !important; }
+    body { background:#fff !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+  window.__SUPA_URL__ = 'https://pfufrqqzgwfnfobuvptj.supabase.co';
+  window.__SUPA_KEY__ = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmdWZycXF6Z3dmbmZvYnV2cHRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2ODIwMTMsImV4cCI6MjA5ODI1ODAxM30.3dn0x7SmDtjkspsVZVmx3KWUvggPZSKrhkO7a-g2PqU';
+</script>
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+// ══ CONEXIÓN Y ROLES ════════════════════════════════════════════════════════
+// Mismo Supabase y mismos usuarios que app-domestico.html. Este módulo solo
+// admite ADMINISTRADOR y NEGOCIO; el vendedor no tiene acceso.
+const SUPA_URL = window.__SUPA_URL__ || '';
+const SUPA_KEY = window.__SUPA_KEY__ || '';
+let supaClient = null;
+try { if (SUPA_URL && SUPA_KEY && window.supabase) supaClient = window.supabase.createClient(SUPA_URL, SUPA_KEY); } catch(e) {}
+
+const ADMIN_EMAIL   = 'fedemarotti@hotmail.com';
+const NEGOCIO_EMAIL = 'produccion@domestico.com.ar';
+const ROL = (email) => {
+  const e = (email || '').trim().toLowerCase();
+  if (e === ADMIN_EMAIL) return 'ADMINISTRADOR';
+  if (e === NEGOCIO_EMAIL) return 'NEGOCIO';
+  return null;
+};
+
+// ══ ESTILOS — mismo molde que app-domestico.html ═══════════════════════════
+const C = { bg0:'#080B10', bg1:'#0E141C', bg2:'#0A0F16', tx:'#EEF2F7', tx2:'#9AA7B8', tx3:'#6B7A8D',
+            ln:'rgba(255,255,255,0.10)', ln2:'rgba(255,255,255,0.06)', gl:'rgba(255,255,255,0.045)',
+            vd:'#34d399', na:'#f97316' };
+const RGB = { na:'249,115,22', vd:'52,211,153', az:'96,165,250', vi:'167,139,250' };
+const glassBtn = (rgb, { pad='15px 20px', size=15, weight=750, radius=16, align='center' } = {}) => ({
+  width:'100%', padding:pad, borderRadius:radius, cursor:'pointer', textAlign:align,
+  fontFamily:'inherit', fontSize:size, fontWeight:weight, letterSpacing:'-0.015em', color:C.tx,
+  background:rgb ? `linear-gradient(180deg,rgba(${rgb},0.16) 0%,rgba(${rgb},0.06) 100%)`
+                 : 'linear-gradient(180deg,rgba(255,255,255,0.085) 0%,rgba(255,255,255,0.035) 100%)',
+  border:`1px solid ${rgb ? `rgba(${rgb},0.34)` : C.ln}`,
+  backdropFilter:'blur(14px) saturate(130%)', WebkitBackdropFilter:'blur(14px) saturate(130%)',
+  boxShadow:`inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.25), 0 10px 26px rgba(0,0,0,0.42)${rgb ? `, 0 10px 28px rgba(${rgb},0.16)` : ''}`,
+  transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease',
+});
+const s = {
+  app: { minHeight:'100vh', backgroundColor:C.bg0, backgroundImage:`radial-gradient(120% 30% at 50% 0%, rgba(96,165,250,0.10) 0%, transparent 60%), linear-gradient(180deg,${C.bg1} 0%,${C.bg2} 30%,${C.bg0} 100%)`, backgroundRepeat:'no-repeat', fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif", color:C.tx },
+  hdr: { background:'rgba(10,15,22,0.72)', backdropFilter:'blur(18px) saturate(140%)', WebkitBackdropFilter:'blur(18px) saturate(140%)', borderBottom:`1px solid ${C.ln2}`, padding:'0 20px', position:'sticky', top:0, zIndex:100, height:56, display:'flex', alignItems:'center' },
+  hIn: { maxWidth:640, margin:'0 auto', width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 },
+  wrap: { maxWidth:640, margin:'0 auto', padding:'20px 16px 60px' },
+  card: { background:C.gl, backdropFilter:'blur(14px)', WebkitBackdropFilter:'blur(14px)', border:`1px solid ${C.ln}`, borderRadius:18, padding:18, marginBottom:14, boxShadow:'inset 0 1px 0 rgba(255,255,255,0.07), 0 10px 30px rgba(0,0,0,0.30)' },
+  cTit: { fontSize:11.5, fontWeight:750, color:C.tx3, textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:12 },
+  sTit: { fontSize:25, fontWeight:800, letterSpacing:'-0.035em', marginBottom:20, color:C.tx },
+  bP: { width:'100%', padding:'15px 20px', borderRadius:16, cursor:'pointer', fontFamily:'inherit',
+        fontSize:15.5, fontWeight:800, letterSpacing:'-0.015em', color:'#fff',
+        background:'linear-gradient(165deg,#FB923C 0%,#F97316 48%,#DB6209 100%)',
+        border:'1px solid rgba(255,255,255,0.22)',
+        boxShadow:'inset 0 1px 0 rgba(255,255,255,0.42), 0 12px 30px rgba(249,115,22,0.34), 0 4px 12px rgba(0,0,0,0.4)',
+        transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), box-shadow 0.15s ease, filter 0.15s ease' },
+  bS: glassBtn(null, { pad:'13px 20px', size:14, weight:650 }),
+  bV: glassBtn(RGB.vd, { size:15.5, weight:750 }),
+  inp: { width:'100%', padding:'13px 15px', background:'rgba(0,0,0,0.28)', color:C.tx, border:`1px solid ${C.ln}`, borderRadius:13, fontSize:14.5, fontWeight:600, boxSizing:'border-box', outline:'none', fontFamily:'inherit' },
+  lbl: { display:'block', fontSize:12.5, fontWeight:600, color:C.tx2, marginBottom:6 },
+};
+const G = ({ cols=1, gap=10, children, style }) => <div style={{ display:'grid', gridTemplateColumns:`repeat(${cols},1fr)`, gap, ...style }}>{children}</div>;
+
+// ══ UNIDADES ════════════════════════════════════════════════════════════════
+// Cada materia prima es de PESO (base kg, se carga en kg o g) o de VOLUMEN
+// (base L, se carga en L o ml — ml y cm³ son lo mismo). Todo se guarda en la
+// unidad base; la pantalla muestra g/ml cuando la cantidad es chica.
+const nfmt = (v) => (Math.round(v*1000)/1000).toLocaleString('es-AR');
+const fmtCant = (n, base) => {
+  const v = Number(n)||0;
+  if (base==='l') return v>=1 ? `${nfmt(v)} L` : `${Math.round(v*1000).toLocaleString('es-AR')} ml`;
+  return v>=1 ? `${nfmt(v)} kg` : `${Math.round(v*1000).toLocaleString('es-AR')} g`;
+};
+const SUBUNIDADES = { kg:[{ k:'kg', label:'kg', f:1 }, { k:'g', label:'g', f:0.001 }],
+                      l: [{ k:'l', label:'L', f:1 }, { k:'ml', label:'ml (cm³)', f:0.001 }] };
+const fmtFecha = (ts) => { const d = new Date(ts);
+  return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' }) + ' ' +
+         d.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' }); };
+
+// ══ MAPEO Supabase ⇄ app ════════════════════════════════════════════════════
+const mapMp = (r) => ({ id:r.id, nombre:r.nombre, base:r.unidad_base, stock:Number(r.stock), minimo:r.minimo==null?null:Number(r.minimo) });
+const mapFormula = (r) => ({
+  id:r.id, nombre:r.nombre, batchL:Number(r.batch_litros),
+  aguaL: r.agua_litros==null?null:Number(r.agua_litros), proceso:r.proceso||'',
+  componentes:(r.fp_formula_componentes||[]).slice().sort((a,b)=>a.orden-b.orden).map(c=>({ mpId:c.materia_prima_id, cant:Number(c.cantidad) })),
+  notas:(r.fp_formula_notas||[]).slice().sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)).map(n=>({ id:n.id, fecha:n.fecha, autor:n.autor, autorEmail:n.autor_email, texto:n.texto })),
+});
+
+// ══ LOGIN (mismo patrón que la app de ventas) ═══════════════════════════════
+function LoginScreen() {
+  const [usuario, setUsuario] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const handleLogin = async (e) => {
+    e.preventDefault(); setError(''); setCargando(true);
+    if (!supaClient) { setError('No hay conexión con el servidor.'); setCargando(false); return; }
+    try {
+      const { error: err } = await supaClient.auth.signInWithPassword({ email: usuario, password });
+      if (err) { setError('Usuario o contraseña incorrectos.'); setCargando(false); return; }
+    } catch(e2) { setError('Error al conectar. Intentá de nuevo.'); setCargando(false); }
+  };
+  return (
+    <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', padding:16,
+      background:'linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)', fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif" }}>
+      <div style={{ background:'#fff', borderRadius:16, padding:'48px 40px', width:'100%', maxWidth:400, boxShadow:'0 20px 60px rgba(0,0,0,0.4)' }}>
+        <div style={{ textAlign:'center', marginBottom:32 }}>
+          <div style={{ fontSize:40, marginBottom:8 }}>🧪</div>
+          <div style={{ fontSize:24, fontWeight:900, color:'#f97316', letterSpacing:2 }}>DOMÉSTICO</div>
+          <div style={{ fontSize:13, color:'#666', marginTop:4 }}>Fórmulas / Producción</div>
+        </div>
+        <form onSubmit={handleLogin}>
+          <div style={{ marginBottom:16 }}>
+            <label style={{ fontSize:12, fontWeight:700, color:'#444', display:'block', marginBottom:6 }}>CORREO ELECTRÓNICO</label>
+            <input type="email" value={usuario} onChange={e=>setUsuario(e.target.value)} required
+              style={{ width:'100%', padding:'13px 15px', border:'1px solid #ddd', borderRadius:10, fontSize:15, boxSizing:'border-box', outline:'none' }} />
+          </div>
+          <div style={{ marginBottom:24 }}>
+            <label style={{ fontSize:12, fontWeight:700, color:'#444', display:'block', marginBottom:6 }}>CONTRASEÑA</label>
+            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required
+              style={{ width:'100%', padding:'13px 15px', border:'1px solid #ddd', borderRadius:10, fontSize:15, boxSizing:'border-box', outline:'none' }} />
+          </div>
+          {error && <div style={{ fontSize:13, color:'#dc2626', marginBottom:16, fontWeight:600 }}>⚠️ {error}</div>}
+          <button type="submit" disabled={cargando}
+            style={{ width:'100%', padding:'14px', background:'linear-gradient(165deg,#FB923C 0%,#F97316 48%,#DB6209 100%)', color:'#fff', border:'none', borderRadius:10, fontSize:15, fontWeight:800, cursor:'pointer', opacity: cargando?0.6:1 }}>
+            {cargando ? 'Ingresando…' : 'Ingresar'}
+          </button>
+        </form>
+        <div style={{ fontSize:11, color:'#999', textAlign:'center', marginTop:20 }}>Acceso exclusivo: Administrador y Negocio</div>
+      </div>
+    </div>
+  );
+}
+
+function SinAcceso({ email, onSalir }) {
+  return (
+    <div style={{ ...s.app, display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}>
+      <div style={{ ...s.card, maxWidth:420, textAlign:'center', padding:'36px 28px' }}>
+        <div style={{ fontSize:40, marginBottom:12 }}>🔒</div>
+        <div style={{ fontSize:18, fontWeight:800, marginBottom:8 }}>Sin acceso a este módulo</div>
+        <div style={{ fontSize:13.5, color:C.tx2, lineHeight:1.6, marginBottom:6 }}>
+          Fórmulas / Producción es exclusivo de <b>ADMINISTRADOR</b> y <b>NEGOCIO</b>.
+        </div>
+        <div style={{ fontSize:12, color:C.tx3, marginBottom:20 }}>Sesión: {email}</div>
+        <button onClick={onSalir} className="sel-btn" style={{ ...s.bS, maxWidth:200, margin:'0 auto' }}>🚪 Cerrar sesión</button>
+      </div>
+    </div>
+  );
+}
+
+// ══ RAÍZ: sesión y rol ══════════════════════════════════════════════════════
+function Root() {
+  const [session, setSession] = useState(undefined); // undefined = verificando
+  useEffect(() => {
+    if (!supaClient) { setSession(null); return; }
+    supaClient.auth.getSession().then(({ data:{ session } }) => setSession(session));
+    const { data:{ subscription } } = supaClient.auth.onAuthStateChange((_e, s2) => setSession(s2));
+    return () => subscription.unsubscribe();
+  }, []);
+  const salir = () => supaClient && supaClient.auth.signOut();
+  if (session === undefined) return (
+    <div style={{ ...s.app, display:'flex', alignItems:'center', justifyContent:'center', color:C.tx3, fontSize:14 }}>Verificando sesión…</div>
+  );
+  if (!session) return <LoginScreen />;
+  const email = (session.user?.email || '').toLowerCase();
+  const rol = ROL(email);
+  if (!rol) return <SinAcceso email={email} onSalir={salir} />;
+  return <Modulo rol={rol} email={email} onSalir={salir} />;
+}
+
+// ══ MÓDULO PRINCIPAL — datos en Supabase (tablas fp_) ═══════════════════════
+function Modulo({ rol, email, onSalir }) {
+  // Navegación con historial: atrás y adelante en todas las pantallas
+  const [stack, setStack] = useState([{ v:'panel' }]);
+  const [pos, setPos] = useState(0);
+  const cur = stack[pos];
+  const vista = cur.v;
+  const ir = (entry) => { const ns = stack.slice(0, pos+1); ns.push(entry); setStack(ns); setPos(ns.length-1); };
+  const atras = () => setPos(p => Math.max(0, p-1));
+  const adelante = () => setPos(p => Math.min(stack.length-1, p+1));
+  const navBtn = (activo) => ({ padding:'5px 11px', background:'rgba(255,255,255,0.08)', border:`1px solid ${C.ln}`, borderRadius:8, color:'#fff', fontSize:12, cursor: activo?'pointer':'default', opacity: activo?1:0.25 });
+
+  const [mps, setMps] = useState(null);           // null = cargando
+  const [formulas, setFormulas] = useState(null);
+  const [err, setErr] = useState('');
+  const mpById = (id) => (mps||[]).find(m => m.id === id);
+
+  const cargarTodo = async () => {
+    try {
+      const [rMp, rF] = await Promise.all([
+        supaClient.from('fp_materias_primas').select('*').eq('activo', true).order('nombre'),
+        supaClient.from('fp_formulas').select('*, fp_formula_componentes(*), fp_formula_notas(*)').eq('activo', true).order('nombre'),
+      ]);
+      if (rMp.error) throw rMp.error;
+      if (rF.error) throw rF.error;
+      setMps(rMp.data.map(mapMp));
+      setFormulas(rF.data.map(mapFormula));
+      setErr('');
+    } catch(e) {
+      setErr('No pude leer la base: ' + (e.message || e) + '. Si las tablas fp_ todavía no existen, hay que crearlas primero (SQL).');
+      if (mps === null) setMps([]);
+      if (formulas === null) setFormulas([]);
+    }
+  };
+  useEffect(() => { cargarTodo(); }, []);
+
+  // Auditoría de stock: cada cambio queda en fp_movimientos con autor y fecha
+  const movimiento = async (mpId, tipo, antes, despues, motivo, referencia) => {
+    try { await supaClient.from('fp_movimientos').insert({ materia_prima_id:mpId, tipo,
+      cantidad_antes:antes, cantidad_despues:despues, motivo:motivo||null, referencia:referencia||null,
+      autor:rol, autor_email:email }); } catch(e) {}
+  };
+
+  // ── Materias primas ──
+  const altaMp = async ({ nombre, base, stock, minimo }) => {
+    const ins = await supaClient.from('fp_materias_primas')
+      .insert({ nombre, unidad_base:base, stock, minimo }).select().single();
+    if (ins.error) {
+      if (ins.error.code === '23505') {
+        // ¿Existe pero está dada de baja? La reactivamos con los datos nuevos.
+        const { data: rows } = await supaClient.from('fp_materias_primas').select('*').eq('activo', false);
+        const ex = (rows||[]).find(r => r.nombre.toLowerCase() === nombre.toLowerCase());
+        if (ex) {
+          await supaClient.from('fp_materias_primas').update({ activo:true, unidad_base:base, stock, minimo }).eq('id', ex.id);
+          await movimiento(ex.id, 'alta', null, stock, 'Materia prima reactivada');
+          await cargarTodo(); return null;
+        }
+        return 'Ya existe una materia prima con ese nombre.';
+      }
+      return 'Error al guardar: ' + ins.error.message;
+    }
+    await movimiento(ins.data.id, 'alta', null, stock, 'Alta de materia prima');
+    await cargarTodo(); return null;
+  };
+
+  const ajustarStock = async (mp, nuevoStock, motivo) => {
+    const up = await supaClient.from('fp_materias_primas').update({ stock: nuevoStock }).eq('id', mp.id);
+    if (up.error) return 'Error al ajustar: ' + up.error.message;
+    await movimiento(mp.id, 'ajuste', mp.stock, nuevoStock, motivo || 'Ajuste manual');
+    await cargarTodo(); return null;
+  };
+
+  const borrarMp = async (mp) => {
+    // Baja lógica: desaparece de las listas pero el historial de movimientos queda intacto.
+    const up = await supaClient.from('fp_materias_primas').update({ activo:false }).eq('id', mp.id);
+    if (up.error) return 'Error al borrar: ' + up.error.message;
+    await movimiento(mp.id, 'baja', mp.stock, mp.stock, 'Baja de materia prima');
+    await cargarTodo(); return null;
+  };
+
+  // Alta al vuelo desde el editor de fórmulas (queda en el catálogo con stock 0)
+  const crearMpRapida = async (nombre, base) => {
+    const msg = await altaMp({ nombre, base, stock:0, minimo:null });
+    if (msg) { setErr(msg); return null; }
+    const r = await supaClient.from('fp_materias_primas').select('*').eq('activo', true);
+    const row = (r.data||[]).find(x => x.nombre.toLowerCase() === nombre.toLowerCase());
+    return row ? mapMp(row) : null;
+  };
+
+  // ── Fórmulas ──
+  const guardarFormula = async (data, formulaExistente) => {
+    let id = formulaExistente?.id;
+    if (!id) {
+      const ins = await supaClient.from('fp_formulas')
+        .insert({ nombre:data.nombre, batch_litros:data.batchL, agua_litros:data.aguaL, proceso:data.proceso }).select().single();
+      if (ins.error) return 'Error al crear la fórmula: ' + ins.error.message;
+      id = ins.data.id;
+    } else {
+      const up = await supaClient.from('fp_formulas')
+        .update({ nombre:data.nombre, batch_litros:data.batchL, agua_litros:data.aguaL, proceso:data.proceso, updated_at:new Date().toISOString() }).eq('id', id);
+      if (up.error) return 'Error al guardar: ' + up.error.message;
+      await supaClient.from('fp_formula_componentes').delete().eq('formula_id', id);
+    }
+    if (data.componentes.length) {
+      const insC = await supaClient.from('fp_formula_componentes')
+        .insert(data.componentes.map((c,i) => ({ formula_id:id, materia_prima_id:c.mpId, cantidad:c.cant, orden:i })));
+      if (insC.error) return 'Error al guardar componentes: ' + insC.error.message;
+    }
+    // Bitácora automática: quién creó o modificó, con fecha
+    await supaClient.from('fp_formula_notas').insert({ formula_id:id,
+      autor:rol, autor_email:email, texto: formulaExistente ? 'Fórmula modificada.' : 'Fórmula creada.' });
+    await cargarTodo(); return null;
+  };
+
+  const borrarFormula = async (f) => {
+    const del = await supaClient.from('fp_formulas').delete().eq('id', f.id);
+    if (del.error) { setErr('Error al borrar: ' + del.error.message); return; }
+    await cargarTodo();
+  };
+
+  const agregarNota = async (formulaId, texto) => {
+    const ins = await supaClient.from('fp_formula_notas').insert({ formula_id:formulaId, autor:rol, autor_email:email, texto });
+    if (ins.error) { setErr('Error al anotar: ' + ins.error.message); return; }
+    await cargarTodo();
+  };
+
+  const rolChip = rol === 'ADMINISTRADOR'
+    ? { background:'rgba(124,58,237,0.2)', border:'1px solid rgba(124,58,237,0.5)', color:'#c4b5fd' }
+    : { background:'rgba(2,132,199,0.2)', border:'1px solid rgba(2,132,199,0.5)', color:'#7dd3fc' };
+  const cargando = mps === null || formulas === null;
+  const formulaCur = cur.id ? (formulas||[]).find(f => f.id === cur.id) : null;
+
+  return (
+    <React.Fragment>
+    <div style={s.app} className="screen-ui">
+      <div style={s.hdr}><div style={s.hIn}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, minWidth:0 }}>
+          <span style={{ fontSize:20 }}>🧪</span>
+          <div style={{ minWidth:0 }}>
+            <div style={{ fontSize:14, fontWeight:800, letterSpacing:'-0.02em', whiteSpace:'nowrap' }}>FÓRMULAS / PRODUCCIÓN</div>
+            <div style={{ fontSize:10, color:C.tx3 }}>Doméstico · Química de Limpieza</div>
+          </div>
+        </div>
+        <div style={{ display:'flex', gap:6, alignItems:'center', flexShrink:0 }}>
+          <div style={{ ...rolChip, fontSize:10, fontWeight:800, padding:'3px 10px', borderRadius:20, letterSpacing:'0.5px' }}>{rol}</div>
+          <button onClick={atras} disabled={pos===0} className="sel-btn" style={navBtn(pos>0)}>←</button>
+          <button onClick={adelante} disabled={pos===stack.length-1} className="sel-btn" style={navBtn(pos<stack.length-1)}>→</button>
+          <button onClick={onSalir} title="Cerrar sesión" className="sel-btn" style={{ padding:'5px 10px', background:'rgba(239,68,68,0.15)', border:'1px solid rgba(239,68,68,0.4)', borderRadius:8, color:'#fca5a5', fontSize:12, cursor:'pointer' }}>🚪</button>
+        </div>
+      </div></div>
+
+      <div style={s.wrap}>
+        {err && (
+          <div style={{ ...s.card, borderColor:'rgba(239,68,68,0.5)', background:'rgba(239,68,68,0.08)', display:'flex', gap:10, alignItems:'flex-start' }}>
+            <div style={{ fontSize:13, color:'#fca5a5', fontWeight:650, lineHeight:1.5, flex:1 }}>⚠️ {err}</div>
+            <button onClick={()=>setErr('')} style={{ background:'none', border:'none', color:'#fca5a5', fontSize:14, cursor:'pointer' }}>✕</button>
+          </div>
+        )}
+        {cargando && <div style={{ textAlign:'center', color:C.tx3, fontSize:14, padding:'60px 0' }}>Cargando datos…</div>}
+
+        {!cargando && vista==='panel' && <Panel irMp={()=>ir({ v:'mp' })} irFormulas={()=>ir({ v:'formulas' })} nMp={mps.length} nF={formulas.length} />}
+        {!cargando && vista==='mp' && <MateriasPrimas mps={mps} formulas={formulas} onAlta={altaMp} onAjuste={ajustarStock} onBorrar={borrarMp} />}
+        {!cargando && vista==='formulas' && <ListaFormulas formulas={formulas} onBorrar={borrarFormula}
+          onVer={(id)=>ir({ v:'ver', id })}
+          onEditar={(id)=>ir({ v:'editor', id })}
+          onNueva={()=>ir({ v:'editor', id:null })} />}
+        {!cargando && vista==='editor' && <EditorFormula key={(cur.id||'nueva')+'-'+pos}
+          formula={formulaCur} mps={mps} onCrearMp={crearMpRapida}
+          onGuardar={(data)=>guardarFormula(data, formulaCur)} onListo={atras} />}
+        {!cargando && vista==='ver' && (formulaCur
+          ? <VerFormula formula={formulaCur} mpById={mpById} onNota={(txt)=>agregarNota(formulaCur.id, txt)} />
+          : <div style={{ color:C.tx3, fontSize:14 }}>Esta fórmula ya no existe.</div>)}
+      </div>
+    </div>
+    {!cargando && vista==='ver' && formulaCur && <PrintSheet formula={formulaCur} mpById={mpById} />}
+    </React.Fragment>
+  );
+}
+
+// ── PANEL — botones cuadrados en 2 columnas, entra en pantalla de teléfono ──
+function Panel({ irMp, irFormulas, nMp, nF }) {
+  const sq = (rgb, off) => ({ ...glassBtn(rgb, { radius:20, pad:10 }), aspectRatio:'1 / 0.82',
+    display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:7,
+    ...(off ? { opacity:0.35, cursor:'not-allowed' } : {}) });
+  const ico = { fontSize:'clamp(28px, 8vw, 38px)', lineHeight:1 };
+  const txt = { fontSize:13.5, fontWeight:800, letterSpacing:'-0.01em', textAlign:'center', lineHeight:1.25 };
+  const sub = { fontSize:10, fontWeight:700, color:C.tx3, textTransform:'uppercase', letterSpacing:'0.08em' };
+  return (
+    <div>
+      <div style={{ paddingTop:4, marginBottom:14 }}>
+        <div style={{ ...s.sTit, marginBottom:0, fontSize:22 }}>Panel de producción</div>
+      </div>
+      <G cols={2} gap={12}>
+        <button onClick={irMp} className="sel-btn" style={sq(RGB.vd)}>
+          <span style={ico}>⚗️</span>
+          <span style={txt}>MATERIAS<br/>PRIMAS</span>
+          <span style={sub}>{nMp} cargadas</span>
+        </button>
+        <button onClick={irFormulas} className="sel-btn" style={sq(RGB.az)}>
+          <span style={ico}>📘</span>
+          <span style={txt}>FÓRMULAS</span>
+          <span style={sub}>{nF} cargadas</span>
+        </button>
+        <button disabled style={sq(null, true)}>
+          <span style={ico}>📦</span>
+          <span style={txt}>MOVIMIENTOS<br/>DE STOCK</span>
+          <span style={sub}>Fase 2</span>
+        </button>
+        <button disabled style={sq(null, true)}>
+          <span style={ico}>💰</span>
+          <span style={txt}>PROVEEDORES<br/>Y COSTOS</span>
+          <span style={sub}>Fase 3</span>
+        </button>
+      </G>
+    </div>
+  );
+}
+
+// ── MATERIAS PRIMAS ──────────────────────────────────────────────────────────
+function MateriasPrimas({ mps, formulas, onAlta, onAjuste, onBorrar }) {
+  const [q, setQ] = useState('');
+  const [alta, setAlta] = useState(false);
+  const [nueva, setNueva] = useState({ nombre:'', base:'kg', stock:'', minimo:'' });
+  const [ajustando, setAjustando] = useState(null);
+  const [ajuste, setAjuste] = useState({ stock:'', motivo:'' });
+  const [errAlta, setErrAlta] = useState('');
+  const [borrando, setBorrando] = useState(null);
+  const [errBorrar, setErrBorrar] = useState({});
+  const [ocupado, setOcupado] = useState(false);
+
+  const lista = useMemo(() => mps.filter(m => m.nombre.toLowerCase().includes(q.toLowerCase())), [mps, q]);
+  const uBase = nueva.base==='l' ? 'L' : 'kg';
+  const usadaEn = (id) => formulas.filter(f => f.componentes.some(c => c.mpId === id));
+
+  const guardarNueva = async () => {
+    const nombre = nueva.nombre.trim();
+    if (!nombre) { setErrAlta('Falta el nombre.'); return; }
+    setOcupado(true);
+    const msg = await onAlta({ nombre, base:nueva.base, stock:Number(nueva.stock)||0, minimo: nueva.minimo==='' ? null : Number(nueva.minimo) });
+    setOcupado(false);
+    if (msg) { setErrAlta(msg); return; }
+    setNueva({ nombre:'', base:'kg', stock:'', minimo:'' }); setAlta(false); setErrAlta('');
+  };
+  const guardarAjuste = async (m) => {
+    setOcupado(true);
+    const msg = await onAjuste(m, Number(ajuste.stock)||0, ajuste.motivo.trim());
+    setOcupado(false);
+    if (msg) { setErrBorrar({ ...errBorrar, [m.id]: msg }); return; }
+    setAjustando(null); setAjuste({ stock:'', motivo:'' });
+  };
+  const pedirBorrar = (m) => {
+    const usos = usadaEn(m.id);
+    if (usos.length) { setErrBorrar({ ...errBorrar, [m.id]: `No se puede borrar: la ${usos.length===1?'usa la fórmula':'usan las fórmulas'} ${usos.map(f=>f.nombre).join(', ')}. Primero sacala de ahí.` }); setBorrando(null); return; }
+    setErrBorrar({ ...errBorrar, [m.id]: '' }); setBorrando(m.id); setAjustando(null);
+  };
+  const confirmarBorrar = async (m) => {
+    setOcupado(true);
+    const msg = await onBorrar(m);
+    setOcupado(false);
+    if (msg) { setErrBorrar({ ...errBorrar, [m.id]: msg }); return; }
+    setBorrando(null);
+  };
+
+  return (
+    <div>
+      <div style={s.sTit}>⚗️ Materias primas</div>
+      <button onClick={()=>setAlta(!alta)} className="sel-btn" style={{ ...s.bP, marginBottom:14 }}>➕ Nueva materia prima</button>
+
+      {alta && (
+        <div style={{ ...s.card, borderColor:'rgba(249,115,22,0.35)' }}>
+          <div style={s.cTit}>Alta de materia prima</div>
+          <label style={s.lbl}>Nombre</label>
+          <input style={{ ...s.inp, marginBottom:12 }} value={nueva.nombre} onChange={e=>setNueva({ ...nueva, nombre:e.target.value })} placeholder="Ej: Ácido sulfónico 90%" />
+          <G cols={3} gap={10}>
+            <div><label style={s.lbl}>Se mide por</label>
+              <select style={s.inp} value={nueva.base} onChange={e=>setNueva({ ...nueva, base:e.target.value })}>
+                <option value="kg">Peso (kg / g)</option>
+                <option value="l">Volumen (L / ml)</option>
+              </select></div>
+            <div><label style={s.lbl}>Stock inicial ({uBase})</label>
+              <input type="number" style={s.inp} value={nueva.stock} onChange={e=>setNueva({ ...nueva, stock:e.target.value })} placeholder="0" /></div>
+            <div><label style={s.lbl}>Mínimo ({uBase})</label>
+              <input type="number" style={s.inp} value={nueva.minimo} onChange={e=>setNueva({ ...nueva, minimo:e.target.value })} placeholder="—" /></div>
+          </G>
+          <div style={{ fontSize:10.5, color:C.tx3, marginTop:8 }}>Elegís una sola vez cómo se mide. Después, en las fórmulas, la cargás en kg o g (si es de peso) o en L o ml/cm³ (si es de volumen) — la conversión es automática.</div>
+          {errAlta && <div style={{ fontSize:12.5, color:'#f87171', fontWeight:700, marginTop:10 }}>⚠️ {errAlta}</div>}
+          <G cols={2} gap={10} style={{ marginTop:14 }}>
+            <button onClick={guardarNueva} disabled={ocupado} className="sel-btn" style={{ ...s.bV, opacity: ocupado?0.6:1 }}>{ocupado?'Guardando…':'Guardar'}</button>
+            <button onClick={()=>{ setAlta(false); setErrAlta(''); }} className="sel-btn" style={s.bS}>Cancelar</button>
+          </G>
+        </div>
+      )}
+
+      <div style={s.card}>
+        <input style={{ ...s.inp, marginBottom:14 }} value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Buscar materia prima…" />
+        <div style={{ fontSize:11, color:C.tx3, marginBottom:10 }}>{lista.length} materias primas</div>
+        {lista.length===0 && <div style={{ fontSize:13, color:C.tx3 }}>Todavía no hay materias primas cargadas. Arrancá con "➕ Nueva materia prima".</div>}
+        {lista.map(m => {
+          const bajo = m.minimo != null && m.stock <= m.minimo;
+          return (
+            <div key={m.id} style={{ padding:'12px 14px', background:'rgba(255,255,255,0.03)', borderRadius:12, border:`1px solid ${bajo?'rgba(239,68,68,0.4)':C.ln2}`, marginBottom:8 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                <div style={{ flex:1, minWidth:180 }}>
+                  <div style={{ fontSize:14, fontWeight:700 }}>{m.nombre}</div>
+                  <div style={{ fontSize:10, color:C.tx3, marginTop:1 }}>{m.base==='l' ? 'Volumen (L / ml)' : 'Peso (kg / g)'}</div>
+                </div>
+                {bajo && <span style={{ fontSize:10, fontWeight:800, color:'#fca5a5', background:'rgba(239,68,68,0.15)', border:'1px solid rgba(239,68,68,0.4)', borderRadius:20, padding:'2px 8px' }}>STOCK BAJO</span>}
+                <div style={{ fontSize:15, fontWeight:800, color: bajo ? '#fca5a5' : '#86efac' }}>{fmtCant(m.stock, m.base)}</div>
+                <button onClick={()=>{ setAjustando(ajustando===m.id?null:m.id); setAjuste({ stock:m.stock, motivo:'' }); setBorrando(null); }} className="sel-btn"
+                  style={{ padding:'6px 12px', background:'rgba(255,255,255,0.07)', border:`1px solid ${C.ln}`, borderRadius:8, color:C.tx2, fontSize:11.5, fontWeight:700, cursor:'pointer' }}>Ajustar</button>
+                <button onClick={()=>pedirBorrar(m)} className="sel-btn"
+                  style={{ padding:'6px 10px', background:'rgba(239,68,68,0.10)', border:'1px solid rgba(239,68,68,0.3)', borderRadius:8, color:'#fca5a5', fontSize:11.5, cursor:'pointer' }}>🗑</button>
+              </div>
+              {errBorrar[m.id] && <div style={{ fontSize:12, color:'#fbbf24', fontWeight:650, marginTop:8, lineHeight:1.5 }}>⚠️ {errBorrar[m.id]}</div>}
+              {borrando===m.id && (
+                <div style={{ marginTop:10, paddingTop:10, borderTop:'1px dashed rgba(239,68,68,0.35)', display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+                  <span style={{ fontSize:13, fontWeight:700, color:'#fca5a5' }}>¿Borrar "{m.nombre}"?</span>
+                  <button onClick={()=>confirmarBorrar(m)} disabled={ocupado} className="sel-btn" style={{ padding:'8px 14px', background:'rgba(239,68,68,0.2)', border:'1px solid rgba(239,68,68,0.5)', borderRadius:9, color:'#fca5a5', fontSize:12.5, fontWeight:800, cursor:'pointer' }}>Sí, borrar</button>
+                  <button onClick={()=>setBorrando(null)} className="sel-btn" style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', border:`1px solid ${C.ln}`, borderRadius:9, color:C.tx2, fontSize:12.5, fontWeight:700, cursor:'pointer' }}>Cancelar</button>
+                </div>
+              )}
+              {ajustando===m.id && (
+                <div style={{ marginTop:10, paddingTop:10, borderTop:`1px dashed ${C.ln}` }}>
+                  <G cols={2} gap={10}>
+                    <div><label style={s.lbl}>Stock real contado ({m.base==='l'?'L':'kg'})</label>
+                      <input type="number" style={s.inp} value={ajuste.stock} onChange={e=>setAjuste({ ...ajuste, stock:e.target.value })} /></div>
+                    <div><label style={s.lbl}>Motivo</label>
+                      <input style={s.inp} value={ajuste.motivo} onChange={e=>setAjuste({ ...ajuste, motivo:e.target.value })} placeholder="Conteo físico, ingreso, merma…" /></div>
+                  </G>
+                  <button onClick={()=>guardarAjuste(m)} disabled={ocupado} className="sel-btn" style={{ ...s.bV, marginTop:10, padding:'11px 16px', fontSize:13.5, opacity: ocupado?0.6:1 }}>{ocupado?'Guardando…':'Guardar ajuste'}</button>
+                  <div style={{ fontSize:10.5, color:C.tx3, marginTop:6 }}>Cada ajuste queda registrado con fecha, usuario y motivo en el historial de movimientos.</div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── LISTA DE FÓRMULAS ────────────────────────────────────────────────────────
+function ListaFormulas({ formulas, onBorrar, onVer, onEditar, onNueva }) {
+  const [q, setQ] = useState('');
+  const [borrando, setBorrando] = useState(null);
+  const lista = formulas.filter(f => f.nombre.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div>
+      <div style={s.sTit}>📘 Fórmulas</div>
+      <button onClick={onNueva} className="sel-btn" style={{ ...s.bP, marginBottom:14 }}>➕ Nueva fórmula</button>
+      <div style={s.card}>
+        <input style={{ ...s.inp, marginBottom:14 }} value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Buscar fórmula…" />
+        {lista.length===0 && <div style={{ fontSize:13, color:C.tx3 }}>Todavía no hay fórmulas. Conviene cargar primero las materias primas y después armar cada fórmula.</div>}
+        {lista.map(f => (
+          <div key={f.id} style={{ padding:'14px', background:'rgba(96,165,250,0.06)', borderRadius:12, border:'1px solid rgba(96,165,250,0.25)', marginBottom:10 }}>
+            <div style={{ fontSize:15, fontWeight:800, marginBottom:2 }}>{f.nombre}</div>
+            <div style={{ fontSize:11.5, color:C.tx3, marginBottom:10 }}>Batch {nfmt(f.batchL)} L · {f.componentes.length} componentes + agua · bitácora: {f.notas.length}</div>
+            <G cols={3} gap={8}>
+              <button onClick={()=>onVer(f.id)} className="sel-btn" style={glassBtn(RGB.az, { pad:'10px 14px', size:13.5 })}>👁 Ver completa</button>
+              <button onClick={()=>onEditar(f.id)} className="sel-btn" style={s.bS}>✏️ Editar</button>
+              <button onClick={()=>setBorrando(borrando===f.id?null:f.id)} className="sel-btn" style={{ padding:'10px 14px', background:'rgba(239,68,68,0.10)', border:'1px solid rgba(239,68,68,0.3)', borderRadius:16, color:'#fca5a5', fontSize:13.5, fontWeight:700, cursor:'pointer' }}>🗑 Borrar</button>
+            </G>
+            {borrando===f.id && (
+              <div style={{ marginTop:10, paddingTop:10, borderTop:'1px dashed rgba(239,68,68,0.35)', display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+                <span style={{ fontSize:13, fontWeight:700, color:'#fca5a5' }}>¿Borrar la fórmula "{f.nombre}"? Se borra también su bitácora.</span>
+                <button onClick={()=>{ onBorrar(f); setBorrando(null); }} className="sel-btn" style={{ padding:'8px 14px', background:'rgba(239,68,68,0.2)', border:'1px solid rgba(239,68,68,0.5)', borderRadius:9, color:'#fca5a5', fontSize:12.5, fontWeight:800, cursor:'pointer' }}>Sí, borrar</button>
+                <button onClick={()=>setBorrando(null)} className="sel-btn" style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', border:`1px solid ${C.ln}`, borderRadius:9, color:C.tx2, fontSize:12.5, fontWeight:700, cursor:'pointer' }}>Cancelar</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── EDITOR DE FÓRMULA ────────────────────────────────────────────────────────
+function EditorFormula({ formula, mps, onCrearMp, onGuardar, onListo }) {
+  const mpDe = (id) => mps.find(m => m.id === id);
+  const compInicial = (c) => {
+    const mp = mpDe(c.mpId); const chico = c.cant < 1;
+    return { key:Math.random().toString(36).substr(2,9), mpId:c.mpId,
+      valor: chico ? c.cant*1000 : c.cant, sub: chico ? (mp?.base==='l'?'ml':'g') : (mp?.base||'kg') };
+  };
+  const [nombre, setNombre] = useState(formula?.nombre || '');
+  const [batch, setBatch] = useState(formula?.batchL || '');
+  const [comps, setComps] = useState(formula ? formula.componentes.map(compInicial) : []);
+  const [aguaL, setAguaL] = useState(formula?.aguaL || '');
+  const [proceso, setProceso] = useState(formula?.proceso || '');
+  const [busca, setBusca] = useState('');
+  const [errGuardar, setErrGuardar] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+
+  const usados = comps.map(c => c.mpId);
+  const sugerencias = busca.trim()
+    ? mps.filter(m => !usados.includes(m.id) && m.nombre.toLowerCase().includes(busca.trim().toLowerCase())).slice(0,6)
+    : [];
+  const existeExacta = mps.some(m => m.nombre.toLowerCase() === busca.trim().toLowerCase());
+
+  const agregarMp = (mp) => { setComps(cs => [...cs, { key:Math.random().toString(36).substr(2,9), mpId:mp.id, valor:'', sub:mp.base }]); setBusca(''); };
+  const crearYAgregar = async (b) => {
+    const nom = busca.trim(); if (!nom || ocupado) return;
+    setOcupado(true);
+    const mp = await onCrearMp(nom, b);
+    setOcupado(false);
+    if (mp) agregarMp(mp);
+  };
+  const aBase = (c) => { const mp = mpDe(c.mpId); const sub = SUBUNIDADES[mp?.base||'kg'].find(x=>x.k===c.sub); return (Number(c.valor)||0) * (sub?.f||1); };
+  const guardar = async () => {
+    if (!nombre.trim() || !batch) { setErrGuardar('Falta el nombre del producto o el tamaño del batch.'); return; }
+    setOcupado(true);
+    const msg = await onGuardar({ nombre:nombre.trim().toUpperCase(), batchL:Number(batch),
+      aguaL: aguaL ? Number(aguaL) : null, proceso,
+      componentes: comps.filter(c=>aBase(c)>0).map(c=>({ mpId:c.mpId, cant:aBase(c) })) });
+    setOcupado(false);
+    if (msg) { setErrGuardar(msg); return; }
+    onListo();
+  };
+
+  return (
+    <div>
+      <div style={s.sTit}>{formula ? '✏️ Editar fórmula' : '➕ Nueva fórmula'}</div>
+
+      <div style={s.card}>
+        <div style={s.cTit}>Producto</div>
+        <label style={s.lbl}>Nombre del producto</label>
+        <input style={{ ...s.inp, marginBottom:12, textTransform:'uppercase' }} value={nombre} onChange={e=>setNombre(e.target.value)} placeholder="Ej: JABÓN ROPA INICIAL / FRESH" />
+        <label style={s.lbl}>Tamaño del batch (litros)</label>
+        <input type="number" style={{ ...s.inp, maxWidth:180 }} value={batch} onChange={e=>setBatch(e.target.value)} placeholder="200" />
+      </div>
+
+      <div style={s.card}>
+        <div style={s.cTit}>Componentes</div>
+        {comps.map((c, i) => {
+          const mp = mpDe(c.mpId);
+          return (
+            <div key={c.key} style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
+              <div style={{ flex:1, fontSize:13.5, fontWeight:700, padding:'11px 13px', background:'rgba(52,211,153,0.07)', border:'1px solid rgba(52,211,153,0.25)', borderRadius:11, minWidth:0, overflowWrap:'anywhere' }}>{mp?.nombre}</div>
+              <input type="number" style={{ ...s.inp, width:90, flexShrink:0 }} value={c.valor}
+                onChange={e=>setComps(comps.map((x,j)=>j===i?{ ...x, valor:e.target.value }:x))} placeholder="0" />
+              <select style={{ ...s.inp, width:92, flexShrink:0, padding:'13px 8px' }} value={c.sub}
+                onChange={e=>setComps(comps.map((x,j)=>j===i?{ ...x, sub:e.target.value }:x))}>
+                {SUBUNIDADES[mp?.base||'kg'].map(u => <option key={u.k} value={u.k}>{u.label}</option>)}
+              </select>
+              <button onClick={()=>setComps(comps.filter((_,j)=>j!==i))} className="sel-btn" style={{ padding:'10px 12px', background:'rgba(239,68,68,0.12)', border:'1px solid rgba(239,68,68,0.35)', borderRadius:10, color:'#fca5a5', cursor:'pointer', flexShrink:0 }}>✕</button>
+            </div>
+          );
+        })}
+
+        <div style={{ position:'relative', marginTop:10 }}>
+          <input style={s.inp} value={busca} onChange={e=>setBusca(e.target.value)} placeholder="＋ Escribí para buscar una materia prima… (ej: L)" />
+          {busca.trim() && (
+            <div style={{ marginTop:6, background:'#0E141C', border:`1px solid ${C.ln}`, borderRadius:13, overflow:'hidden' }}>
+              {sugerencias.map(mp => (
+                <div key={mp.id} onClick={()=>agregarMp(mp)} style={{ padding:'12px 15px', fontSize:13.5, fontWeight:650, cursor:'pointer', borderBottom:`1px solid ${C.ln2}`, display:'flex', justifyContent:'space-between', gap:8 }}>
+                  <span>{mp.nombre}</span>
+                  <span style={{ color:C.tx3, fontSize:12, flexShrink:0 }}>stock {fmtCant(mp.stock, mp.base)}</span>
+                </div>
+              ))}
+              {!existeExacta && (
+                <div style={{ padding:'12px 15px', background:'rgba(249,115,22,0.07)' }}>
+                  <div style={{ fontSize:13.5, fontWeight:700, color:'#fdba74', marginBottom:8 }}>➕ Crear "{busca.trim()}" como nueva materia prima:</div>
+                  <div style={{ display:'flex', gap:8 }}>
+                    <button onClick={()=>crearYAgregar('kg')} disabled={ocupado} className="sel-btn" style={{ flex:1, padding:'9px 10px', background:'rgba(249,115,22,0.15)', border:'1px solid rgba(249,115,22,0.4)', borderRadius:9, color:'#fdba74', fontSize:12.5, fontWeight:700, cursor:'pointer' }}>⚖️ Peso (kg/g)</button>
+                    <button onClick={()=>crearYAgregar('l')} disabled={ocupado} className="sel-btn" style={{ flex:1, padding:'9px 10px', background:'rgba(96,165,250,0.12)', border:'1px solid rgba(96,165,250,0.4)', borderRadius:9, color:'#93c5fd', fontSize:12.5, fontWeight:700, cursor:'pointer' }}>💧 Volumen (L/ml)</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{ fontSize:10.5, color:C.tx3, marginTop:6 }}>Solo se pueden usar materias primas del catálogo. Si no existe, se da de alta desde acá (con stock 0) y queda incorporada. Cada una se carga en su unidad: kg/g o L/ml (cm³).</div>
+        </div>
+      </div>
+
+      <div style={{ ...s.card, borderColor:'rgba(96,165,250,0.3)' }}>
+        <div style={s.cTit}>Agua</div>
+        <div style={{ fontSize:19, fontWeight:900, color:'#93c5fd', letterSpacing:'-0.03em' }}>💧 c.s.p. — completar hasta {batch||'…'} L</div>
+        <div style={{ fontSize:11.5, color:C.tx3, marginTop:6, lineHeight:1.5 }}>El agua completa el batch (cantidad suficiente para {batch||'…'} litros). No se suma con los kilos de los componentes ni lleva stock.</div>
+        <div style={{ marginTop:12, maxWidth:260 }}>
+          <label style={s.lbl}>Litros de agua aproximados (opcional, informativo)</label>
+          <input type="number" style={s.inp} value={aguaL} onChange={e=>setAguaL(e.target.value)} placeholder="Ej: 170" />
+        </div>
+      </div>
+
+      <div style={s.card}>
+        <div style={s.cTit}>Proceso de producción</div>
+        <textarea style={{ ...s.inp, minHeight:130, resize:'vertical', lineHeight:1.5 }} value={proceso} onChange={e=>setProceso(e.target.value)}
+          placeholder={"1) Cargar el agua en el reactor…\n2) Incorporar…"} />
+      </div>
+
+      {errGuardar && <div style={{ fontSize:13, color:'#f87171', fontWeight:700, marginBottom:10 }}>⚠️ {errGuardar}</div>}
+      <G cols={2} gap={10}>
+        <button onClick={guardar} disabled={ocupado} className="sel-btn" style={{ ...s.bV, opacity: ocupado?0.6:1 }}>{ocupado ? 'Guardando…' : '💾 Guardar fórmula'}</button>
+        <button onClick={onListo} className="sel-btn" style={s.bS}>Cancelar</button>
+      </G>
+    </div>
+  );
+}
+
+// ── VISTA COMPLETA + BITÁCORA ────────────────────────────────────────────────
+function VerFormula({ formula, mpById, onNota }) {
+  const [nota, setNota] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+  const agregarNota = async () => {
+    if (!nota.trim() || ocupado) return;
+    setOcupado(true);
+    await onNota(nota.trim());
+    setOcupado(false); setNota('');
+  };
+  return (
+    <div>
+      <div style={{ ...s.sTit, marginBottom:4 }}>{formula.nombre}</div>
+      <div style={{ fontSize:12.5, color:C.tx3, marginBottom:14 }}>Batch de referencia: {nfmt(formula.batchL)} L</div>
+      <button onClick={()=>window.print()} className="sel-btn" style={{ ...glassBtn(RGB.na, { pad:'12px 18px', size:14 }), marginBottom:16 }}>🖨 Imprimir / Guardar PDF (hoja A4)</button>
+
+      <div style={s.card}>
+        <div style={s.cTit}>Receta — batch de {nfmt(formula.batchL)} L</div>
+        <div style={{ display:'flex', justifyContent:'flex-end', gap:12, fontSize:10, color:C.tx3, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', paddingBottom:6, borderBottom:`1px solid ${C.ln2}` }}>
+          <span>Por batch</span><span style={{ width:84, textAlign:'right' }}>Por litro</span>
+        </div>
+        {formula.componentes.map((c,i) => {
+          const mp = mpById(c.mpId);
+          return (
+            <div key={i} style={{ display:'flex', justifyContent:'space-between', gap:10, padding:'10px 0', borderBottom:`1px solid ${C.ln2}`, fontSize:13.5 }}>
+              <span style={{ fontWeight:650 }}>{mp?.nombre || '(materia prima dada de baja)'}</span>
+              <span style={{ display:'flex', gap:12, flexShrink:0 }}>
+                <span style={{ fontWeight:800 }}>{fmtCant(c.cant, mp?.base)}</span>
+                <span style={{ color:C.tx3, width:84, textAlign:'right' }}>{fmtCant(c.cant/formula.batchL, mp?.base)}/L</span>
+              </span>
+            </div>
+          );
+        })}
+        <div style={{ display:'flex', justifyContent:'space-between', gap:10, padding:'12px 0 2px', fontSize:14 }}>
+          <span style={{ fontWeight:800, color:'#93c5fd' }}>💧 Agua — c.s.p.</span>
+          <span style={{ fontWeight:900, color:'#93c5fd' }}>{formula.aguaL ? `≈ ${nfmt(formula.aguaL)} L · ` : ''}hasta completar {nfmt(formula.batchL)} L</span>
+        </div>
+      </div>
+
+      <div style={s.card}>
+        <div style={s.cTit}>Proceso de producción</div>
+        <div style={{ fontSize:13.5, lineHeight:1.7, whiteSpace:'pre-wrap', color:C.tx2 }}>{formula.proceso || 'Sin proceso cargado.'}</div>
+      </div>
+
+      <div style={s.card}>
+        <div style={s.cTit}>📓 Bitácora</div>
+        <div style={{ display:'flex', gap:8, marginBottom:14 }}>
+          <input style={{ ...s.inp, flex:1 }} value={nota} onChange={e=>setNota(e.target.value)} onKeyDown={e=>e.key==='Enter'&&agregarNota()} placeholder="Nueva entrada… (fecha y autor se registran solos)" />
+          <button onClick={agregarNota} disabled={ocupado} className="sel-btn" style={{ padding:'12px 18px', background:C.na, color:'#fff', border:'none', borderRadius:10, fontWeight:700, cursor:'pointer', flexShrink:0, opacity: ocupado?0.6:1 }}>{ocupado?'…':'Agregar'}</button>
+        </div>
+        {formula.notas.length===0 && <div style={{ fontSize:12.5, color:C.tx3 }}>Sin entradas todavía.</div>}
+        {formula.notas.map((n) => (
+          <div key={n.id} style={{ padding:'11px 14px', background:'rgba(255,255,255,0.03)', borderRadius:11, border:`1px solid ${C.ln2}`, marginBottom:8 }}>
+            <div style={{ fontSize:10.5, color:C.tx3, fontWeight:700, marginBottom:3 }}>📅 {fmtFecha(n.fecha)} · {n.autor}{n.autorEmail ? ` (${n.autorEmail})` : ''}</div>
+            <div style={{ fontSize:13.5, lineHeight:1.5 }}>{n.texto}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── HOJA DE IMPRESIÓN A4 (solo visible al imprimir / guardar PDF) ───────────
+function PrintSheet({ formula, mpById }) {
+  if (!formula) return null;
+  const th = { textAlign:'left', padding:'7px 8px', borderBottom:'2px solid #111', fontSize:11, textTransform:'uppercase', letterSpacing:'0.06em', color:'#444' };
+  const td = { padding:'8px', borderBottom:'1px solid #ddd', fontSize:13, color:'#111' };
+  const hoy = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+  return (
+    <div className="print-only" style={{ fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif", color:'#111', background:'#fff' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', borderBottom:'3px solid #f97316', paddingBottom:10, marginBottom:18 }}>
+        <div>
+          <div style={{ fontSize:22, fontWeight:900, color:'#f97316', letterSpacing:2 }}>DOMÉSTICO</div>
+          <div style={{ fontSize:11, color:'#555' }}>Química de Limpieza · Fórmulas / Producción</div>
+        </div>
+        <div style={{ fontSize:11, color:'#555' }}>Impreso: {hoy}</div>
+      </div>
+
+      <div style={{ fontSize:20, fontWeight:900, marginBottom:2 }}>{formula.nombre}</div>
+      <div style={{ fontSize:13, color:'#444', marginBottom:16 }}>Batch de referencia: <b>{nfmt(formula.batchL)} L</b></div>
+
+      <div style={{ fontSize:12, fontWeight:800, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:6 }}>Receta</div>
+      <table style={{ width:'100%', borderCollapse:'collapse', marginBottom:16 }}>
+        <thead><tr>
+          <th style={th}>Componente</th>
+          <th style={{ ...th, textAlign:'right' }}>Por batch ({nfmt(formula.batchL)} L)</th>
+          <th style={{ ...th, textAlign:'right' }}>Por litro</th>
+        </tr></thead>
+        <tbody>
+          {formula.componentes.map((c,i) => {
+            const mp = mpById(c.mpId);
+            return (<tr key={i}>
+              <td style={td}>{mp?.nombre || '—'}</td>
+              <td style={{ ...td, textAlign:'right', fontWeight:700 }}>{fmtCant(c.cant, mp?.base)}</td>
+              <td style={{ ...td, textAlign:'right' }}>{fmtCant(c.cant/formula.batchL, mp?.base)}/L</td>
+            </tr>);
+          })}
+          <tr>
+            <td style={{ ...td, fontWeight:800 }}>Agua — c.s.p.</td>
+            <td style={{ ...td, textAlign:'right', fontWeight:800 }} colSpan={2}>{formula.aguaL ? `≈ ${nfmt(formula.aguaL)} L · ` : ''}completar hasta {nfmt(formula.batchL)} L</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style={{ fontSize:12, fontWeight:800, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:6 }}>Proceso de producción</div>
+      <div style={{ fontSize:13, lineHeight:1.7, whiteSpace:'pre-wrap', marginBottom:16, border:'1px solid #ddd', borderRadius:6, padding:'10px 12px' }}>{formula.proceso || 'Sin proceso cargado.'}</div>
+
+      {formula.notas.length > 0 && (<div>
+        <div style={{ fontSize:12, fontWeight:800, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:6 }}>Bitácora</div>
+        {formula.notas.map((n) => (
+          <div key={n.id} style={{ fontSize:12, marginBottom:6, lineHeight:1.5 }}>
+            <b>{fmtFecha(n.fecha)}</b> ({n.autor}): {n.texto}
+          </div>
+        ))}
+      </div>)}
+
+      <div style={{ marginTop:22, paddingTop:8, borderTop:'1px solid #ddd', fontSize:10, color:'#777' }}>
+        Doméstico · Química de Limpieza — Documento interno de producción. Uso exclusivo de planta y administración.
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
+</script>
+</body>
+</html>

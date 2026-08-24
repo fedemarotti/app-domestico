@@ -337,6 +337,7 @@ function Modulo({ rol, email, onSalir }) {
         </div>
         <div style={{ display:'flex', gap:6, alignItems:'center', flexShrink:0 }}>
           <div style={{ ...rolChip, fontSize:10, fontWeight:800, padding:'3px 10px', borderRadius:20, letterSpacing:'0.5px' }}>{rol}</div>
+          <button onClick={()=>{ window.location.href = '/'; }} title="Volver al Sistema de Ventas" className="sel-btn" style={{ padding:'5px 11px', background:'rgba(249,115,22,0.15)', border:'1px solid rgba(249,115,22,0.4)', borderRadius:8, color:'#fdba74', fontSize:12, cursor:'pointer' }}>🏠</button>
           <button onClick={atras} disabled={pos===0} className="sel-btn" style={navBtn(pos>0)}>←</button>
           <button onClick={adelante} disabled={pos===stack.length-1} className="sel-btn" style={navBtn(pos<stack.length-1)}>→</button>
           <button onClick={onSalir} title="Cerrar sesión" className="sel-btn" style={{ padding:'5px 10px', background:'rgba(239,68,68,0.15)', border:'1px solid rgba(239,68,68,0.4)', borderRadius:8, color:'#fca5a5', fontSize:12, cursor:'pointer' }}>🚪</button>

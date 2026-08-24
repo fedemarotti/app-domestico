@@ -194,6 +194,7 @@ const ADMIN_EMAIL = 'fedemarotti@hotmail.com';
 const VENTAS_EMAIL = 'ventas@domestico.com.ar';
 const PRODUCCION_EMAIL = 'produccion@domestico.com.ar';
 const esAdmin = (u) => (u?.email || '').trim().toLowerCase() === ADMIN_EMAIL;
+const esNegocio = (u) => (u?.email || '').trim().toLowerCase() === PRODUCCION_EMAIL;
 
 const AR_OFFSET_MS = 3 * 3600 * 1000;
 const arParts = (ts) => {
@@ -4316,6 +4317,13 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
                 <button onClick={()=>setEtapa('liquidaciones')} className="sel-btn" style={s.bLiq}>📊 LIQUIDACIONES</button>
                 <button onClick={()=>setEtapa('liquidacion_flex')} className="sel-btn" style={glassBtn(RGB.na, { size:15.5, weight:750 })}>🛵 LIQUIDACIÓN FLEX</button>
                 <button onClick={()=>setEtapa('gestion')} className="sel-btn" style={glassBtn(RGB.vi, { size:15.5, weight:750 })}>📈 GESTIÓN</button>
+              </G>
+            )}
+
+            {/* Módulo Fórmulas / Producción — solo ADMIN y NEGOCIO. Vive en su propia página. */}
+            {(esAdmin(usuarioActual) || esNegocio(usuarioActual)) && (
+              <G gap={12} style={{ marginBottom:28 }}>
+                <button onClick={()=>{ window.location.href = 'formulas-produccion.html'; }} className="sel-btn" style={glassBtn(RGB.vd, { size:15.5, weight:750 })}>🧪 FÓRMULAS / PRODUCCIÓN</button>
               </G>
             )}
 

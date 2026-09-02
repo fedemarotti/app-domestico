@@ -793,6 +793,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
   });
   const [paso, setPaso]       = useState('inicio');
   const [cur, setCur]         = useState({ tipo:null, cantidad:null, calidad:null });
+  const [manual, setManual]   = useState({ nombre:'', precio:'' }); // producto cargado a mano (nombre + precio final)
   const [waMensaje, setWaMensaje] = useState('');
   const [modalidadPRE, setModalidadPRE] = useState(preloaded?.modalidadPRE || null); // 'retiro' | 'flex' | 'interior'
 
@@ -857,6 +858,18 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
       : `${tipo.toUpperCase()} ${calidad.toUpperCase()} ${cantidad} LTS`;
     setItems([...items,{ id:uid(), nombre, precio, tipoItem:'individual', tipo, cantidad, calidad }]);
     setCur({ tipo:null, cantidad:null, calidad:null }); setPaso('inicio');
+    // el useEffect de auto-save detectará el cambio en items y persistirá
+  };
+
+  // Producto MANUAL: nombre y precio final tipeados por el vendedor. Es un ítem de PRODUCTO
+  // (suma en "Productos", no en extras). No tiene tipo/cantidad/calidad: en la DEF no pide
+  // colores ni fragancias, y en informes cuenta por nombre sin litros.
+  const agregarManual = () => {
+    const nombre = (manual.nombre || '').trim();
+    const precio = Math.round(parseFloat(manual.precio));
+    if (!nombre || !(precio > 0)) return;
+    setItems([...items,{ id:uid(), nombre, precio, tipoItem:'manual' }]);
+    setManual({ nombre:'', precio:'' }); setPaso('inicio');
     // el useEffect de auto-save detectará el cambio en items y persistirá
   };
 
@@ -955,6 +968,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
             <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
               <button onClick={()=>{ setCur({tipo:null,cantidad:null,calidad:null}); setPaso('tipo'); }} className="sel-btn" style={s.bP}>➕ Producto Individual</button>
               <button onClick={()=>setPaso('c_tam')} className="sel-btn" style={s.bV}>📦 Combo Pre-armado</button>
+              <button onClick={()=>{ setManual({ nombre:'', precio:'' }); setPaso('manual'); }} className="sel-btn" style={s.bLiq}>✏️ Producto Manual</button>
               {items.length>0 && <button onClick={()=>{ snap(); setPaso('extras'); }} className="sel-btn" style={s.bS}>Continuar → Extras y envío</button>}
             </div>
           )}
@@ -1047,6 +1061,32 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
         </div>
       )}
 
+      {/* PRODUCTO MANUAL (nombre + precio final a mano) */}
+      {paso==='manual' && (() => {
+        const nomOk = (manual.nombre || '').trim().length > 0;
+        const precNum = parseFloat(manual.precio);
+        const precOk = precNum > 0;
+        const ok = nomOk && precOk;
+        return (
+          <div>
+            <button onClick={()=>setPaso('inicio')} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.75)', border:'1px solid rgba(255,255,255,0.14)', borderRadius:8, fontWeight:600, fontSize:12, cursor:'pointer', marginBottom:18 }}>← Atrás</button>
+            <SH step="Pre-cotización · Manual" title="Producto manual" />
+            <div style={s.card}>
+              <div style={s.cTit}>✏️ Cargar producto a mano</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                <div><label style={s.lbl}>Producto / descripción</label><input value={manual.nombre} onChange={e=>setManual({...manual, nombre:e.target.value})} style={s.inp} placeholder="Ej: Desengrasante 20 Lts, Alcohol en gel 5 Lts..." autoFocus /></div>
+                <div><label style={s.lbl}>Precio final</label><input type="number" inputMode="numeric" min="0" step="1" value={manual.precio} onChange={e=>setManual({...manual, precio:e.target.value})} onKeyDown={e=>{ if (e.key==='Enter' && ok) agregarManual(); }} style={s.inp} placeholder="$0" /></div>
+              </div>
+            </div>
+            <div style={{...s.card, textAlign:'center', marginBottom:20}}>
+              <div style={{ fontSize:18, fontWeight:800, marginBottom:8, minHeight:24, color: nomOk ? C.tx : 'rgba(255,255,255,0.3)' }}>{nomOk ? manual.nombre.trim() : 'Sin descripción'}</div>
+              <div style={s.tot}>{fmt(precOk ? Math.round(precNum) : 0)}</div>
+            </div>
+            <button onClick={agregarManual} disabled={!ok} className="sel-btn" style={{...s.bP, opacity: ok ? 1 : 0.45, cursor: ok ? 'pointer' : 'default'}}>✓ Agregar al listado</button>
+          </div>
+        );
+      })()}
+
       {/* COMBO TAMAÑO */}
       {paso==='c_tam' && (
         <div>
@@ -1134,6 +1174,20 @@ const DetalleDEF = ({ itemPRE, onConfirm }) => {
   const puedeDiv = ['jabon','suavizante','detergente'].includes(tipo) && cantidad===200;
   const litUsados = divisiones.reduce((s,d)=>s+d.cantidad,0);
   const litResto = (cantidad||0) - litUsados;
+
+  // PRODUCTO MANUAL — no pide detalle de producción: se confirma solo al entrar, con nombre y precio.
+  if (tipoItem==='manual') {
+    useEffect(() => { onConfirm({ ...itemPRE }); }, []);
+    return (
+      <div>
+        <SH step="Detalle · Manual" title={nombre} />
+        <div style={{...s.card, textAlign:'center'}}>
+          <div style={{ fontSize:13, color:'rgba(255,255,255,0.6)' }}>✏️ Producto cargado a mano — sin colores ni fragancias.</div>
+          <div style={{ fontSize:13, color:'#4ade80', fontWeight:700, marginTop:8 }}>✓ Confirmado automáticamente</div>
+        </div>
+      </div>
+    );
+  }
 
   // LAVANDINA — primero pregunta si canjea, luego fragancias si corresponde
   if (tipo==='lavandina') {
@@ -1645,6 +1699,7 @@ const ResumenItemDEF = ({ det, itemPRE }) => {
     const d = det.divisiones[0];
     partes.push(d.fragancia ? `${d.fragancia} ${d.cantidad}lts` : `Color: ${d.color}`);
   }
+  if (partes.length === 0 && (det.tipoItem === 'manual' || itemPRE?.tipoItem === 'manual')) partes.push('✏️ Producto manual');
   return <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)', marginTop:3 }}>{partes.join(' · ')}</div>;
 };
 
@@ -2462,7 +2517,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
                     </span>
                     <div style={{ display:'flex', gap:8, alignItems:'center' }}>
                       <span style={{ color:C.na, fontWeight:700, fontSize:12 }}>{fmt(it.precio)}</span>
-                      {completo && !activo && (
+                      {completo && !activo && it.tipoItem !== 'manual' && (
                         <button onClick={()=>iniciarEdicion(i)}
                           style={{ padding:'3px 10px', background:'rgba(249,115,22,0.15)', color:C.na, border:`1px solid rgba(249,115,22,0.3)`, borderRadius:6, fontSize:11, fontWeight:700, cursor:'pointer' }}>
                           ✏️ Editar
@@ -3561,6 +3616,9 @@ const ModuloGestion = ({ onVolver }) => {
         const nom = it.tipo.charAt(0).toUpperCase() + it.tipo.slice(1);
         addProd(`${nom}${it.calidad ? ' ' + it.calidad : ''}`, gNum(it.precio), litros, 1);
         if (it.calidad && porCalidad[it.calidad] !== undefined) porCalidad[it.calidad] += gNum(it.precio);
+      } else if (it.tipoItem === 'manual' && it.nombre) {
+        // Producto manual: cuenta por nombre (facturación + unidades), sin litros
+        addProd(String(it.nombre).trim(), gNum(it.precio), 0, 1);
       } else itemsViejos += 1;
     }));
     const topProd = Object.entries(prod).map(([k, v]) => ({ nombre: k, ...v })).sort((a, b) => b.fact - a.fact);
@@ -3804,7 +3862,7 @@ const ModuloGestion = ({ onVolver }) => {
             {m.topProd.length === 0 ? vacio('Sin ítems con formato actual en este período.') : (
               <>
                 {m.topProd.slice(0, 8).map(t => (
-                  <Barra key={t.nombre} nombre={t.nombre} pct={(t.fact / (m.topProd[0].fact || 1)) * 100} val={t.nombre.startsWith('Combo') ? `${t.u} u.` : gLts(t.lts)} />
+                  <Barra key={t.nombre} nombre={t.nombre} pct={(t.fact / (m.topProd[0].fact || 1)) * 100} val={(t.nombre.startsWith('Combo') || !t.lts) ? `${t.u} u.` : gLts(t.lts)} />
                 ))}
                 <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:4 }}>
                   Litros totales: {gLts(m.topProd.reduce((s, t) => s + t.lts, 0))}{m.itemsViejos ? ` · ${m.itemsViejos} ítem${m.itemsViejos !== 1 ? 's' : ''} de formato antiguo sin datos de litros` : ''}

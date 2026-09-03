@@ -892,7 +892,9 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
   // (suma en "Productos", no en extras). No tiene tipo/cantidad/calidad: en la DEF no pide
   // colores ni fragancias, y en informes cuenta por nombre sin litros.
   const agregarManual = () => {
-    const nombre = (manual.nombre || '').trim();
+    // Los documentos imprimibles insertan el nombre como HTML: se quitan < y > para que un
+    // texto tipeado nunca rompa la cotización / orden de producción / checklist.
+    const nombre = (manual.nombre || '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim();
     const precio = Math.round(parseFloat(manual.precio));
     if (!nombre || !(precio > 0)) return;
     setItems([...items,{ id:uid(), nombre, precio, tipoItem:'manual' }]);
@@ -4359,13 +4361,17 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   const esPRECargado = etapa.startsWith('pre_cargado_');
   const [codigoCargado, setCodigoCargado] = useState(null);
   const [preLoadingCargado, setPreLoadingCargado] = useState(false);
+  const [preCargadoFallo, setPreCargadoFallo] = useState(false); // loadLS no encontró la PRE (ni nube ni local)
 
   React.useEffect(() => {
-    if (!esPRECargado) { setCodigoCargado(null); return; }
+    if (!esPRECargado) { setCodigoCargado(null); setPreCargadoFallo(false); return; }
     const cod = etapa.replace('pre_cargado_','');
     setPreLoadingCargado(true);
     setCodigoCargado(null);
-    loadLS(cod).then(d => { setCodigoCargado(d); setPreLoadingCargado(false); });
+    setPreCargadoFallo(false);
+    let vigente = true; // si el usuario navegó a otra etapa antes de que responda, ignorar la respuesta
+    loadLS(cod).then(d => { if (!vigente) return; setCodigoCargado(d || null); setPreCargadoFallo(!d); setPreLoadingCargado(false); });
+    return () => { vigente = false; };
   }, [etapa]);
 
   return (
@@ -4487,8 +4493,15 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
         {etapa==='pre' && <PreCotizacion onVolver={irInicio} onIrDEF={(cod, cli, mod)=>{ setCodigoPRE(cod); if(cli) setClientePreload(cli); if(mod) setModalidadPreload(mod); setEtapa('def'); }} clienteInicial={clientePreload} usuarioActual={usuarioActual} />}
 
         {/* ── PRE CARGADA ── */}
-        {esPRECargado && preLoadingCargado && <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'60vh',color:'rgba(255,255,255,0.6)',fontSize:16,flexDirection:'column',gap:14}}><div style={{width:38,height:38,border:'3px solid rgba(255,255,255,0.15)',borderTop:'3px solid rgba(255,255,255,0.8)',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}></div>Cargando pre-cotización...</div>}
-        {esPRECargado && !preLoadingCargado && <PreCotizacion onVolver={irInicio} onIrDEF={(cod, cli, mod)=>{ setCodigoPRE(cod); if(cli) setClientePreload(cli); if(mod) setModalidadPreload(mod); setEtapa('def'); }} preloaded={codigoCargado} usuarioActual={usuarioActual} />}
+        {/* PRE cargada desde búsqueda/clientes. La pantalla se monta RECIÉN cuando llegaron los datos
+            (key por código fuerza el montaje limpio): antes, en el primer render previo al useEffect,
+            PreCotizacion se montaba con preloaded=null y quedaba como una PRE nueva vacía con otro código. */}
+        {esPRECargado && !codigoCargado && (
+          !preCargadoFallo
+            ? <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'60vh',color:'rgba(255,255,255,0.6)',fontSize:16,flexDirection:'column',gap:14}}><div style={{width:38,height:38,border:'3px solid rgba(255,255,255,0.15)',borderTop:'3px solid rgba(255,255,255,0.8)',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}></div>Cargando pre-cotización...</div>
+            : <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'60vh',color:'rgba(255,255,255,0.7)',fontSize:15,flexDirection:'column',gap:16,textAlign:'center',padding:20}}><div>⚠️ No se encontró la pre-cotización <strong>{etapa.replace('pre_cargado_','')}</strong>.<br/>Revisá la conexión y volvé a buscarla.</div><button onClick={irInicio} className="sel-btn" style={s.bS}>🏠 Volver al inicio</button></div>
+        )}
+        {esPRECargado && codigoCargado && <PreCotizacion key={codigoCargado.codigo} onVolver={irInicio} onIrDEF={(cod, cli, mod)=>{ setCodigoPRE(cod); if(cli) setClientePreload(cli); if(mod) setModalidadPreload(mod); setEtapa('def'); }} preloaded={codigoCargado} usuarioActual={usuarioActual} />}
 
         {/* ── CLIENTES ── */}
         {etapa==='clientes' && <ModuloClientes onNuevoPedido={nuevoPedidoDesdeCli} onVolver={irInicio} onAbrirPedido={(p)=>{ if(p.tipo==='PRE'){ setEtapa('pre_cargado_'+p.codigo); } else { setPedidoVer(p); setEtapa('ver_pedido'); } }} />}

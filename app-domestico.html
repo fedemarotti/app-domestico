@@ -306,6 +306,33 @@ async function genCodigoDEF() {
   const sufijo = String.fromCharCode(65 + Math.floor(Math.random() * 26));
   return `DEF${dd}${mm}${String(n).padStart(2,'0')}${sufijo}`;
 }
+
+// Código DEF a partir de la PRE: si se confirma el MISMO DÍA en que se creó la PRE, el DEF es el
+// espejo exacto (PRE020918R → DEF020918R) así PRE y DEF comparten código. Si cambió el día, manda la
+// fecha del DEF: se genera un código nuevo con la fecha de hoy (genCodigoDEF).
+async function codigoDEFDesdePRE(codigoPRE) {
+  const now = new Date();
+  const ddmmHoy = String(now.getDate()).padStart(2,'0') + String(now.getMonth()+1).padStart(2,'0');
+  const m = /^PRE(\d{2})(\d{2})/.exec(codigoPRE || '');
+  if (m && (m[1] + m[2]) === ddmmHoy) {
+    const espejo = toDEF(codigoPRE);
+    let ocupado = false;
+    // Resguardo: si por alguna razón ya existe un DEF con ese código (de otra PRE), no lo pisamos.
+    if (supaClient) {
+      try {
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
+        const queryPromise = supaClient.from('pedidos').select('codigo').eq('codigo', espejo);
+        const { data } = await Promise.race([queryPromise, timeoutPromise]);
+        if (data && data.length > 0) ocupado = true;
+      } catch(e) { console.warn('codigoDEFDesdePRE Supabase error (usando local):', e); }
+    }
+    if (!ocupado) {
+      try { const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}'); if (all[espejo]) ocupado = true; } catch{}
+    }
+    if (!ocupado) return espejo;
+  }
+  return genCodigoDEF();
+}
 // ── SUPABASE CONFIG ─────────────────────────────────────────────────────────
 const SUPA_URL = window.__SUPA_URL__ || '';
 const SUPA_KEY = window.__SUPA_KEY__ || '';
@@ -2437,9 +2464,10 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
       // Si ya existe un pedidoFinal (el vendedor volvió a "Editar cliente/entrega" y reconfirmó),
       // reusamos el mismo código/fecha para ACTUALIZAR ese mismo registro (saveLS hace upsert por
       // código) en vez de generar un código nuevo y crear un segundo pedido duplicado.
-      // El código y la fecha DEFINITIVOS solo se generan de cero en la primera confirmación real —
-      // no heredan la fecha de una PRE vieja que se haya cobrado días después.
-      const codigoFinal = pedidoFinal ? pedidoFinal.codigo : await genCodigoDEF();
+      // El código DEF se define en la primera confirmación real: mismo código que la PRE si se confirma
+      // el mismo día (PRE020918R → DEF020918R); si cambió el día manda la fecha del DEF y se genera
+      // uno nuevo con la fecha de hoy. La fecha del DEF es siempre la de confirmación.
+      const codigoFinal = pedidoFinal ? pedidoFinal.codigo : await codigoDEFDesdePRE(codigoPRE);
       setCodigo(codigoFinal);
       const p = {
         codigo: codigoFinal, codigoPRE, tipo:'DEF', numero:codigoFinal,

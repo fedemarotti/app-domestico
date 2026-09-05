@@ -192,6 +192,7 @@ function detectarZona(loc) {
 // ═══════════════════════════════════════════════════════════════════════════════
 const ADMIN_EMAIL = 'fedemarotti@hotmail.com';
 const VENTAS_EMAIL = 'ventas@domestico.com.ar';
+const VENTAS2_EMAIL = 'ventas2@domestico.com.ar'; // segundo vendedor (05/09/2026): mismo flujo que VENDEDOR, reportes propios
 const PRODUCCION_EMAIL = 'produccion@domestico.com.ar';
 const esAdmin = (u) => (u?.email || '').trim().toLowerCase() === ADMIN_EMAIL;
 const esNegocio = (u) => (u?.email || '').trim().toLowerCase() === PRODUCCION_EMAIL;
@@ -3613,7 +3614,7 @@ const ModuloGestion = ({ onVolver }) => {
 
     // Por vendedor (sobre DEF del período) — comisión idéntica a Liquidaciones: 5% del neto sin envío
     const porVend = {};
-    ['VENDEDOR', 'NEGOCIO', 'ADMINISTRADOR', 'Sin atribución'].forEach(k => porVend[k] = { cant: 0, fact: 0, com: 0, items: [] });
+    ['VENDEDOR', 'VENDEDOR 2', 'NEGOCIO', 'ADMINISTRADOR', 'Sin atribución'].forEach(k => porVend[k] = { cant: 0, fact: 0, com: 0, items: [] });
     defs.forEach(p => {
       const v = gVendedor(p);
       if (!porVend[v]) porVend[v] = { cant: 0, fact: 0, com: 0, items: [] };
@@ -4532,6 +4533,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 const ROLES_LIQ = [
   { key:'ventas',     label:'VENDEDOR',       email:VENTAS_EMAIL,     icon:'🧑‍💼', color:'linear-gradient(145deg,#16a34a,#15803d)', glow:'rgba(22,163,74,0.55)' },
+  { key:'ventas2',    label:'VENDEDOR 2',     email:VENTAS2_EMAIL,    icon:'🧑‍💼', color:'linear-gradient(145deg,#0d9488,#0f766e)', glow:'rgba(13,148,136,0.55)' },
   { key:'produccion', label:'NEGOCIO',        email:PRODUCCION_EMAIL, icon:'🏭',   color:'linear-gradient(145deg,#0284c7,#0369a1)', glow:'rgba(2,132,199,0.55)' },
   { key:'admin',      label:'ADMINISTRADOR',  email:ADMIN_EMAIL,      icon:'👔',   color:'linear-gradient(145deg,#7c3aed,#6d28d9)', glow:'rgba(124,58,237,0.55)' },
   { key:'total',      label:'VENTAS TOTALES', email:null,             icon:'📊',   color:'linear-gradient(145deg,#d97706,#b45309)', glow:'rgba(217,119,6,0.55)' },
@@ -4784,8 +4786,8 @@ function ModuloLiquidaciones({ onVolver }) {
       {step === 'rol' && (
         <div>
           <div style={{ fontSize:19, fontWeight:900, color:'#fff', marginBottom:20 }}>De quién querés ver las ventas?</div>
-          {/* 3 botones lado a lado */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:12 }}>
+          {/* Roles en grilla de 2 columnas (2 vendedores + negocio + admin) */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:12, marginBottom:12 }}>
             {ROLES_LIQ.filter(r => r.key !== 'total').map(r => (
               <button key={r.key}
                 onClick={() => tapRol(r.key)}
@@ -5049,7 +5051,7 @@ function CardMetrica({ titulo, children, destacada }) {
 function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrarVendedor, resumen, onCerrar }) {
   const fmtM = v => '$' + Math.round(v || 0).toLocaleString('es-AR');
   const maxImporteDia = resumen ? Math.max(...resumen.dias.map(d => d.importe)) : 0;
-  const vendColores = { 'VENDEDOR':'#16a34a', 'NEGOCIO':'#0284c7', 'ADMINISTRADOR':'#7c3aed', 'Sin datos':'#94a3b8' };
+  const vendColores = { 'VENDEDOR':'#16a34a', 'VENDEDOR 2':'#0d9488', 'NEGOCIO':'#0284c7', 'ADMINISTRADOR':'#7c3aed', 'Sin datos':'#94a3b8' };
   const modColores  = { 'LOCAL':'#22c55e', 'FLEX':'#fb923c', 'INTERIOR':'#818cf8' };
   return (
     <div>

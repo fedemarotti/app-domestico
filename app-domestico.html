@@ -220,13 +220,18 @@ const arRangoDesdeISO = (isoDesde, isoHasta) => {
 // LOCALSTORAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Genera el próximo código PRE consultando Supabase para evitar colisiones entre dispositivos
-async function genCodigoPRE() {
-  const now = new Date();
-  const dd = String(now.getDate()).padStart(2,'0');
-  const mm = String(now.getMonth()+1).padStart(2,'0');
-  const prefixHoy = `PRE${dd}${mm}`;
-
+// Secuencia del día COMPARTIDA entre PRE y DEF. El número NN del código se toma como el máximo entre
+// TODOS los códigos PREddmm.. y DEFddmm.. existentes (Supabase + localStorage), no por tipo.
+// Motivo (bug 11/09/2026): un DEF generado hoy a partir de una PRE de otro día recibe un código nuevo
+// con la fecha de hoy (DEF110901C, de PRE100909W). Si la secuencia de PRE es independiente, la primera
+// PRE de hoy también sale 01 (PRE110901C) y su espejo DEF110901C ya está ocupado por otro pedido:
+// la búsqueda la reemplazaba por ese DEF ajeno y la PRE "desaparecía". Con la secuencia compartida
+// ningún PRE y DEF de distinto origen pueden compartir sufijo.
+async function maxSecuenciaDia(ddmm) {
+  const prefijos = [`PRE${ddmm}`, `DEF${ddmm}`];
+  // parseInt('07A') retorna 7: la letra final no rompe la lógica del máximo.
+  const numDe = (codigo) => (typeof codigo === 'string' && prefijos.some(p => codigo.startsWith(p)))
+    ? (parseInt(codigo.slice(7)) || 0) : 0;
   let maxN = 0;
 
   // Consultar Supabase con timeout de 3 segundos para no colgar la app
@@ -236,31 +241,28 @@ async function genCodigoPRE() {
       const queryPromise = supaClient
         .from('pedidos')
         .select('codigo')
-        .like('codigo', `${prefixHoy}%`);
+        .or(`codigo.like.${prefijos[0]}%,codigo.like.${prefijos[1]}%`);
       const { data } = await Promise.race([queryPromise, timeoutPromise]);
-      if (data && data.length > 0) {
-        data.forEach(row => {
-          const num = parseInt(row.codigo.replace(prefixHoy, '')) || 0;
-          if (num > maxN) maxN = num;
-        });
-      }
-    } catch(e) { console.warn('genCodigoPRE Supabase error (usando local):', e); }
+      (data || []).forEach(row => { const num = numDe(row.codigo); if (num > maxN) maxN = num; });
+    } catch(e) { console.warn('maxSecuenciaDia Supabase error (usando local):', e); }
   }
 
   // También revisar localStorage local por si hay pedidos no sincronizados
   try {
     const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}');
-    Object.keys(all).forEach(k => {
-      if (k.startsWith(prefixHoy)) {
-        const num = parseInt(k.replace(prefixHoy, '')) || 0;
-        if (num > maxN) maxN = num;
-      }
-    });
+    Object.keys(all).forEach(k => { const num = numDe(k); if (num > maxN) maxN = num; });
   } catch{}
 
-  const n = maxN + 1;
+  return maxN;
+}
+
+// Genera el próximo código PRE consultando Supabase para evitar colisiones entre dispositivos
+async function genCodigoPRE() {
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2,'0');
+  const mm = String(now.getMonth()+1).padStart(2,'0');
+  const n = (await maxSecuenciaDia(dd + mm)) + 1;
   // Sufijo aleatorio (letra A-Z) para evitar colisiones entre usuarios simultáneos.
-  // parseInt('07A') sigue retornando 7, por lo que la lógica de maxN no se rompe.
   const sufijo = String.fromCharCode(65 + Math.floor(Math.random() * 26));
   return `PRE${dd}${mm}${String(n).padStart(2,'0')}${sufijo}`;
 }
@@ -272,38 +274,9 @@ async function genCodigoDEF() {
   const now = new Date();
   const dd = String(now.getDate()).padStart(2,'0');
   const mm = String(now.getMonth()+1).padStart(2,'0');
-  const prefixHoy = `DEF${dd}${mm}`;
-
-  let maxN = 0;
-
-  if (supaClient) {
-    try {
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
-      const queryPromise = supaClient
-        .from('pedidos')
-        .select('codigo')
-        .like('codigo', `${prefixHoy}%`);
-      const { data } = await Promise.race([queryPromise, timeoutPromise]);
-      if (data && data.length > 0) {
-        data.forEach(row => {
-          const num = parseInt(row.codigo.replace(prefixHoy, '')) || 0;
-          if (num > maxN) maxN = num;
-        });
-      }
-    } catch(e) { console.warn('genCodigoDEF Supabase error (usando local):', e); }
-  }
-
-  try {
-    const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}');
-    Object.keys(all).forEach(k => {
-      if (k.startsWith(prefixHoy)) {
-        const num = parseInt(k.replace(prefixHoy, '')) || 0;
-        if (num > maxN) maxN = num;
-      }
-    });
-  } catch{}
-
-  const n = maxN + 1;
+  // Misma secuencia diaria que las PRE (ver maxSecuenciaDia): el sufijo que toma este DEF nuevo
+  // no puede ser después el espejo de una PRE de hoy.
+  const n = (await maxSecuenciaDia(dd + mm)) + 1;
   const sufijo = String.fromCharCode(65 + Math.floor(Math.random() * 26));
   return `DEF${dd}${mm}${String(n).padStart(2,'0')}${sufijo}`;
 }
@@ -4327,8 +4300,12 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
     const addR = (p) => { if (p && !resultado.find(x => x.codigo === p.codigo)) resultado.push(p); };
     encontrados.forEach(p => {
       if (p.tipo === 'PRE') {
+        // El DEF de esta PRE es el que la referencia por codigoPRE. El código espejo solo vale como
+        // respaldo para DEF viejos sin codigoPRE: un DEF de OTRA PRE puede tener el mismo sufijo
+        // (11/09/2026: DEF110901C venía de PRE100909W y escondía a PRE110901C en la búsqueda).
         const defCod = toDEF(p.codigo);
-        const defExiste = todos.find(x => x.codigo === defCod);
+        const defExiste = todos.find(x => x.codigoPRE === p.codigo && x.codigo !== p.codigo)
+          || todos.find(x => x.codigo === defCod && !x.codigoPRE);
         defExiste ? addR(defExiste) : addR(p);
       } else { addR(p); }
     });

@@ -4380,7 +4380,8 @@ const mkDur = (ms) => {
 const mkMediana = arr => { if (!arr.length) return null; const a = [...arr].sort((x, y) => x - y); const n = a.length; return n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2; };
 const mkTel = c => (c?.telefono || '').replace(/\D/g, '');
 const mkWaLink = c => { let t = mkTel(c); if (!t) return null; if (t.startsWith('0')) t = t.slice(1); if (!t.startsWith('54')) t = '549' + t; return `https://wa.me/${t}`; };
-const mkLocalidad = p => ((p?.cliente?.localidad || p?.extras?.localidad || '').trim().toUpperCase()) || 'SIN DATO';
+// Sin localidad cargada = en general clientes que retiran en planta (no se les pide dirección)
+const mkLocalidad = p => ((p?.cliente?.localidad || p?.extras?.localidad || '').trim().toUpperCase()) || 'SIN DEFINIR';
 const mkCsv = (nombreArchivo, cabecera, filas) => {
   const esc = v => { const s2 = v == null ? '' : String(v); return /[;"\n]/.test(s2) ? `"${s2.replace(/"/g, '""')}"` : s2; };
   const txt = '﻿' + [cabecera, ...filas].map(f => f.map(esc).join(';')).join('\r\n');
@@ -4774,7 +4775,7 @@ const ModuloMarketing = () => {
                   </div>
                 </div>
               )}
-              <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', marginTop:6 }}>Tocá una provincia (en el mapa o en la lista) para ver el detalle. {m.estimadas > 0 ? `${m.estimadas} venta(s) Flex/Retiro sin provincia cargada se cuentan en Buenos Aires.` : ''}</div>
+              <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', marginTop:6 }}>Tocá una provincia (en el mapa o en la lista) para ver el detalle. {m.estimadas > 0 ? `${m.estimadas} venta(s) sin dirección cargada (en general retiran en planta) se ubican en Buenos Aires como “SIN DEFINIR”.` : ''}</div>
             </div>
             {sp && (
               <div style={{ ...card, borderColor:'rgba(244,114,182,0.5)' }}>
@@ -4847,7 +4848,7 @@ const ModuloMarketing = () => {
               {[30, 60, 90].map(d => <button key={d} onClick={() => setDiasInactivo(d)} style={pill(diasInactivo === d)}>+{d} días</button>)}
             </div>
             {m.inactivos.length === 0 ? vacio('No hay clientes inactivos con ese criterio.') :
-              m.inactivos.slice(0, 200).map((o, i) => filaContacto('in' + i, o.c, o.c?.nombre || o.c?.telefono || 'Sin nombre', `${(o.c?.localidad || 'SIN DATO').toUpperCase()} · última compra ${fmtFechaDDMMAAAA(o.ultima)} (${gDiasDesde(o.ultima, m.now)} días) · ${o.n} compra${o.n !== 1 ? 's' : ''}${o.c?.telefono ? ' · ' + o.c.telefono : ''}`, fmt(o.tot), o.u))}
+              m.inactivos.slice(0, 200).map((o, i) => filaContacto('in' + i, o.c, o.c?.nombre || o.c?.telefono || 'Sin nombre', `${(o.c?.localidad || 'SIN DEFINIR').toUpperCase()} · última compra ${fmtFechaDDMMAAAA(o.ultima)} (${gDiasDesde(o.ultima, m.now)} días) · ${o.n} compra${o.n !== 1 ? 's' : ''}${o.c?.telefono ? ' · ' + o.c.telefono : ''}`, fmt(o.tot), o.u))}
             <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:6 }}>Ordenados por lo que compraron en total: arriba los que más vale la pena recuperar.</div>
           </div>
         </div>

@@ -4907,6 +4907,385 @@ const AppMarketing = ({ usuarioActual, onCerrarSesion }) => (
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// VENTAS Y GANANCIA — solo ADMIN. Bandeja estilo WhatsApp de DEF confirmados con
+// rentabilidad por venta. Costos en Supabase (tabla costos_historial, solo admin por RLS);
+// estado leído / costo de productos manuales en tabla ventas_admin (solo admin).
+// Reglas definidas por Fede el 22/09/2026 (ver spec en el proyecto).
+// ═══════════════════════════════════════════════════════════════════════════════
+const VG_COSTOS_BASE = {
+  pasta: {
+    jabon:      { 50: { Inicial: 7893.84,  Intermedia: 10020.29, Premium: 11675.34 }, 200: { Inicial: 31575.36, Intermedia: 40081.16, Premium: 46701.36 } },
+    suavizante: { 50: { Inicial: 6553.95,  Intermedia: 7421.31,  Premium: 8552.31  }, 200: { Inicial: 26215.80, Intermedia: 29685.24, Premium: 34209.24 } },
+    detergente: { 50: { Inicial: 10120.88, Intermedia: 14427.89, Premium: 17897.33 }, 200: { Inicial: 40483.52, Intermedia: 57711.56, Premium: 71589.32 } },
+  },
+  lavandina50: 646.69, desodorante50: 1499.02,
+  bolsa: 171, etiquetaChica: 18, etiquetaGrande: 43, balde: 3800, caja: 400,
+  comiDepo: 3.5, comiVentas: 5,
+};
+const VG_TIPOS = [['jabon','Jabón'],['suavizante','Suavizante'],['detergente','Detergente']];
+const VG_CALS = ['Inicial','Intermedia','Premium'];
+const VG_BOLSAS = { jabon: { 50: 1, 200: 4 }, suavizante: { 50: 2, 200: 8 }, detergente: { 50: 1, 200: 4 } };
+const vgN = v => { const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')); return isFinite(n) ? n : 0; };
+const vgLitros = arr => (arr || []).reduce((a, f) => a + vgN(f?.cantidad), 0);
+const vgFmt = n => (n < 0 ? '− ' : '') + '$' + Math.round(Math.abs(n)).toLocaleString('es-AR');
+
+// Costo de mercadería de un DEF. costosManuales: { 'i<idx>' | 'a<idx>': costo } cargados por el admin.
+const vgCostoDEF = (p, C, costosManuales = {}) => {
+  const det = []; let cat = 0; let manPrecio = 0, manCosto = 0, manEstimado = false;
+  const add = (txt, v) => { det.push([txt, v]); cat += v; };
+  (p.items || []).forEach((it, idx) => {
+    const esCombo = it.tipoItem === 'combo' || it.tipo === 'combo';
+    const t = it.cantidad === 200 ? 200 : 50;
+    if (it.tipoItem === 'manual') {
+      const pr = vgN(it.precio); const k = 'i' + idx; const tiene = costosManuales[k] != null && costosManuales[k] !== '';
+      const c = tiene ? vgN(costosManuales[k]) : pr * 0.5; if (!tiene) manEstimado = true;
+      manPrecio += pr; manCosto += c; det.push([`✍️ ${it.nombre || 'Producto manual'}${tiene ? '' : ' (50% estimado)'}`, c, 'manual']); return;
+    }
+    if (esCombo) {
+      const cal = it.calidad; let pasta = 0;
+      VG_TIPOS.forEach(([k]) => { pasta += vgN(C.pasta?.[k]?.[t]?.[cal]); });
+      const lavU = it.canje_lavandina ? 0 : t / 50;
+      const litDes = vgLitros(it.fragancias_piso); const desU = litDes > 0 ? litDes / 50 : (t / 50) * (it.canje_lavandina ? 2 : 1);
+      const bolsas = VG_BOLSAS.jabon[t] + VG_BOLSAS.suavizante[t] + VG_BOLSAS.detergente[t];
+      const chicas = ['jabon_divs','suav_divs','det_divs'].reduce((a, k) => a + ((it[k] || []).length > 1 ? 12 : 3), 0) + 3 * lavU + 3 * desU;
+      const grandes = t === 50 ? 1 : 3;
+      const tot = pasta + lavU * C.lavandina50 + desU * C.desodorante50 + bolsas * C.bolsa + chicas * C.etiquetaChica + grandes * C.etiquetaGrande;
+      add(`Combo ${t === 50 ? 'Chico' : 'Grande'} ${cal || ''} (pastas ${vgFmt(pasta)} · ${lavU} lav. · ${desU} desod. · ${bolsas} bolsas · ${chicas}+${grandes} etiq.)`, tot);
+      return;
+    }
+    if (VG_BOLSAS[it.tipo]) {
+      const pasta = vgN(C.pasta?.[it.tipo]?.[t]?.[it.calidad]);
+      const fracc = t === 200 && (it.divisiones || []).length > 1;
+      const bolsas = VG_BOLSAS[it.tipo][t]; const chicas = fracc ? 12 : 3;
+      const nom = (VG_TIPOS.find(x => x[0] === it.tipo) || [0, it.tipo])[1];
+      add(`${nom} ${it.calidad || ''} ${t} L${fracc ? ' fracc.' : ''} (pasta ${vgFmt(pasta)} · ${bolsas} bolsas · ${chicas} etiq.)`, pasta + bolsas * C.bolsa + chicas * C.etiquetaChica);
+      return;
+    }
+    if (it.tipo === 'lavandina') {
+      if (it.canje_lavandina) { const u = Math.max(1, vgLitros(it.fragancias_canje) / 50 || t / 50); add(`Lavandina → canje desodorante ${u * 50} L`, u * C.desodorante50 + 3 * u * C.etiquetaChica); }
+      else { const u = t / 50; add(`Lavandina ${t} L (${u} u. · ${3 * u} etiq.)`, u * C.lavandina50 + 3 * u * C.etiquetaChica); }
+      return;
+    }
+    if (it.tipo === 'desodorante') { const u = t / 50; add(`Desodorante ${t} L (${u} u. · ${3 * u} etiq.)`, u * C.desodorante50 + 3 * u * C.etiquetaChica); return; }
+    det.push([`⚠️ Ítem sin costo reconocido: ${it.nombre || it.tipo || '?'}`, 0]);
+  });
+  (p.extras?.agregados || []).forEach((a, idx) => {
+    const pr = vgN(a.precio); const k = 'a' + idx; const tiene = costosManuales[k] != null && costosManuales[k] !== '';
+    const c = tiene ? vgN(costosManuales[k]) : pr * 0.5; if (!tiene) manEstimado = true;
+    manPrecio += pr; manCosto += c; det.push([`⭐ ${a.nombre || 'Producto extra'}${tiene ? '' : ' (50% estimado)'}`, c, 'manual']);
+  });
+  const env = desgloseEnvases(p.envases || 0, p.extras);
+  if (env.baldes) add(`Baldes/envases cargados (${env.baldes})`, env.baldes * C.balde);
+  if (env.cajas) add(`Cajas (${env.cajas})`, env.cajas * C.caja);
+  return { cat, det, manPrecio, manCosto, manEstimado };
+};
+
+// Rentabilidad completa de un DEF con las reglas de comisiones
+const vgRentabilidad = (p, C, costosManuales) => {
+  const total = gTotal(p); const envioFlex = gModalidad(p) === 'FLEX' ? gEnvio(p) : 0;
+  const neto = total - envioFlex;
+  const u = mkUser(p); const conComiVentas = u === 'MALE' || u === 'VENDEDOR 2';
+  const comiDepo = total * vgN(C.comiDepo) / 100;
+  const comiVentas = conComiVentas ? neto * vgN(C.comiVentas) / 100 : 0;
+  const cst = vgCostoDEF(p, C, costosManuales);
+  const shareMan = neto > 0 ? Math.min(1, cst.manPrecio / neto) : 0;
+  const gCat = (neto - cst.manPrecio) - cst.cat - (comiDepo + comiVentas) * (1 - shareMan);
+  const gMan = cst.manPrecio - cst.manCosto - (comiDepo + comiVentas) * shareMan;
+  return { total, envioFlex, neto, comiDepo, comiVentas, conComiVentas, costo: cst.cat + cst.manCosto, cst, gCat, gMan, gTot: gCat + gMan, u };
+};
+
+// Acceso a Supabase (tablas solo admin)
+const vgCargarCostos = async () => {
+  if (!supaClient) return { error: 'sin conexión' };
+  const { data, error } = await supaClient.from('costos_historial').select('id,vigente_desde,data').order('vigente_desde', { ascending: true });
+  if (error) return { error: error.message || 'error' };
+  return { lista: data || [] };
+};
+const vgCostoVigente = (lista, ts) => {
+  if (!lista || !lista.length) return null;
+  let v = lista[0]; for (const r of lista) { if (r.vigente_desde <= ts) v = r; else break; }
+  return { ...VG_COSTOS_BASE, ...(v.data || {}), pasta: { ...VG_COSTOS_BASE.pasta, ...((v.data || {}).pasta || {}) } };
+};
+const vgCargarAdmin = async () => {
+  if (!supaClient) return { error: 'sin conexión' };
+  const { data, error } = await supaClient.from('ventas_admin').select('codigo,leido,leido_ts,costos_manuales');
+  if (error) return { error: error.message || 'error' };
+  const m = {}; (data || []).forEach(r => { m[r.codigo] = r; }); return { mapa: m };
+};
+const vgGuardarAdmin = async (codigo, cambios) => {
+  if (!supaClient) return false;
+  const { error } = await supaClient.from('ventas_admin').upsert({ codigo, ...cambios }, { onConflict: 'codigo' });
+  if (error) { console.warn('ventas_admin', error); return false; }
+  return true;
+};
+// Cuenta DEF sin leer (desde que se cargaron costos por primera vez)
+const vgContarNoLeidas = async () => {
+  try {
+    const [ped, cs, ad] = await Promise.all([listLS(), vgCargarCostos(), vgCargarAdmin()]);
+    if (cs.error || ad.error || !cs.lista.length) return 0;
+    const inicio = cs.lista[0].vigente_desde;
+    return (ped || []).filter(p => p.tipo === 'DEF' && typeof p.ts === 'number' && p.ts >= inicio && !(ad.mapa[p.codigo]?.leido)).length;
+  } catch { return 0; }
+};
+
+// Botón "mantené apretado" (1 s) para marcar leída — evita toques accidentales
+const VgHold = ({ onDone, label = '✓ Mantené para marcar leída' }) => {
+  const [prog, setProg] = useState(0);
+  const ref = React.useRef(null);
+  const start = (e) => { e.preventDefault(); e.stopPropagation(); const t0 = Date.now();
+    clearInterval(ref.current);
+    ref.current = setInterval(() => { const p = Math.min(1, (Date.now() - t0) / 1000); setProg(p);
+      if (p >= 1) { clearInterval(ref.current); try { navigator.vibrate && navigator.vibrate(40); } catch {} setTimeout(() => setProg(0), 250); onDone(); } }, 30); };
+  const stop = (e) => { e && e.stopPropagation(); clearInterval(ref.current); setProg(p => p >= 1 ? p : 0); };
+  React.useEffect(() => () => clearInterval(ref.current), []);
+  return (
+    <button onMouseDown={start} onTouchStart={start} onMouseUp={stop} onMouseLeave={stop} onTouchEnd={stop} onTouchCancel={stop} onClick={e => e.stopPropagation()} onContextMenu={e => e.preventDefault()}
+      style={{ position:'relative', overflow:'hidden', width:'100%', padding:'13px 16px', borderRadius:12, border:'1px solid rgba(52,211,153,0.5)', background:'rgba(52,211,153,0.10)', color:'#6ee7b7', fontWeight:850, fontSize:13.5, cursor:'pointer', fontFamily:'inherit', userSelect:'none', WebkitUserSelect:'none', WebkitTouchCallout:'none', touchAction:'none' }}>
+      <span style={{ position:'absolute', inset:0, width:`${prog * 100}%`, background:'linear-gradient(90deg,rgba(52,211,153,0.35),rgba(52,211,153,0.6))', transition: prog === 0 ? 'width 0.2s' : 'none' }} />
+      <span style={{ position:'relative' }}>{prog > 0 && prog < 1 ? 'Seguí apretando…' : label}</span>
+    </button>
+  );
+};
+
+// Editor de costos (crea una versión nueva vigente desde ahora; las ventas viejas conservan su costo)
+const VgEditorCostos = ({ actual, onGuardado, onCerrar }) => {
+  const base = actual || VG_COSTOS_BASE;
+  const [c, setC] = useState(() => JSON.parse(JSON.stringify(base)));
+  const [estado, setEstado] = useState(null);
+  const inp = (val, onCh) => <input inputMode="decimal" value={val} onChange={e => onCh(e.target.value)} style={{ ...s.inp, padding:'9px 6px', fontSize:12.5, textAlign:'right', minWidth:0 }} />;
+  const setP = (tipo, lt, cal, v) => setC(o => ({ ...o, pasta: { ...o.pasta, [tipo]: { ...o.pasta[tipo], [lt]: { ...o.pasta[tipo][lt], [cal]: v } } } }));
+  const guardar = async () => {
+    const limpio = JSON.parse(JSON.stringify(c));
+    VG_TIPOS.forEach(([k]) => [50, 200].forEach(lt => VG_CALS.forEach(cal => { limpio.pasta[k][lt][cal] = vgN(limpio.pasta[k][lt][cal]); })));
+    ['lavandina50','desodorante50','bolsa','etiquetaChica','etiquetaGrande','balde','caja','comiDepo','comiVentas'].forEach(k => { limpio[k] = vgN(limpio[k]); });
+    setEstado('guardando');
+    const { error } = await supaClient.from('costos_historial').insert({ vigente_desde: Date.now(), data: limpio });
+    if (error) { setEstado('No se pudo guardar: ' + error.message); return; }
+    setEstado('ok'); onGuardado && onGuardado();
+  };
+  const lbl = { fontSize:11, fontWeight:750, color:C.tx2 };
+  return (
+    <div>
+      <button onClick={onCerrar} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', marginBottom:12, fontFamily:'inherit' }}>← Volver a Ventas</button>
+      <div style={{ fontSize:20, fontWeight:900, marginBottom:4 }}>⚙️ Costos</div>
+      <div style={{ fontSize:12, color:C.tx2, marginBottom:14 }}>Al guardar se crea una versión nueva que rige desde este momento. Las ventas anteriores mantienen el costo que tenían. Solo vos ves esta pantalla.</div>
+      {VG_TIPOS.map(([k, nom]) => (
+        <div key={k} style={s.card}>
+          <div style={s.cTit}>{nom} · pasta</div>
+          <div style={{ display:'grid', gridTemplateColumns:'44px 1fr 1fr 1fr', gap:5, alignItems:'center' }}>
+            <div></div>{VG_CALS.map(cal => <div key={cal} style={{ ...lbl, textAlign:'center' }}>{cal}</div>)}
+            {[50, 200].map(lt => (
+              <React.Fragment key={lt}>
+                <div style={lbl}>{lt} L</div>
+                {VG_CALS.map(cal => <div key={cal}>{inp(c.pasta[k][lt][cal], v => setP(k, lt, cal, v))}</div>)}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      ))}
+      <div style={s.card}>
+        <div style={s.cTit}>Otros productos e insumos</div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 120px', gap:8, alignItems:'center' }}>
+          {[['lavandina50','Lavandina (cada 50 L)'],['desodorante50','Desodorante piso (cada 50 L)'],['bolsa','Bolsa'],['etiquetaChica','Etiqueta chica'],['etiquetaGrande','Etiqueta grande'],['balde','Balde / envase suavizante'],['caja','Caja']].map(([k, l]) => (
+            <React.Fragment key={k}><div style={lbl}>{l}</div>{inp(c[k], v => setC(o => ({ ...o, [k]: v })))}</React.Fragment>
+          ))}
+        </div>
+      </div>
+      <div style={s.card}>
+        <div style={s.cTit}>Comisiones (%)</div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 120px', gap:8, alignItems:'center' }}>
+          <div style={lbl}>Comi Depo (sobre el total cobrado)</div>{inp(c.comiDepo, v => setC(o => ({ ...o, comiDepo: v })))}
+          <div style={lbl}>Comi Ventas (MALE y VENDEDOR 2, sin envío Flex)</div>{inp(c.comiVentas, v => setC(o => ({ ...o, comiVentas: v })))}
+        </div>
+      </div>
+      {estado && estado !== 'guardando' && estado !== 'ok' && <div style={{ color:'#fca5a5', fontWeight:700, fontSize:12.5, marginBottom:10 }}>⚠️ {estado}</div>}
+      {estado === 'ok' ? <div style={{ padding:'12px 14px', borderRadius:12, background:'rgba(52,211,153,0.12)', border:'1px solid rgba(52,211,153,0.4)', color:'#6ee7b7', fontWeight:700, fontSize:13 }}>✅ Costos guardados. Rigen desde ahora.</div>
+        : <button onClick={guardar} disabled={estado === 'guardando'} className="sel-btn" style={s.bP}>{estado === 'guardando' ? 'Guardando…' : '💾 Guardar costos'}</button>}
+    </div>
+  );
+};
+
+const ModuloVentasGanancia = ({ onVolver, onCambioNoLeidas }) => {
+  const AM = '#facc15';
+  const [pedidos, setPedidos] = useState(null);
+  const [costos, setCostos] = useState(null);     // lista de versiones
+  const [admin, setAdmin] = useState({});         // codigo → { leido, costos_manuales }
+  const [err, setErr] = useState(null);
+  const [filtro, setFiltro] = useState('todas');  // 'todas' | 'sinleer' | 'fecha'
+  const [fechaISO, setFechaISO] = useState('');
+  const [abierto, setAbierto] = useState(null);
+  const [verDet, setVerDet] = useState(null);
+  const [editCostos, setEditCostos] = useState(false);
+  const [deshacer, setDeshacer] = useState(null); // codigo marcado recién
+  const [sync, setSync] = useState(null);
+  const [limite, setLimite] = useState(60);
+
+  const cargar = async () => {
+    setErr(null);
+    const [ped, cs, ad] = await Promise.all([listLS(), vgCargarCostos(), vgCargarAdmin()]);
+    if (cs.error || ad.error) { setErr(cs.error || ad.error); }
+    setPedidos(Array.isArray(ped) ? ped : []); setCostos(cs.lista || []); setAdmin(ad.mapa || {}); setSync(Date.now());
+  };
+  React.useEffect(() => { cargar(); const t = setInterval(cargar, 60000); return () => clearInterval(t); }, []);
+
+  const inicio = costos && costos.length ? costos[0].vigente_desde : null;
+  const esNoLeida = p => inicio != null && p.ts >= inicio && !admin[p.codigo]?.leido;
+  const defs = React.useMemo(() => (pedidos || []).filter(p => p.tipo === 'DEF' && typeof p.ts === 'number').sort((a, b) => b.ts - a.ts), [pedidos]);
+  const noLeidas = defs.filter(esNoLeida).length;
+  React.useEffect(() => { onCambioNoLeidas && onCambioNoLeidas(noLeidas); }, [noLeidas]);
+
+  const marcar = async (codigo, leido) => {
+    setAdmin(a => ({ ...a, [codigo]: { ...(a[codigo] || {}), codigo, leido } }));
+    const ok = await vgGuardarAdmin(codigo, { leido, leido_ts: leido ? Date.now() : null });
+    if (!ok) { setAdmin(a => ({ ...a, [codigo]: { ...(a[codigo] || {}), leido: !leido } })); alert('No se pudo guardar. Revisá la conexión.'); return; }
+    if (leido) { setDeshacer(codigo); setAbierto(null); setTimeout(() => setDeshacer(d => d === codigo ? null : d), 5000); }
+  };
+  const guardarCostoManual = async (codigo, key, valor) => {
+    const cm = { ...(admin[codigo]?.costos_manuales || {}), [key]: valor === '' ? null : vgN(valor) };
+    setAdmin(a => ({ ...a, [codigo]: { ...(a[codigo] || {}), codigo, costos_manuales: cm } }));
+    await vgGuardarAdmin(codigo, { costos_manuales: cm, leido: !!admin[codigo]?.leido });
+  };
+
+  if (editCostos) return <VgEditorCostos actual={costos && costos.length ? vgCostoVigente(costos, Date.now()) : null} onGuardado={cargar} onCerrar={() => { setEditCostos(false); cargar(); }} />;
+
+  let lista = defs;
+  if (filtro === 'sinleer') lista = lista.filter(esNoLeida);
+  if (filtro === 'fecha' && fechaISO) { const { desde, hasta } = arRangoDesdeISO(fechaISO, fechaISO); lista = lista.filter(p => p.ts >= desde && p.ts <= hasta); }
+  const visibles = lista.slice(0, limite);
+  const hoy0 = arInicioDeDia(Date.now());
+  const etiquetaDia = ts => { const d = arInicioDeDia(ts); return d === hoy0 ? 'HOY' : d === hoy0 - 86400000 ? 'AYER' : fmtFechaDDMMAAAA(ts); };
+  // totales del día de hoy
+  const deHoy = defs.filter(p => p.ts >= hoy0);
+  const sinCostos = !costos || !costos.length;
+  const R = p => sinCostos ? null : vgRentabilidad(p, vgCostoVigente(costos, p.ts), admin[p.codigo]?.costos_manuales || {});
+  const totHoy = sinCostos ? null : deHoy.reduce((a, p) => { const r = R(p); a.cob += r.total; a.g += r.gTot; return a; }, { cob: 0, g: 0 });
+
+  const fila = (l, v, color, bold) => (
+    <div style={{ display:'flex', justifyContent:'space-between', fontSize: bold ? 14 : 12.5, padding:'2px 0', color: bold ? '#fff' : 'rgba(255,255,255,0.72)', fontWeight: bold ? 900 : 500 }}>
+      <span>{l}</span><b style={{ color: color || '#fff', fontWeight: bold ? 900 : 750 }}>{v}</b>
+    </div>
+  );
+  const Desglose = ({ p, r }) => (
+    <div>
+      {fila('Cliente abonó', vgFmt(r.total))}
+      {r.envioFlex > 0 && fila('Envío Flex', vgFmt(-r.envioFlex), '#fca5a5')}
+      {fila(`Comi Depo ${String(vgCostoVigente(costos, p.ts).comiDepo).replace('.', ',')}%`, vgFmt(-r.comiDepo), '#fca5a5')}
+      {r.conComiVentas && fila(`Comi Ventas ${String(vgCostoVigente(costos, p.ts).comiVentas).replace('.', ',')}%`, vgFmt(-r.comiVentas), '#fca5a5')}
+      <div onClick={e => { e.stopPropagation(); setVerDet(verDet === p.codigo ? null : p.codigo); }} style={{ cursor:'pointer' }}>
+        {fila(<span>Costo mercadería <span style={{ fontSize:10.5, color:'#93c5fd' }}>{verDet === p.codigo ? '▲ ocultar' : '▼ ver detalle'}</span></span>, vgFmt(-r.costo), '#fca5a5')}
+      </div>
+      {verDet === p.codigo && (
+        <div onClick={e => e.stopPropagation()} style={{ margin:'4px 0 6px', padding:'8px 10px', borderRadius:10, background:'rgba(0,0,0,0.25)', fontSize:11.5 }}>
+          {r.cst.det.map(([t, v, tipo], i) => (
+            <div key={i} style={{ display:'flex', justifyContent:'space-between', gap:8, padding:'2px 0', color:'rgba(255,255,255,0.75)' }}><span style={{ minWidth:0 }}>{t}</span><b style={{ whiteSpace:'nowrap' }}>{vgFmt(v)}</b></div>
+          ))}
+          {[...(p.items || []).map((it, i) => it.tipoItem === 'manual' ? ['i' + i, it.nombre || 'Producto manual', it.precio] : null), ...(p.extras?.agregados || []).map((a, i) => ['a' + i, a.nombre || 'Producto extra', a.precio])].filter(Boolean).map(([k, nom, pr]) => (
+            <div key={k} style={{ display:'flex', alignItems:'center', gap:6, marginTop:6 }}>
+              <span style={{ flex:1, fontSize:11, color:'#fde68a' }}>Costo real de “{nom}” (vendido a {vgFmt(vgN(pr))}):</span>
+              <input inputMode="decimal" placeholder="50%" defaultValue={admin[p.codigo]?.costos_manuales?.[k] ?? ''} onBlur={e => guardarCostoManual(p.codigo, k, e.target.value.trim())} style={{ ...s.inp, width:100, padding:'6px 8px', fontSize:12, textAlign:'right' }} />
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ borderTop:'1px solid rgba(255,255,255,0.12)', marginTop:6, paddingTop:6 }}>
+        {r.cst.manPrecio > 0 ? <>
+          {fila('💰 Ganancia catálogo (real)', vgFmt(r.gCat), r.gCat >= 0 ? '#4ade80' : '#f87171', true)}
+          {fila(`🟡 Ganancia manual (${r.cst.manEstimado ? 'estimada 50%' : 'con costo cargado'})`, vgFmt(r.gMan), '#fde68a')}
+          {fila('📊 Ganancia total', vgFmt(r.gTot), r.gTot >= 0 ? '#4ade80' : '#f87171', true)}
+        </> : fila('💰 Ganancia', vgFmt(r.gTot), r.gTot >= 0 ? '#4ade80' : '#f87171', true)}
+      </div>
+    </div>
+  );
+
+  let diaPrev = null;
+  return (
+    <div>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+        <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>🏠 Inicio</button>
+        <div style={{ flex:1 }} />
+        <button onClick={cargar} style={{ padding:'8px 12px', background:'rgba(74,222,128,0.12)', color:'#4ade80', border:'1px solid rgba(74,222,128,0.4)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>🔄 {sync ? gHora(sync) : ''}</button>
+      </div>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+        <div style={{ fontSize:22, fontWeight:900, letterSpacing:'-0.4px' }}>💰 Ventas</div>
+        {noLeidas > 0 && <span style={{ fontSize:11.5, fontWeight:900, background:'#ef4444', color:'#fff', borderRadius:20, padding:'4px 10px' }}>{noLeidas} sin leer</span>}
+      </div>
+      <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:10 }}>
+        {[['todas','Todas'],['sinleer','Sin leer'],['fecha','📅 Fecha']].map(([k, l]) => (
+          <button key={k} onClick={() => { setFiltro(k); setLimite(60); }} style={{ padding:'7px 12px', borderRadius:20, fontSize:11.5, fontWeight:800, cursor:'pointer', fontFamily:'inherit',
+            background: filtro === k ? 'rgba(250,204,21,0.18)' : 'rgba(255,255,255,0.06)', border: filtro === k ? '1px solid rgba(250,204,21,0.55)' : '1px solid rgba(255,255,255,0.14)', color: filtro === k ? '#fde68a' : 'rgba(255,255,255,0.7)' }}>{l}</button>
+        ))}
+        <button onClick={() => setEditCostos(true)} style={{ padding:'7px 12px', borderRadius:20, fontSize:11.5, fontWeight:800, cursor:'pointer', fontFamily:'inherit', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.14)', color:'rgba(255,255,255,0.8)' }}>⚙️ Costos</button>
+      </div>
+      {filtro === 'fecha' && <input type="date" value={fechaISO} onChange={e => setFechaISO(e.target.value)} style={{ ...s.inp, marginBottom:10 }} />}
+
+      {err && <div style={{ padding:'12px 14px', borderRadius:12, background:'rgba(239,68,68,0.12)', border:'1px solid rgba(239,68,68,0.4)', color:'#fca5a5', fontSize:12.5, fontWeight:700, marginBottom:10 }}>⚠️ No se pudieron leer los costos o el estado de lectura ({err}). Si recién se instaló, falta crear las tablas en Supabase.</div>}
+      {!err && sinCostos && pedidos && (
+        <div style={{ ...s.card, borderColor:'rgba(250,204,21,0.5)' }}>
+          <div style={{ fontWeight:900, marginBottom:6 }}>Primero cargá los costos</div>
+          <div style={{ fontSize:12.5, color:C.tx2, marginBottom:10 }}>Ya están precargados los valores de tu planilla del 22/09. Revisalos y tocá Guardar: desde ese momento cada DEF nuevo aparece acá como mensaje sin leer.</div>
+          <button onClick={() => setEditCostos(true)} className="sel-btn" style={s.bP}>⚙️ Revisar y guardar costos</button>
+        </div>
+      )}
+      {totHoy && deHoy.length > 0 && (
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
+          <div style={{ ...s.card, marginBottom:0, padding:12 }}><div style={s.cTit}>Cobrado hoy ({deHoy.length})</div><div style={{ fontSize:19, fontWeight:900 }}>{vgFmt(totHoy.cob)}</div></div>
+          <div style={{ ...s.card, marginBottom:0, padding:12 }}><div style={s.cTit}>Ganancia hoy</div><div style={{ fontSize:19, fontWeight:900, color: totHoy.g >= 0 ? '#4ade80' : '#f87171' }}>{vgFmt(totHoy.g)}</div></div>
+        </div>
+      )}
+
+      {!pedidos && <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,0.6)' }}>Cargando…</div>}
+      {pedidos && lista.length === 0 && <div style={{ textAlign:'center', padding:30, color:'rgba(255,255,255,0.45)', fontSize:13 }}>{filtro === 'sinleer' ? 'No hay ventas sin leer. 🎉' : 'No hay ventas para mostrar.'}</div>}
+
+      {pedidos && !sinCostos && visibles.map(p => {
+        const r = R(p); const nueva = esNoLeida(p); const abiertoEste = abierto === p.codigo;
+        const dia = etiquetaDia(p.ts); const sep = dia !== diaPrev; diaPrev = dia;
+        return (
+          <React.Fragment key={p.codigo}>
+            {sep && <div style={{ textAlign:'center', margin:'8px 0 10px' }}><span style={{ fontSize:10, fontWeight:900, letterSpacing:'0.12em', color:C.tx2, background:'rgba(255,255,255,0.07)', borderRadius:8, padding:'3px 10px' }}>{dia}</span></div>}
+            {nueva || abiertoEste ? (
+              <div onClick={() => !nueva && setAbierto(null)} style={{ borderRadius:16, padding:'12px 14px', marginBottom:10, cursor: nueva ? 'default' : 'pointer',
+                background: nueva ? 'linear-gradient(180deg,rgba(250,204,21,0.10),rgba(250,204,21,0.03))' : 'rgba(255,255,255,0.05)',
+                border: nueva ? '1px solid rgba(250,204,21,0.55)' : '1px solid rgba(255,255,255,0.12)', borderLeft: nueva ? `4px solid ${AM}` : '1px solid rgba(255,255,255,0.12)' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:5 }}>
+                  {nueva && <span style={{ width:9, height:9, borderRadius:'50%', background:AM, boxShadow:`0 0 8px ${AM}`, flexShrink:0 }} />}
+                  <Chip codigo={p.codigo} tipo="DEF" />
+                  {nueva && <span style={{ fontSize:9, fontWeight:900, background:AM, color:'#1e293b', borderRadius:6, padding:'1px 6px' }}>NUEVA</span>}
+                  {!nueva && <span style={{ fontSize:11, color:'#38bdf8', fontWeight:900 }}>✓✓</span>}
+                  <span style={{ marginLeft:'auto', fontSize:11, color:C.tx3, fontWeight:700 }}>{arHora(p.ts)}</span>
+                </div>
+                <div style={{ fontSize:12.5, color:C.tx2, marginBottom:8 }}>
+                  <span style={{ fontWeight:900, color: mkColor(r.u) }}>{r.u}</span> vendió · {gModalidad(p)}{p.cliente?.nombre ? ` · ${p.cliente.nombre}` : ''}
+                </div>
+                <Desglose p={p} r={r} />
+                {nueva && <div style={{ marginTop:10 }}><VgHold onDone={() => marcar(p.codigo, true)} /></div>}
+                {!nueva && <div style={{ fontSize:10.5, color:C.tx3, textAlign:'center', marginTop:8 }}>Tocá para cerrar</div>}
+              </div>
+            ) : (
+              <div onClick={() => setAbierto(p.codigo)} style={{ display:'flex', alignItems:'center', gap:9, padding:'9px 12px', marginBottom:6, borderRadius:12, background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.06)', cursor:'pointer', opacity: p.ts >= (inicio || Infinity) ? 0.9 : 0.75 }}>
+                <span style={{ fontSize:11, color:'#38bdf8', fontWeight:900 }}>✓✓</span>
+                <div style={{ flex:1, minWidth:0, fontSize:11.5, color:C.tx2, lineHeight:1.3 }}>
+                  <b style={{ color:'#fff' }}>{p.codigo}</b> · <span style={{ color: mkColor(r.u), fontWeight:800 }}>{r.u}</span> · {vgFmt(r.total)}
+                  <div style={{ fontSize:10.5, color:C.tx3 }}>Ganancia <b style={{ color: r.gTot >= 0 ? '#86efac' : '#fca5a5' }}>{vgFmt(r.gTot)}</b>{r.cst.manEstimado ? ' (incluye estimado)' : ''} · tocá para ver</div>
+                </div>
+                <span style={{ fontSize:10.5, color:C.tx3, fontWeight:700 }}>{arHora(p.ts)}</span>
+              </div>
+            )}
+          </React.Fragment>
+        );
+      })}
+      {pedidos && !sinCostos && lista.length > limite && <button onClick={() => setLimite(l => l + 60)} className="sel-btn" style={{ ...s.bS, marginTop:6 }}>Ver más ventas anteriores</button>}
+
+      {deshacer && (
+        <div style={{ position:'fixed', left:16, right:16, bottom:20, zIndex:400, maxWidth:560, margin:'0 auto', display:'flex', alignItems:'center', gap:10, padding:'12px 14px', borderRadius:14, background:'#1e293b', border:'1px solid rgba(255,255,255,0.18)', boxShadow:'0 10px 30px rgba(0,0,0,0.5)' }}>
+          <span style={{ flex:1, fontSize:13, fontWeight:700 }}>✓✓ {deshacer} marcada como leída</span>
+          <button onClick={() => { const c = deshacer; setDeshacer(null); marcar(c, false); }} style={{ padding:'7px 12px', borderRadius:10, border:'none', background:AM, color:'#1e293b', fontWeight:900, fontSize:12.5, cursor:'pointer', fontFamily:'inherit' }}>Deshacer</button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // PANEL DE INICIO — botones cuadrados (rediseño 22/09/2026)
 // ═══════════════════════════════════════════════════════════════════════════════
 const Tile = ({ icon, label, rgb, solid, onClick, badge, tag }) => (
@@ -4971,6 +5350,14 @@ const CambiarPassword = ({ onCerrar }) => {
 
 const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   const [verCambioPass, setVerCambioPass] = useState(false);
+  const [noLeidasVG, setNoLeidasVG] = useState(0);
+  React.useEffect(() => {
+    if (!esAdmin(usuarioActual)) return;
+    let vivo = true;
+    const tick = () => vgContarNoLeidas().then(n => { if (vivo) setNoLeidasVG(n); });
+    tick(); const t = setInterval(tick, 60000);
+    return () => { vivo = false; clearInterval(t); };
+  }, [usuarioActual]);
   const [etapa, setEtapa]         = useState('inicio');
   const [busqueda, setBusqueda]   = useState('');
   const [busError, setBusError]   = useState('');
@@ -5202,6 +5589,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
             <G cols={3} gap={10} style={{ marginBottom:14 }}>
               <Tile icon="📋" label={<>NUEVA<br/>PRE</>} solid onClick={irPreNuevo} />
               <Tile icon="📦" label={<>NUEVO<br/>DEF</>} rgb={RGB.vd} onClick={irDefNuevo} />
+              {esAdmin(usuarioActual) && <Tile icon="💰" label={<>VENTAS Y<br/>GANANCIA</>} rgb="250,204,21" badge={noLeidasVG} onClick={()=>setEtapa('ventas_ganancia')} />}
               {esNegocio(usuarioActual) && <Tile icon="🧪" label={<>FÓRMULAS<br/>PRODUCCIÓN</>} rgb={RGB.vd} onClick={()=>{ window.location.href = 'formulas-produccion.html'; }} />}
             </G>
 
@@ -5249,6 +5637,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 
         {/* ── GESTIÓN (solo admin) ── */}
         {etapa==='gestion' && esAdmin(usuarioActual) && <ModuloGestion onVolver={irInicio} />}
+        {etapa==='ventas_ganancia' && esAdmin(usuarioActual) && <ModuloVentasGanancia onVolver={irInicio} onCambioNoLeidas={setNoLeidasVG} />}
 
       </div>
     </div>

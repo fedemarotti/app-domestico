@@ -4297,6 +4297,423 @@ const ModuloTracking = ({ pedido, onVolver, onPedidoActualizado, usuarioActual }
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// MARKETING — Usuario exclusivo del equipo de marketing (solo lectura).
+// Ve: embudo PRE→DEF, tiempos de conversión, PRE sin convertir, productos,
+// clientes (con contacto), cuándo/dónde se vende y conversión por vendedora.
+// NUNCA ve: costos, ganancia, comisiones, liquidaciones, fórmulas.
+// Solo lectura: nunca llama a saveLS / deleteLS / saveCliente.
+// Facturación de marketing = lo que pagó el cliente SIN el envío.
+// ═══════════════════════════════════════════════════════════════════════════════
+const MARKETING_EMAIL = 'marketing@domestico.com.ar';
+const esMarketing = (u) => (u?.email || '').trim().toLowerCase() === MARKETING_EMAIL;
+
+const mkNeto = p => Math.max(0, gTotal(p) - gEnvio(p));
+const mkCreacionPRE = p => (typeof p.tsCreacion === 'number' ? p.tsCreacion : p.ts);
+const mkDur = (ms) => {
+  if (ms == null || !isFinite(ms)) return '—';
+  const min = Math.round(ms / 60000);
+  if (min < 60) return `${min} min`;
+  const h = ms / 3600000;
+  if (h < 24) return `${h.toFixed(1).replace('.', ',')} h`;
+  const d = h / 24;
+  return `${d.toFixed(1).replace('.', ',')} días`;
+};
+const mkTel = c => (c?.telefono || '').replace(/\D/g, '');
+const mkWaLink = c => { let t = mkTel(c); if (!t) return null; if (t.startsWith('0')) t = t.slice(1); if (!t.startsWith('54')) t = '549' + t; return `https://wa.me/${t}`; };
+const mkLocalidad = p => ((p?.cliente?.localidad || p?.extras?.localidad || '').trim().toUpperCase()) || 'SIN DATO';
+const mkVendedor = p => { const v = gVendedor(p); return v === 'NEGOCIO' ? 'LOCAL' : v === 'ADMINISTRADOR' ? 'ADMIN' : v; };
+const mkCsv = (nombreArchivo, cabecera, filas) => {
+  const esc = v => { const s2 = v == null ? '' : String(v); return /[;"\n]/.test(s2) ? `"${s2.replace(/"/g, '""')}"` : s2; };
+  const txt = '﻿' + [cabecera, ...filas].map(f => f.map(esc).join(';')).join('\r\n');
+  const blob = new Blob([txt], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = nombreArchivo;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+};
+const MK_DIAS = ['LUN','MAR','MIÉ','JUE','VIE','SÁB','DOM'];
+
+const ModuloMarketing = () => {
+  const ROSA = '#f472b6';
+  const [tab, setTab] = useState('embudo');
+  const [periodo, setPeriodo] = useState('mes');
+  const [desdeISO, setDesdeISO] = useState('');
+  const [hastaISO, setHastaISO] = useState('');
+  const [pedidos, setPedidos] = useState(null);
+  const [sync, setSync] = useState(null);
+  const [diasInactivo, setDiasInactivo] = useState(60);
+  const [verLista, setVerLista] = useState(null); // 'abiertas' | 'inactivos' | null
+
+  const cargar = () => { setPedidos(null); listLS().then(arr => { setPedidos(Array.isArray(arr) ? arr : []); setSync(Date.now()); }); };
+  React.useEffect(() => { cargar(); }, []);
+  // Tiempo real: refresco automático cada 2 minutos mientras la pantalla está abierta
+  React.useEffect(() => { const t = setInterval(() => { listLS().then(arr => { if (Array.isArray(arr)) { setPedidos(arr); setSync(Date.now()); } }); }, 120000); return () => clearInterval(t); }, []);
+
+  const rango = React.useMemo(() => {
+    const now = sync || Date.now();
+    if (periodo === 'hoy') { const d = arInicioDeDia(now); return { desde: d, hasta: now, prevDesde: d - 86400000, prevHasta: now - 86400000, etiqueta: `Hoy · ${fmtFechaDDMMAAAA(now)}`, prevEtiqueta: 'vs ayer' }; }
+    if (periodo === '7d') { const d = arInicioDeDia(now) - 6 * 86400000; return { desde: d, hasta: now, prevDesde: d - 7 * 86400000, prevHasta: d - 1, etiqueta: 'Últimos 7 días', prevEtiqueta: 'vs 7 días previos' }; }
+    if (periodo === 'mes') { const { y, m } = arParts(now); const d = arInicioDeMes(y, m); const pm = m === 0 ? 11 : m - 1, py = m === 0 ? y - 1 : y; const pd = arInicioDeMes(py, pm);
+      return { desde: d, hasta: now, prevDesde: pd, prevHasta: Math.min(pd + (now - d), arFinDeMes(py, pm)), etiqueta: `${MESES_NOMBRE[m]} ${y}`, prevEtiqueta: 'vs mismo tramo mes pasado' }; }
+    if (periodo === 'mesant') { const { y, m } = arParts(now); const pm = m === 0 ? 11 : m - 1, py = m === 0 ? y - 1 : y; const ppm = pm === 0 ? 11 : pm - 1, ppy = pm === 0 ? py - 1 : py;
+      return { desde: arInicioDeMes(py, pm), hasta: arFinDeMes(py, pm), prevDesde: arInicioDeMes(ppy, ppm), prevHasta: arFinDeMes(ppy, ppm), etiqueta: `${MESES_NOMBRE[pm]} ${py}`, prevEtiqueta: 'vs mes previo' }; }
+    if (desdeISO && hastaISO) { const { desde, hasta } = arRangoDesdeISO(desdeISO, hastaISO); const dur = hasta - desde + 1;
+      return { desde, hasta, prevDesde: desde - dur, prevHasta: desde - 1, etiqueta: `${fmtFechaDDMMAAAA(desde)} al ${fmtFechaDDMMAAAA(hasta)}`, prevEtiqueta: 'vs período anterior igual' }; }
+    return null;
+  }, [periodo, desdeISO, hastaISO, sync]);
+
+  const m = React.useMemo(() => {
+    if (!pedidos || !rango) return null;
+    const now = sync || Date.now();
+    const enR = t => typeof t === 'number' && t >= rango.desde && t <= rango.hasta;
+    const enP = t => typeof t === 'number' && t >= rango.prevDesde && t <= rango.prevHasta;
+    const defsAll = pedidos.filter(p => p.tipo === 'DEF');
+    const presAll = pedidos.filter(p => p.tipo === 'PRE');
+    const preByCod = {}; presAll.forEach(p => { preByCod[p.codigo] = p; });
+    const defDePre = {}; defsAll.forEach(d => { const k = d.codigoPRE || (d.codigo ? 'PRE' + d.codigo.slice(3) : null); if (k && preByCod[k] && !(k in defDePre)) defDePre[k] = d; });
+
+    const defs = defsAll.filter(p => enR(p.ts));
+    const defsPrev = defsAll.filter(p => enP(p.ts));
+    const presR = presAll.filter(p => enR(mkCreacionPRE(p)));
+    const presPrev = presAll.filter(p => enP(mkCreacionPRE(p)));
+    const fact = defs.reduce((a, p) => a + mkNeto(p), 0);
+    const factPrev = defsPrev.reduce((a, p) => a + mkNeto(p), 0);
+    const ticket = defs.length ? fact / defs.length : null;
+    const ticketPrev = defsPrev.length ? factPrev / defsPrev.length : null;
+    const convR = presR.filter(p => defDePre[p.codigo]);
+    const tasa = presR.length ? Math.round(convR.length / presR.length * 100) : null;
+    const convPrev = presPrev.filter(p => defDePre[p.codigo]);
+    const tasaPrev = presPrev.length ? Math.round(convPrev.length / presPrev.length * 100) : null;
+    const directas = defs.filter(d => !(d.codigoPRE && preByCod[d.codigoPRE]));
+
+    // Tiempo de conversión: DEF del período que vienen de una PRE → ts DEF − creación PRE
+    const tiempos = [];
+    defs.forEach(d => { const pre = d.codigoPRE && preByCod[d.codigoPRE]; if (!pre) return; const t0 = mkCreacionPRE(pre); if (typeof t0 !== 'number' || d.ts < t0) return; tiempos.push({ ms: d.ts - t0, exacto: typeof pre.tsCreacion === 'number' }); });
+    const msArr = tiempos.map(x => x.ms).sort((a, b) => a - b);
+    const prom = msArr.length ? msArr.reduce((a, b) => a + b, 0) / msArr.length : null;
+    const med = msArr.length ? (msArr.length % 2 ? msArr[(msArr.length - 1) / 2] : (msArr[msArr.length / 2 - 1] + msArr[msArr.length / 2]) / 2) : null;
+    const H = 3600000;
+    const bConv = [
+      { l: 'Menos de 1 h', n: msArr.filter(x => x < H).length },
+      { l: '1 a 24 h', n: msArr.filter(x => x >= H && x < 24 * H).length },
+      { l: '24 a 48 h (promo vigente)', n: msArr.filter(x => x >= 24 * H && x < 48 * H).length },
+      { l: 'Más de 48 h', n: msArr.filter(x => x >= 48 * H).length },
+    ];
+    const dentro48 = msArr.length ? Math.round(msArr.filter(x => x < 48 * H).length / msArr.length * 100) : null;
+    const aproximados = tiempos.filter(x => !x.exacto).length;
+
+    // PRE sin convertir (todas, no solo del período), más nuevas primero
+    const abiertas = presAll.filter(p => !defDePre[p.codigo]).sort((a, b) => mkCreacionPRE(b) - mkCreacionPRE(a));
+    const abiertasR = abiertas.filter(p => enR(mkCreacionPRE(p)));
+
+    // Productos
+    const prod = {}; const porCal = { Inicial: 0, Intermedia: 0, Premium: 0 }; const porFmt = { 50: 0, 200: 0 }; let fCombo = 0, fIndiv = 0, fManual = 0, litros = 0;
+    const add = (k, f, u, l) => { if (!prod[k]) prod[k] = { f: 0, u: 0, l: 0 }; prod[k].f += f; prod[k].u += u; prod[k].l += l; };
+    defs.forEach(p => (p.items || []).forEach(it => {
+      const esCombo = it.tipoItem === 'combo' || it.tipo === 'combo';
+      const lt = (it.cantidad === 50 || it.cantidad === 200) ? it.cantidad : null;
+      const pr = gNum(it.precio);
+      if (esCombo && lt) { const lts = lt * 5; add(`Combo ${lt === 50 ? 'Chico' : 'Grande'}${it.calidad ? ' ' + it.calidad : ''}`, pr, 1, lts); fCombo += pr; porFmt[lt] += pr; litros += lts; if (porCal[it.calidad] !== undefined) porCal[it.calidad] += pr; }
+      else if (!esCombo && it.tipo && lt) { const nom = it.tipo.charAt(0).toUpperCase() + it.tipo.slice(1); add(`${nom}${it.calidad ? ' ' + it.calidad : ''} ${lt} L`, pr, 1, lt); fIndiv += pr; porFmt[lt] += pr; litros += lt; if (porCal[it.calidad] !== undefined) porCal[it.calidad] += pr; }
+      else if (it.tipoItem === 'manual' && it.nombre) { add(String(it.nombre).trim(), pr, 1, 0); fManual += pr; }
+    }));
+    const topProd = Object.entries(prod).map(([k, v]) => ({ nombre: k, ...v })).sort((a, b) => b.f - a.f);
+
+    // Clientes (histórico completo para saber quién es nuevo / recurrente / inactivo)
+    const cli = {};
+    defsAll.forEach(p => { const k = gClaveCliente(p.cliente); if (!k) return; if (!cli[k]) cli[k] = { c: p.cliente, n: 0, tot: 0, primera: p.ts, ultima: p.ts }; const o = cli[k]; o.n += 1; o.tot += mkNeto(p); if (p.ts < o.primera) o.primera = p.ts; if (p.ts > o.ultima) { o.ultima = p.ts; o.c = p.cliente; } });
+    const clavesR = new Set(defs.map(p => gClaveCliente(p.cliente)).filter(Boolean));
+    const nuevos = [...clavesR].filter(k => enR(cli[k].primera)).length;
+    const recurrentes = clavesR.size - nuevos;
+    const todos = Object.values(cli);
+    const conRecompra = todos.filter(o => o.n > 1).length;
+    const tasaRecompra = todos.length ? Math.round(conRecompra / todos.length * 100) : null;
+    const inactivos = todos.filter(o => (now - o.ultima) > diasInactivo * 86400000).sort((a, b) => b.tot - a.tot);
+
+    // Cuándo: mapa de calor día × franja de 2 h (DEF del período)
+    const heat = Array.from({ length: 7 }, () => Array(12).fill(0)); let heatMax = 0;
+    defs.forEach(p => { const d = new Date(p.ts - AR_OFFSET_MS); const dia = (d.getUTCDay() + 6) % 7; const fr = Math.floor(d.getUTCHours() / 2); heat[dia][fr] += 1; if (heat[dia][fr] > heatMax) heatMax = heat[dia][fr]; });
+    const porDiaSem = heat.map(r => r.reduce((a, b) => a + b, 0));
+
+    // Dónde
+    const loc = {}; defs.forEach(p => { const k = mkLocalidad(p); if (!loc[k]) loc[k] = { n: 0, f: 0 }; loc[k].n += 1; loc[k].f += mkNeto(p); });
+    const topLoc = Object.entries(loc).map(([k, v]) => ({ nombre: k, ...v })).sort((a, b) => b.n - a.n);
+    const porMod = { RETIRO: 0, FLEX: 0, INTERIOR: 0 }; defs.forEach(p => { porMod[gModalidad(p)] += 1; });
+
+    // Por vendedora
+    const vend = {}; const vk = v => { if (!vend[v]) vend[v] = { pre: 0, conv: 0, def: 0, f: 0 }; return vend[v]; };
+    presR.forEach(p => { const o = vk(mkVendedor(p)); o.pre += 1; if (defDePre[p.codigo]) o.conv += 1; });
+    defs.forEach(p => { const o = vk(mkVendedor(p)); o.def += 1; o.f += mkNeto(p); });
+    const vendArr = Object.entries(vend).map(([k, v]) => ({ nombre: k, ...v })).sort((a, b) => b.f - a.f);
+
+    return { now, defs, defsPrev, presR, presPrev, fact, factPrev, ticket, ticketPrev, convR, tasa, tasaPrev, directas,
+      prom, med, bConv, nConv: msArr.length, dentro48, aproximados, abiertas, abiertasR,
+      topProd, porCal, porFmt, fCombo, fIndiv, fManual, litros,
+      nuevos, recurrentes, clientesTot: todos.length, conRecompra, tasaRecompra, inactivos,
+      heat, heatMax, porDiaSem, topLoc, porMod, vendArr, preByCod };
+  }, [pedidos, rango, sync, diasInactivo]);
+
+  // ── UI ──
+  const chip = (key, label) => (
+    <button key={key} onClick={() => setPeriodo(key)} style={{ padding:'7px 12px', borderRadius:20, fontSize:11, fontWeight:800, cursor:'pointer', fontFamily:'inherit',
+      background: periodo === key ? 'linear-gradient(135deg,#db2777,#be185d)' : 'rgba(255,255,255,0.07)',
+      border: periodo === key ? '1px solid transparent' : '1px solid rgba(255,255,255,0.14)', color: periodo === key ? '#fff' : 'rgba(255,255,255,0.7)' }}>{label}</button>
+  );
+  const tabBtn = (key, label) => (
+    <button key={key} onClick={() => { setTab(key); setVerLista(null); }} style={{ padding:'11px 2px', borderRadius:10, fontSize:10.5, fontWeight:800, textTransform:'uppercase', cursor:'pointer', fontFamily:'inherit',
+      background: tab === key ? 'rgba(219,39,119,0.28)' : 'rgba(255,255,255,0.06)', border: tab === key ? '1px solid rgba(244,114,182,0.6)' : '1px solid rgba(255,255,255,0.12)',
+      color: tab === key ? '#fbcfe8' : 'rgba(255,255,255,0.6)' }}>{label}</button>
+  );
+  const card = { background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:14, marginBottom:12 };
+  const cTit = { fontSize:10, fontWeight:800, color:'rgba(255,255,255,0.5)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:10, display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 };
+  const Kpi = ({ lbl, val, cmp, sub }) => (
+    <div style={{ background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:14, padding:12 }}>
+      <div style={{ fontSize:9.5, fontWeight:800, color:'rgba(255,255,255,0.5)', textTransform:'uppercase', letterSpacing:'0.7px', marginBottom:4 }}>{lbl}</div>
+      <div style={{ fontSize:19, fontWeight:900, letterSpacing:'-0.5px' }}>{val}</div>
+      {cmp !== undefined && <div style={{ fontSize:10.5, fontWeight:700, marginTop:3, color: cmp === null ? 'rgba(255,255,255,0.4)' : cmp >= 0 ? '#4ade80' : '#f87171' }}>{cmp === null ? 'sin datos previos' : `${cmp >= 0 ? '▲ +' : '▼ '}${cmp}% ${rango.prevEtiqueta}`}</div>}
+      {sub && <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.45)', marginTop:3 }}>{sub}</div>}
+    </div>
+  );
+  const Barra = ({ nombre, pct, val, color }) => (
+    <div style={{ marginBottom:9 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:8, fontSize:12, marginBottom:4 }}>
+        <span style={{ color:'rgba(255,255,255,0.82)', fontWeight:650, minWidth:0, overflowWrap:'anywhere' }}>{nombre}</span>
+        <span style={{ fontWeight:800, fontSize:11.5, whiteSpace:'nowrap', flexShrink:0 }}>{val}</span>
+      </div>
+      <div style={{ height:9, background:'rgba(255,255,255,0.07)', borderRadius:5, overflow:'hidden' }}><div style={{ width:`${Math.min(100, Math.max(2, pct))}%`, height:'100%', borderRadius:5, background: color || ROSA }} /></div>
+    </div>
+  );
+  const btnMini = { padding:'5px 10px', borderRadius:8, fontSize:10.5, fontWeight:800, cursor:'pointer', fontFamily:'inherit', background:'rgba(52,211,153,0.12)', color:'#6ee7b7', border:'1px solid rgba(52,211,153,0.4)', textTransform:'none', letterSpacing:0 };
+  const vacio = (msg) => <div style={{ padding:'18px 10px', textAlign:'center', fontSize:12.5, color:'rgba(255,255,255,0.45)' }}>{msg}</div>;
+  const filaContacto = (key, c, linea1, linea2, monto) => {
+    const wa = mkWaLink(c);
+    return (
+      <div key={key} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 11px', borderRadius:10, marginBottom:7, background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.09)' }}>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontWeight:800, fontSize:12, overflowWrap:'anywhere' }}>{linea1}</div>
+          <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.5)', marginTop:2, overflowWrap:'anywhere' }}>{linea2}</div>
+        </div>
+        <div style={{ textAlign:'right', flexShrink:0 }}>
+          <div style={{ fontWeight:900, fontSize:12.5 }}>{monto}</div>
+          {wa && <a href={wa} target="_blank" rel="noopener noreferrer" style={{ display:'inline-block', marginTop:4, fontSize:10.5, fontWeight:800, color:'#4ade80', textDecoration:'none' }}>💬 WhatsApp</a>}
+        </div>
+      </div>
+    );
+  };
+  const exportarAbiertas = () => mkCsv(`PRE-sin-convertir-${fmtFechaDDMMAAAA(Date.now()).replace(/\//g,'-')}.csv`,
+    ['Código','Creada','Antigüedad (días)','Cliente','Teléfono','Localidad','Vendedora','Importe sin envío'],
+    m.abiertas.map(p => [p.codigo, fmtFechaDDMMAAAA(mkCreacionPRE(p)), gDiasDesde(mkCreacionPRE(p), m.now), p.cliente?.nombre || '', p.cliente?.telefono || '', mkLocalidad(p), mkVendedor(p), Math.round(mkNeto(p))]));
+  const exportarInactivos = () => mkCsv(`clientes-inactivos-${diasInactivo}d.csv`,
+    ['Cliente','Teléfono','Localidad','Última compra','Días sin comprar','Compras','Total comprado sin envío'],
+    m.inactivos.map(o => [o.c?.nombre || '', o.c?.telefono || '', (o.c?.localidad || '').toUpperCase(), fmtFechaDDMMAAAA(o.ultima), gDiasDesde(o.ultima, m.now), o.n, Math.round(o.tot)]));
+  const exportarVentas = () => mkCsv(`ventas-${rango.etiqueta.replace(/[^\w]+/g,'-')}.csv`,
+    ['Código DEF','Fecha','Hora','Vendedora','Modalidad','Localidad','Cliente','Teléfono','Viene de PRE','Tiempo PRE→DEF (h)','Importe sin envío'],
+    [...m.defs].sort((a,b)=>a.ts-b.ts).map(p => { const pre = p.codigoPRE && m.preByCod[p.codigoPRE]; const t = pre ? (p.ts - mkCreacionPRE(pre)) / 3600000 : null;
+      return [p.codigo, fmtFechaDDMMAAAA(p.ts), arHora(p.ts), mkVendedor(p), gModalidad(p), mkLocalidad(p), p.cliente?.nombre || '', p.cliente?.telefono || '', pre ? p.codigoPRE : 'venta directa', t != null && t >= 0 ? t.toFixed(1).replace('.', ',') : '', Math.round(mkNeto(p))]; }));
+
+  const cargando = !pedidos || (!!rango && !m);
+
+  return (
+    <div>
+      <AvisoSync nonce={sync} />
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+        <div style={{ fontSize:22, fontWeight:900, letterSpacing:'-0.4px', flex:1 }}>📣 <span style={{ color:ROSA }}>MARKETING</span></div>
+        <button onClick={cargar} style={{ padding:'8px 12px', background:'rgba(74,222,128,0.12)', color:'#4ade80', border:'1px solid rgba(74,222,128,0.4)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>🔄 {sync ? gHora(sync) : 'Actualizar'}</button>
+      </div>
+      <div style={{ fontSize:12, color:'rgba(255,255,255,0.45)', marginBottom:10 }}>{rango ? rango.etiqueta : 'Elegí las dos fechas'} · importes sin envío</div>
+      <div style={{ display:'flex', gap:6, marginBottom:10, flexWrap:'wrap' }}>{chip('hoy','HOY')}{chip('7d','7 DÍAS')}{chip('mes','MES')}{chip('mesant','MES ANT.')}{chip('custom','📅')}</div>
+      {periodo === 'custom' && (
+        <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+          <input type="date" value={desdeISO} onChange={e=>setDesdeISO(e.target.value)} style={{ ...s.inp, flex:1 }} />
+          <input type="date" value={hastaISO} onChange={e=>setHastaISO(e.target.value)} style={{ ...s.inp, flex:1 }} />
+        </div>
+      )}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, marginBottom:14 }}>
+        {tabBtn('embudo','Embudo')}{tabBtn('productos','Productos')}{tabBtn('clientes','Clientes')}{tabBtn('cuando','Cuándo/Dónde')}
+      </div>
+
+      {cargando && <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'40vh', flexDirection:'column', gap:14, color:'rgba(255,255,255,0.6)' }}>
+        <div style={{ width:38, height:38, border:'3px solid rgba(255,255,255,0.15)', borderTop:`3px solid ${ROSA}`, borderRadius:'50%', animation:'spin 0.8s linear infinite' }}></div>Cargando datos…</div>}
+      {!cargando && !rango && vacio('Elegí las dos fechas del período personalizado.')}
+
+      {/* ═══ EMBUDO ═══ */}
+      {!cargando && rango && tab === 'embudo' && (
+        <div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
+            <Kpi lbl="PRE creadas" val={m.presR.length} cmp={gPct(m.presR.length, m.presPrev.length)} />
+            <Kpi lbl="DEF (ventas)" val={m.defs.length} cmp={gPct(m.defs.length, m.defsPrev.length)} sub={`${m.directas.length} directas sin PRE`} />
+            <Kpi lbl="Conversión PRE→DEF" val={m.tasa === null ? '—' : `${m.tasa}%`} sub={`${m.convR.length} de ${m.presR.length} PRE del período${m.tasaPrev !== null ? ` · antes ${m.tasaPrev}%` : ''}`} />
+            <Kpi lbl="Facturación" val={fmt(m.fact)} cmp={gPct(m.fact, m.factPrev)} />
+            <Kpi lbl="Ticket promedio" val={m.ticket === null ? '—' : fmt(m.ticket)} cmp={m.ticket === null ? undefined : gPct(m.ticket, m.ticketPrev)} />
+            <Kpi lbl="PRE sin convertir" val={m.abiertasR.length} sub={`${m.abiertas.length} abiertas en total`} />
+          </div>
+
+          <div style={card}>
+            <div style={cTit}><span>⏱️ Tiempo de conversión PRE → DEF</span></div>
+            {m.nConv === 0 ? vacio('No hay ventas del período que vengan de una PRE.') : (
+              <div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:12 }}>
+                  <Kpi lbl="Promedio" val={mkDur(m.prom)} />
+                  <Kpi lbl="Mediana" val={mkDur(m.med)} />
+                  <Kpi lbl="Dentro de 48 h" val={`${m.dentro48}%`} />
+                </div>
+                {m.bConv.map(b => <Barra key={b.l} nombre={b.l} pct={b.n / m.nConv * 100} val={`${b.n} · ${Math.round(b.n / m.nConv * 100)}%`} />)}
+                <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:6 }}>La promo 15% OFF vale 48 h: “dentro de 48 h” mide cuántas ventas cerraron con la promo vigente.{m.aproximados > 0 ? ` ${m.aproximados} PRE antigua(s) sin fecha de creación exacta: se usó su última edición.` : ''}</div>
+              </div>
+            )}
+          </div>
+
+          <div style={card}>
+            <div style={cTit}><span>🧑‍💼 Por vendedora</span></div>
+            {m.vendArr.length === 0 ? vacio('Sin movimiento en el período.') : (
+              <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                  <thead><tr style={{ color:'rgba(255,255,255,0.5)', fontSize:10, textTransform:'uppercase' }}>
+                    <th style={{ textAlign:'left', padding:'4px 2px' }}>Quién</th><th>PRE</th><th>Conv.</th><th>DEF</th><th style={{ textAlign:'right' }}>Facturado</th></tr></thead>
+                  <tbody>{m.vendArr.map(v => (
+                    <tr key={v.nombre} style={{ borderTop:'1px solid rgba(255,255,255,0.08)' }}>
+                      <td style={{ padding:'7px 2px', fontWeight:800 }}>{v.nombre}</td>
+                      <td style={{ textAlign:'center' }}>{v.pre}</td>
+                      <td style={{ textAlign:'center' }}>{v.pre ? `${Math.round(v.conv / v.pre * 100)}%` : '—'}</td>
+                      <td style={{ textAlign:'center' }}>{v.def}</td>
+                      <td style={{ textAlign:'right', fontWeight:800 }}>{fmt(v.f)}</td>
+                    </tr>))}</tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div style={card}>
+            <div style={cTit}><span>📝 PRE sin convertir ({m.abiertas.length})</span>
+              <span style={{ display:'flex', gap:6 }}>
+                {m.abiertas.length > 0 && <button onClick={exportarAbiertas} style={btnMini}>⬇ Excel</button>}
+                {m.abiertas.length > 0 && <button onClick={() => setVerLista(verLista === 'abiertas' ? null : 'abiertas')} style={{ ...btnMini, background:'rgba(244,114,182,0.12)', color:'#f9a8d4', borderColor:'rgba(244,114,182,0.4)' }}>{verLista === 'abiertas' ? 'Ocultar' : 'Ver lista'}</button>}
+              </span>
+            </div>
+            {m.abiertas.length === 0 ? vacio('No hay PRE pendientes de convertir. 🎉') : verLista === 'abiertas'
+              ? m.abiertas.slice(0, 150).map(p => filaContacto(p.codigo, p.cliente, `${p.codigo}${p.cliente?.nombre ? ' · ' + p.cliente.nombre : ''}`, `${mkLocalidad(p)} · ${mkVendedor(p)} · hace ${gAntigLabel(mkCreacionPRE(p), m.now)}${p.cliente?.telefono ? ' · ' + p.cliente.telefono : ''}`, fmt(mkNeto(p))))
+              : <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)' }}>{m.abiertasR.length} creadas en el período. Tocá “Ver lista” para contactar a cada cliente por WhatsApp.</div>}
+          </div>
+
+          <button onClick={exportarVentas} disabled={!m.defs.length} style={{ ...glassBtn(RGB.vd, { pad:'12px 16px', size:13.5, weight:750 }), opacity: m.defs.length ? 1 : 0.5 }}>⬇ Descargar ventas del período (Excel)</button>
+        </div>
+      )}
+
+      {/* ═══ PRODUCTOS ═══ */}
+      {!cargando && rango && tab === 'productos' && (() => {
+        const totProd = m.fCombo + m.fIndiv + m.fManual; const totCal = m.porCal.Inicial + m.porCal.Intermedia + m.porCal.Premium; const totFmt = m.porFmt[50] + m.porFmt[200];
+        const maxP = m.topProd.length ? m.topProd[0].f : 1;
+        return (
+          <div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
+              <Kpi lbl="Litros vendidos" val={gLts(m.litros)} />
+              <Kpi lbl="Productos vendidos" val={m.topProd.reduce((a, p) => a + p.u, 0)} sub="unidades (combos cuentan 1)" />
+            </div>
+            <div style={card}>
+              <div style={cTit}><span>🏆 Ranking por facturación</span></div>
+              {m.topProd.length === 0 ? vacio('Sin ventas en el período.') : m.topProd.slice(0, 15).map(p => <Barra key={p.nombre} nombre={p.nombre} pct={p.f / maxP * 100} val={`${fmt(p.f)} · ${p.u}u`} />)}
+            </div>
+            <div style={card}>
+              <div style={cTit}><span>💎 Calidad</span></div>
+              {totCal === 0 ? vacio('Sin datos.') : ['Inicial','Intermedia','Premium'].map((k, i) => <Barra key={k} nombre={k} pct={m.porCal[k] / totCal * 100} val={`${Math.round(m.porCal[k] / totCal * 100)}%`} color={['#94a3b8','#60a5fa','#fbbf24'][i]} />)}
+            </div>
+            <div style={card}>
+              <div style={cTit}><span>📦 Formato y tipo</span></div>
+              {totFmt === 0 ? vacio('Sin datos.') : <>
+                <Barra nombre="50 L" pct={m.porFmt[50] / totFmt * 100} val={`${Math.round(m.porFmt[50] / totFmt * 100)}%`} color="#34d399" />
+                <Barra nombre="200 L" pct={m.porFmt[200] / totFmt * 100} val={`${Math.round(m.porFmt[200] / totFmt * 100)}%`} color="#10b981" />
+              </>}
+              {totProd > 0 && <div style={{ marginTop:8 }}>
+                <Barra nombre="Combos" pct={m.fCombo / totProd * 100} val={`${Math.round(m.fCombo / totProd * 100)}%`} color="#f472b6" />
+                <Barra nombre="Individuales" pct={m.fIndiv / totProd * 100} val={`${Math.round(m.fIndiv / totProd * 100)}%`} color="#a78bfa" />
+                {m.fManual > 0 && <Barra nombre="Productos manuales" pct={m.fManual / totProd * 100} val={`${Math.round(m.fManual / totProd * 100)}%`} color="#fb923c" />}
+              </div>}
+              <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:6 }}>Porcentajes sobre el valor de los productos (sin envases ni envío).</div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ═══ CLIENTES ═══ */}
+      {!cargando && rango && tab === 'clientes' && (
+        <div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
+            <Kpi lbl="Clientes nuevos" val={m.nuevos} sub="primera compra en el período" />
+            <Kpi lbl="Clientes que volvieron" val={m.recurrentes} sub="ya habían comprado antes" />
+            <Kpi lbl="Tasa de recompra" val={m.tasaRecompra === null ? '—' : `${m.tasaRecompra}%`} sub={`${m.conRecompra} de ${m.clientesTot} compraron 2+ veces (histórico)`} />
+            <Kpi lbl="Inactivos" val={m.inactivos.length} sub={`sin comprar hace +${diasInactivo} días`} />
+          </div>
+          <div style={card}>
+            <div style={cTit}><span>😴 Clientes inactivos</span>
+              <span style={{ display:'flex', gap:6 }}>{m.inactivos.length > 0 && <button onClick={exportarInactivos} style={btnMini}>⬇ Excel</button>}</span>
+            </div>
+            <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+              {[30, 60, 90].map(d => <button key={d} onClick={() => setDiasInactivo(d)} style={{ padding:'6px 12px', borderRadius:20, fontSize:11, fontWeight:800, cursor:'pointer', fontFamily:'inherit',
+                background: diasInactivo === d ? 'rgba(219,39,119,0.3)' : 'rgba(255,255,255,0.06)', color: diasInactivo === d ? '#fbcfe8' : 'rgba(255,255,255,0.65)', border: diasInactivo === d ? '1px solid rgba(244,114,182,0.6)' : '1px solid rgba(255,255,255,0.12)' }}>+{d} días</button>)}
+            </div>
+            {m.inactivos.length === 0 ? vacio('No hay clientes inactivos con ese criterio.') :
+              m.inactivos.slice(0, 150).map((o, i) => filaContacto('in' + i, o.c, o.c?.nombre || o.c?.telefono || 'Sin nombre', `${(o.c?.localidad || 'SIN DATO').toUpperCase()} · última compra ${fmtFechaDDMMAAAA(o.ultima)} (${gDiasDesde(o.ultima, m.now)} días) · ${o.n} compra${o.n !== 1 ? 's' : ''}${o.c?.telefono ? ' · ' + o.c.telefono : ''}`, fmt(o.tot)))}
+            <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:6 }}>Ordenados por lo que compraron en total: arriba los que más vale la pena recuperar.</div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ CUÁNDO / DÓNDE ═══ */}
+      {!cargando && rango && tab === 'cuando' && (() => {
+        const maxDia = Math.max(1, ...m.porDiaSem); const maxLoc = m.topLoc.length ? m.topLoc[0].n : 1; const totMod = m.porMod.RETIRO + m.porMod.FLEX + m.porMod.INTERIOR;
+        return (
+          <div>
+            <div style={card}>
+              <div style={cTit}><span>🔥 Cuándo se vende (DEF por día y hora)</span></div>
+              {m.defs.length === 0 ? vacio('Sin ventas en el período.') : (
+                <div>
+                  <div style={{ display:'grid', gridTemplateColumns:'34px repeat(12,1fr)', gap:3, fontSize:9, alignItems:'center' }}>
+                    <div></div>
+                    {Array.from({ length: 12 }, (_, i) => <div key={'h' + i} style={{ textAlign:'center', color:'rgba(255,255,255,0.45)', fontWeight:700 }}>{i * 2}</div>)}
+                    {m.heat.map((fila, d) => (
+                      <React.Fragment key={'d' + d}>
+                        <div style={{ color:'rgba(255,255,255,0.6)', fontWeight:800 }}>{MK_DIAS[d]}</div>
+                        {fila.map((v, h) => <div key={h} title={`${MK_DIAS[d]} ${h * 2}–${h * 2 + 2} h: ${v}`} style={{ aspectRatio:'1/1', borderRadius:4, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:800, fontSize:9,
+                          color: v ? '#fff' : 'transparent', background: v ? `rgba(244,114,182,${0.18 + 0.82 * v / m.heatMax})` : 'rgba(255,255,255,0.04)' }}>{v || ''}</div>)}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                  <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:8 }}>Columnas = franjas de 2 horas (0 = 0 a 2 h). Más intenso = más ventas. Sirve para decidir cuándo pautar y publicar.</div>
+                  <div style={{ marginTop:12 }}>{m.porDiaSem.map((v, i) => <Barra key={i} nombre={MK_DIAS[i]} pct={v / maxDia * 100} val={v} />)}</div>
+                </div>
+              )}
+            </div>
+            <div style={card}>
+              <div style={cTit}><span>📍 Dónde (localidad)</span></div>
+              {m.topLoc.length === 0 ? vacio('Sin ventas en el período.') : m.topLoc.slice(0, 15).map(l => <Barra key={l.nombre} nombre={l.nombre} pct={l.n / maxLoc * 100} val={`${l.n} · ${fmt(l.f)}`} color="#60a5fa" />)}
+            </div>
+            <div style={card}>
+              <div style={cTit}><span>🚚 Modalidad de entrega</span></div>
+              {totMod === 0 ? vacio('Sin datos.') : [['RETIRO','Retira en planta','#34d399'],['FLEX','Envío Flex AMBA','#fb923c'],['INTERIOR','Interior del país','#60a5fa']].map(([k, l, c]) =>
+                <Barra key={k} nombre={l} pct={m.porMod[k] / totMod * 100} val={`${m.porMod[k]} · ${Math.round(m.porMod[k] / totMod * 100)}%`} color={c} />)}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+};
+
+// Contenedor de la app para el usuario MARKETING: solo su panel, sin crear/editar pedidos.
+const AppMarketing = ({ usuarioActual, onCerrarSesion }) => (
+  <div style={s.app}>
+    <div style={s.hdr} className="no-print">
+      <div style={s.hIn}>
+        <div style={{ fontWeight:900, fontSize:17, letterSpacing:'-0.03em', color:C.tx }}>Dom<span style={{ color:C.na }}>é</span>stico <span style={{ fontSize:11, fontWeight:800, color:'#f9a8d4', marginLeft:6, padding:'2px 8px', borderRadius:20, border:'1px solid rgba(244,114,182,0.4)', background:'rgba(244,114,182,0.12)' }}>MARKETING</span></div>
+        {onCerrarSesion && <button onClick={onCerrarSesion} title="Cerrar sesión" style={{ padding:'5px 10px', background:'rgba(239,68,68,0.15)', border:'1px solid rgba(239,68,68,0.4)', borderRadius:8, color:'#fca5a5', fontSize:12, cursor:'pointer', fontFamily:'inherit', fontWeight:700 }}>Salir</button>}
+      </div>
+    </div>
+    <div style={s.wrap}><ModuloMarketing /></div>
+  </div>
+);
+
+
 const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   const [etapa, setEtapa]         = useState('inicio');
   const [busqueda, setBusqueda]   = useState('');
@@ -5846,8 +6263,11 @@ function LoginScreen({ onLogin }) {
       return;
     }
     try {
+      // Se puede entrar con el usuario corto (ej. "marketing") o con el correo completo
+      const u = usuario.trim().toLowerCase();
+      const emailLogin = u.includes('@') ? u : `${u}@domestico.com.ar`;
       const { data, error: err } = await supaClient.auth.signInWithPassword({
-        email: usuario,
+        email: emailLogin,
         password: password
       });
       if (err) {
@@ -5878,9 +6298,9 @@ function LoginScreen({ onLogin }) {
         </div>
         <form onSubmit={handleLogin}>
           <div style={{marginBottom:16}}>
-            <label style={{fontSize:12, fontWeight:700, color:'#444', display:'block', marginBottom:6}}>CORREO ELECTRÓNICO</label>
+            <label style={{fontSize:12, fontWeight:700, color:'#444', display:'block', marginBottom:6}}>USUARIO O CORREO</label>
             <input
-              type="email"
+              type="text" autoCapitalize="none" autoCorrect="off" spellCheck={false}
               value={usuario}
               onChange={e=>setUsuario(e.target.value)}
               required
@@ -5984,6 +6404,7 @@ function AppConAuth() {
     return <LoginScreen onLogin={setUsuario} />;
   }
 
+  if (esMarketing(usuario)) return <AppMarketing usuarioActual={usuario} onCerrarSesion={() => supaClient.auth.signOut()} />;
   return <App usuarioActual={usuario} onCerrarSesion={() => supaClient.auth.signOut()} />;
 }
 

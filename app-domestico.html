@@ -4012,6 +4012,15 @@ const TRK_BASE = [
   { k:'produccion', ico:'🧪', tit:'En producción', desc:'La planta está elaborando los productos.' },
   { k:'armado', ico:'📦', tit:'Consolidado y armado', desc:'Producción terminó. Control y armado del pedido.' },
 ];
+const TRK_PASOS_INTERIOR_STD = [...TRK_BASE,
+    { k:'listoDespacho', ico:'🏷️', tit:'Listo para despachar', desc:'Se entrega al transporte el día que elige el operador.', dato:'medioDespacho' },
+    { k:'despachado', ico:'🚛', tit:'Despachado al transporte', desc:'En manos del transporte elegido, en viaje a la localidad del cliente. El flete lo abona el cliente al retirarlo.', final:true },
+];
+const TRK_PASOS_INTERIOR_ANDREANI = [...TRK_BASE,
+    { k:'listoDespacho', ico:'🏷️', tit:'Listo para despachar', desc:'Se avisa al cliente que el pago del envío va antes del despacho.', dato:'medioDespacho' },
+    { k:'esperaPago', ico:'💳', tit:'Esperando pago de Andreani', desc:'El cliente tiene que abonar el traslado antes de despacharlo.', dato:'pagoAndreani' },
+    { k:'despachado', ico:'🚛', tit:'Despachado al transporte', desc:'En manos de Andreani, en viaje a la localidad del cliente. El flete ya fue abonado.', final:true },
+];
 const TRK_PASOS = {
   retiro: [...TRK_BASE,
     { k:'listo', ico:'🏪', tit:'Listo para retirar', desc:'Retirable en planta (Moreno, Bs. As.).', dato:'fechaRetiro' },
@@ -4022,22 +4031,29 @@ const TRK_PASOS = {
     { k:'reparto', ico:'🚚', tit:'En reparto (15 a 21 hs)', desc:'La logística lo está llevando al domicilio del cliente.' },
     { k:'entregado', ico:'✔️', tit:'Entregado', desc:'El cliente lo recibió. Pedido cerrado.', final:true },
   ],
-  interior: [...TRK_BASE,
-    { k:'listoDespacho', ico:'🏷️', tit:'Listo para despachar', desc:'Se entrega al transporte el día que elige el operador.', dato:'diaDespacho' },
-    { k:'despachado', ico:'🚛', tit:'Despachado al transporte', desc:'En manos de Vía Cargo / Andreani, en viaje a la localidad del cliente. El flete lo abona el cliente al recibir.', final:true },
-  ],
+  interior: TRK_PASOS_INTERIOR_STD,
+};
+const trkPasosDe = (p) => {
+  const mod = trkModalidad(p);
+  if (mod !== 'interior') return TRK_PASOS[mod];
+  const medio = (p.trackingDatos || {}).medioDespacho;
+  return medio === 'Andreani' ? TRK_PASOS_INTERIOR_ANDREANI : TRK_PASOS_INTERIOR_STD;
+};
+const trkNombreCliente = (p) => {
+  const n = ((p.cliente && p.cliente.nombre) || '').trim().split(' ')[0] || '';
+  return n ? n.charAt(0).toUpperCase() + n.slice(1).toLowerCase() : 'cliente';
 };
 const trkEstado = (p) => {
   if (Array.isArray(p.tracking) && p.tracking.length) return p.tracking;
   const base = [{ k:'confirmado', ts: p.ts || 0, por: p.creadoPor || '' }];
   if (p.estado === 'entregado') {
-    const pasos = TRK_PASOS[trkModalidad(p)];
+    const pasos = trkPasosDe(p);
     base.push({ k: pasos[pasos.length-1].k, ts: p.tsEntrega || p.ts || 0, por: '' });
   }
   return base;
 };
 const trkIdx = (p) => {
-  const pasos = TRK_PASOS[trkModalidad(p)];
+  const pasos = trkPasosDe(p);
   const t = trkEstado(p);
   const i = pasos.findIndex(x => x.k === (t[t.length-1] || {}).k);
   return i < 0 ? 0 : i;
@@ -4049,28 +4065,44 @@ const trkWA = (p) => {
   const t = trkEstado(p);
   const ult = t[t.length-1] || {};
   const d = p.trackingDatos || {};
+  const nombre = trkNombreCliente(p);
   const dia = d.diaDespacho === 'HOY' ? 'hoy' : d.diaDespacho === 'MAÑANA' ? 'mañana' : 'el próximo día hábil';
   const seg = d.nroSeguimiento ? `\n🔎 N° de seguimiento: *${d.nroSeguimiento}*` : '';
   const c1 = `✅ Tu pedido está *confirmado* y en cola de producción. Te vamos avisando los avances.`;
   const c2 = `🧪 Tu pedido ya está *en producción*. La planta está elaborando tus productos.`;
   const c3 = `📦 Producción terminó. Tu pedido está en *consolidado y armado*, en control final.`;
   const gracias = `Gracias por confiar en Doméstico. Cualquier consulta sobre el uso de los productos, estamos acá.`;
-  const cuerpos = {
-    retiro: [c1, c2, c3,
-      `🏪 *Tu pedido está listo.* Podés retirarlo en planta (Moreno, Bs. As.) a partir de: *${d.fechaRetiro || 'a coordinar'}*.\n\nCualquier cambio de día u horario, avisanos por acá.`,
-      `🤝 *Pedido entregado.* ${gracias}`,
-    ],
-    flex: [c1, c2, c3,
-      `🛵 *Tu pedido sale hoy.* La empresa de logística lo retira de nuestra planta después del mediodía y estará *en reparto entre las 15 y las 21 hs*.\n\nPor favor asegurate de que haya alguien para recibirlo.`,
-      `🚚 *Tu pedido está en reparto.* La logística lo entrega hoy entre las *15 y las 21 hs* en tu domicilio.`,
-      `✔️ *Pedido entregado.* ${gracias}`,
-    ],
-    interior: [c1, c2, c3,
-      `🏷️ *Tu pedido está finalizado.* Lo entregamos a la empresa de transporte (Vía Cargo / Andreani) *${dia}* para el traslado a tu localidad. _(El flete se abona al recibir.)_`,
-      `🚛 *Tu pedido ya está en manos del transporte* (Vía Cargo / Andreani), en viaje a tu localidad. El tiempo de traslado depende de la empresa transportista. _(El flete se abona al recibir.)_${seg}`,
-    ],
-  };
-  return `📦 *DOMÉSTICO · Estado de tu pedido*\n📋 *${p.codigo}*\n🕐 Novedad: ${trkFmtTs(ult.ts)}\n\n${cuerpos[mod][i]}\n\n_Doméstico · Química de Limpieza · Moreno, Bs. As._`;
+  let cuerpo;
+  if (mod === 'interior') {
+    const medio = d.medioDespacho || 'el transporte';
+    const esAndreani = medio === 'Andreani';
+    const alertaAndreani = `🏷️ Hola *${nombre}*, *tu pedido ya está finalizado.*\n\nTe recordamos que Andreani cobra el traslado antes de despacharlo. Te vamos a generar un link de pago con el importe correspondiente para que se lo abones directamente a ellos.`;
+    const cuerposInterior = {
+      confirmado: c1,
+      produccion: c2,
+      armado: c3,
+      listoDespacho: esAndreani ? alertaAndreani : `🏷️ Hola *${nombre}*, *tu pedido ya está finalizado.* Lo entregamos a ${medio} *${dia}* para el traslado a tu localidad. El flete lo abonás vos en la sucursal de ${medio} de tu localidad al retirarlo.`,
+      esperaPago: alertaAndreani,
+      despachado: esAndreani
+        ? `🚛 Hola *${nombre}*, tu pedido ya está en manos de Andreani, en viaje a tu localidad. Confirmamos el pago del envío recibido.${seg}`
+        : `🚛 Hola *${nombre}*, tu pedido ya está en manos de ${medio}, en viaje a tu localidad. Lo abonás en la sucursal de ${medio} al retirarlo.${seg}`,
+    };
+    cuerpo = cuerposInterior[ult.k] || '';
+  } else {
+    const cuerpos = {
+      retiro: [c1, c2, c3,
+        `🏪 *Tu pedido está listo.* Podés retirarlo en planta (Moreno, Bs. As.) a partir de: *${d.fechaRetiro || 'a coordinar'}*.\n\nCualquier cambio de día u horario, avisanos por acá.`,
+        `🤝 *Pedido entregado.* ${gracias}`,
+      ],
+      flex: [c1, c2, c3,
+        `🛵 *Tu pedido sale hoy.* La empresa de logística lo retira de nuestra planta después del mediodía y estará *en reparto entre las 15 y las 21 hs*.\n\nPor favor asegurate de que haya alguien para recibirlo.`,
+        `🚚 *Tu pedido está en reparto.* La logística lo entrega hoy entre las *15 y las 21 hs* en tu domicilio.`,
+        `✔️ *Pedido entregado.* ${gracias}`,
+      ],
+    };
+    cuerpo = cuerpos[mod][i];
+  }
+  return `📦 *DOMÉSTICO · Estado de tu pedido*\n📋 *${p.codigo}*\n🕐 Novedad: ${trkFmtTs(ult.ts)}\n\n${cuerpo}\n\n_Doméstico · Química de Limpieza · Moreno, Bs. As._`;
 };
 
 const ModuloTracking = ({ pedido, onVolver, onPedidoActualizado, usuarioActual }) => {
@@ -4079,12 +4111,16 @@ const ModuloTracking = ({ pedido, onVolver, onPedidoActualizado, usuarioActual }
   const [fechaRetiro, setFechaRetiro] = React.useState(d0.fechaRetiro || '');
   const [diaDespacho, setDiaDespacho] = React.useState(d0.diaDespacho || 'HOY');
   const [nroSeguimiento, setNroSeguimiento] = React.useState(d0.nroSeguimiento || '');
+  const [medioSel, setMedioSel] = React.useState(d0.medioDespacho === 'Andreani' ? 'Andreani' : d0.medioDespacho === 'Vía Cargo' ? 'ViaCargo' : (d0.medioDespacho ? 'Expreso' : ''));
+  const [nombreExpreso, setNombreExpreso] = React.useState((d0.medioDespacho && d0.medioDespacho !== 'Andreani' && d0.medioDespacho !== 'Vía Cargo') ? d0.medioDespacho : '');
+  const [montoAndreani, setMontoAndreani] = React.useState(d0.montoAndreani || '');
+  const [comprobanteAndreani, setComprobanteAndreani] = React.useState(d0.comprobanteAndreani || '');
   const [guardando, setGuardando] = React.useState(false);
   const [aviso, setAviso] = React.useState('');
   const [copiado, setCopiado] = React.useState(false);
 
   const mod = trkModalidad(ped);
-  const pasos = TRK_PASOS[mod];
+  const pasos = trkPasosDe(ped);
   const t = trkEstado(ped);
   const i = trkIdx(ped);
   const fin = i === pasos.length - 1;
@@ -4098,7 +4134,21 @@ const ModuloTracking = ({ pedido, onVolver, onPedidoActualizado, usuarioActual }
       if (!fechaRetiro.trim()) { setAviso('Completá desde cuándo se puede retirar (ej: mañana desde las 9)'); return; }
       datos.fechaRetiro = fechaRetiro.trim();
     }
-    if (sig.dato === 'diaDespacho') datos.diaDespacho = diaDespacho;
+    if (sig.dato === 'medioDespacho') {
+      if (!medioSel) { setAviso('Elegí el medio de despacho'); return; }
+      const medioFinal = medioSel === 'Andreani' ? 'Andreani' : medioSel === 'ViaCargo' ? 'Vía Cargo' : nombreExpreso.trim();
+      if (medioSel === 'Expreso' && !medioFinal) { setAviso('Cargá el nombre del expreso'); return; }
+      if (medioSel !== 'Andreani' && !diaDespacho) { setAviso('Elegí el día de entrega al transporte'); return; }
+      datos.medioDespacho = medioFinal;
+      if (medioSel !== 'Andreani') datos.diaDespacho = diaDespacho;
+    }
+    if (sig.dato === 'pagoAndreani') {
+      if (!montoAndreani.trim() || !comprobanteAndreani.trim()) { setAviso('Cargá el importe cobrado y el comprobante de pago'); return; }
+      if (!diaDespacho) { setAviso('Elegí el día de entrega al transporte'); return; }
+      datos.montoAndreani = montoAndreani.trim();
+      datos.comprobanteAndreani = comprobanteAndreani.trim();
+      datos.diaDespacho = diaDespacho;
+    }
     if (sig.k === 'despachado' && nroSeguimiento.trim()) datos.nroSeguimiento = nroSeguimiento.trim();
     setGuardando(true);
     const ahora = Date.now();
@@ -4152,7 +4202,8 @@ const ModuloTracking = ({ pedido, onVolver, onPedidoActualizado, usuarioActual }
           const dd = ped.trackingDatos || {};
           let desc = p2.desc;
           if (p2.dato === 'fechaRetiro' && j <= i && dd.fechaRetiro) desc = 'Retirable a partir de: ' + dd.fechaRetiro;
-          if (p2.dato === 'diaDespacho' && j <= i && dd.diaDespacho) desc = 'Entrega al transporte: ' + dd.diaDespacho;
+          if (p2.dato === 'medioDespacho' && j <= i && dd.medioDespacho) desc = 'Medio: ' + dd.medioDespacho + (dd.diaDespacho ? ' · Entrega al transporte: ' + dd.diaDespacho : '');
+          if (p2.dato === 'pagoAndreani' && j <= i && dd.montoAndreani) desc = 'Pago recibido: $' + dd.montoAndreani + ' · Comprobante: ' + dd.comprobanteAndreani + (dd.diaDespacho ? ' · Entrega al transporte: ' + dd.diaDespacho : '');
           if (p2.k === 'despachado' && j <= i && dd.nroSeguimiento) desc = desc + ' · N° seguimiento: ' + dd.nroSeguimiento;
           return (
             <div key={p2.k} style={{ display:'flex', gap:14 }}>
@@ -4180,8 +4231,38 @@ const ModuloTracking = ({ pedido, onVolver, onPedidoActualizado, usuarioActual }
             <input value={fechaRetiro} onChange={e => { setFechaRetiro(e.target.value); setAviso(''); }} placeholder="Ej: mañana desde las 9:00" style={{ width:'100%', padding:'11px 12px', background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:10, color:'#fff', fontSize:13, fontWeight:700, boxSizing:'border-box' }} />
           </div>
         )}
-        {sig && sig.dato === 'diaDespacho' && (
+        {sig && sig.dato === 'medioDespacho' && (
           <div style={{ marginBottom:12 }}>
+            <label style={{ display:'block', fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.6)', marginBottom:6 }}>Medio de despacho:</label>
+            <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+              {[{k:'Andreani',l:'Andreani'},{k:'ViaCargo',l:'Vía Cargo'},{k:'Expreso',l:'Expreso'}].map(opt => (
+                <div key={opt.k} onClick={() => { setMedioSel(opt.k); setAviso(''); }} style={{ flex:1, padding:'9px 4px', borderRadius:10, fontSize:10.5, fontWeight:800, textAlign:'center', cursor:'pointer', background: medioSel === opt.k ? 'rgba(249,115,22,0.25)' : 'rgba(255,255,255,0.07)', border: medioSel === opt.k ? '1px solid #f97316' : '1px solid rgba(255,255,255,0.16)', color: medioSel === opt.k ? '#fdba74' : 'rgba(255,255,255,0.6)' }}>{opt.l}</div>
+              ))}
+            </div>
+            {medioSel === 'Expreso' && (
+              <input value={nombreExpreso} onChange={e => { setNombreExpreso(e.target.value); setAviso(''); }} placeholder="Nombre del expreso (ej: Expreso Roca)" style={{ width:'100%', padding:'11px 12px', background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:10, color:'#fff', fontSize:13, fontWeight:700, boxSizing:'border-box', marginBottom:10 }} />
+            )}
+            {medioSel && medioSel !== 'Andreani' && (
+              <div>
+                <label style={{ display:'block', fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.6)', marginBottom:6 }}>Se entrega al transporte:</label>
+                <div style={{ display:'flex', gap:6 }}>
+                  {['HOY','MAÑANA','PRÓX. DÍA HÁBIL'].map(dOpt => (
+                    <div key={dOpt} onClick={() => setDiaDespacho(dOpt)} style={{ flex:1, padding:'9px 4px', borderRadius:10, fontSize:10.5, fontWeight:800, textAlign:'center', cursor:'pointer', background: diaDespacho === dOpt ? 'rgba(249,115,22,0.25)' : 'rgba(255,255,255,0.07)', border: diaDespacho === dOpt ? '1px solid #f97316' : '1px solid rgba(255,255,255,0.16)', color: diaDespacho === dOpt ? '#fdba74' : 'rgba(255,255,255,0.6)' }}>{dOpt}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {medioSel === 'Andreani' && (
+              <div style={{ fontSize:11, color:'rgba(253,186,116,0.85)', lineHeight:1.5 }}>Andreani cobra el traslado antes de despacharlo. El día de entrega se carga más adelante, al confirmar el pago.</div>
+            )}
+          </div>
+        )}
+        {sig && sig.dato === 'pagoAndreani' && (
+          <div style={{ marginBottom:12 }}>
+            <label style={{ display:'block', fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.6)', marginBottom:6 }}>Importe cobrado por Andreani:</label>
+            <input value={montoAndreani} onChange={e => { setMontoAndreani(e.target.value); setAviso(''); }} placeholder="Ej: 8500" style={{ width:'100%', padding:'11px 12px', background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:10, color:'#fff', fontSize:13, fontWeight:700, boxSizing:'border-box', marginBottom:10 }} />
+            <label style={{ display:'block', fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.6)', marginBottom:6 }}>Comprobante / referencia de pago:</label>
+            <input value={comprobanteAndreani} onChange={e => { setComprobanteAndreani(e.target.value); setAviso(''); }} placeholder="N° de operación o comprobante" style={{ width:'100%', padding:'11px 12px', background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:10, color:'#fff', fontSize:13, fontWeight:700, boxSizing:'border-box', marginBottom:10 }} />
             <label style={{ display:'block', fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.6)', marginBottom:6 }}>Se entrega al transporte:</label>
             <div style={{ display:'flex', gap:6 }}>
               {['HOY','MAÑANA','PRÓX. DÍA HÁBIL'].map(dOpt => (

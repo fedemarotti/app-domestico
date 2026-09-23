@@ -4930,17 +4930,21 @@ const vgLitros = arr => (arr || []).reduce((a, f) => a + vgN(f?.cantidad), 0);
 const vgFmt = n => (n < 0 ? '− ' : '') + '$' + Math.round(Math.abs(n)).toLocaleString('es-AR');
 
 // Costo de mercadería de un DEF. costosManuales: { 'i<idx>' | 'a<idx>': costo } cargados por el admin.
+// Devuelve además `filas`: una por producto con lo vendido, su costo y su margen.
 const vgCostoDEF = (p, C, costosManuales = {}) => {
-  const det = []; let cat = 0; let manPrecio = 0, manCosto = 0, manEstimado = false;
-  const add = (txt, v) => { det.push([txt, v]); cat += v; };
+  const det = []; const filas = []; let cat = 0; let manPrecio = 0, manCosto = 0, manEstimado = false;
+  const add = (nombre, precio, costo, sub) => { det.push([nombre, costo]); filas.push({ nombre, precio, costo, sub }); cat += costo; };
+  const manual = (key, nombre, precio, icono) => {
+    const tiene = costosManuales[key] != null && costosManuales[key] !== '';
+    const c = tiene ? vgN(costosManuales[key]) : precio * 0.5; if (!tiene) manEstimado = true;
+    manPrecio += precio; manCosto += c; det.push([nombre, c, 'manual']);
+    filas.push({ nombre: `${icono} ${nombre}`, precio, costo: c, sub: tiene ? 'costo cargado por vos' : 'costo estimado 50% (tocá para cargar el real)', manual: key, estimado: !tiene });
+  };
   (p.items || []).forEach((it, idx) => {
     const esCombo = it.tipoItem === 'combo' || it.tipo === 'combo';
     const t = it.cantidad === 200 ? 200 : 50;
-    if (it.tipoItem === 'manual') {
-      const pr = vgN(it.precio); const k = 'i' + idx; const tiene = costosManuales[k] != null && costosManuales[k] !== '';
-      const c = tiene ? vgN(costosManuales[k]) : pr * 0.5; if (!tiene) manEstimado = true;
-      manPrecio += pr; manCosto += c; det.push([`✍️ ${it.nombre || 'Producto manual'}${tiene ? '' : ' (50% estimado)'}`, c, 'manual']); return;
-    }
+    const pr = vgN(it.precio);
+    if (it.tipoItem === 'manual') { manual('i' + idx, it.nombre || 'Producto manual', pr, '✍️'); return; }
     if (esCombo) {
       const cal = it.calidad; let pasta = 0;
       VG_TIPOS.forEach(([k]) => { pasta += vgN(C.pasta?.[k]?.[t]?.[cal]); });
@@ -4950,7 +4954,8 @@ const vgCostoDEF = (p, C, costosManuales = {}) => {
       const chicas = ['jabon_divs','suav_divs','det_divs'].reduce((a, k) => a + ((it[k] || []).length > 1 ? 12 : 3), 0) + 3 * lavU + 3 * desU;
       const grandes = t === 50 ? 1 : 3;
       const tot = pasta + lavU * C.lavandina50 + desU * C.desodorante50 + bolsas * C.bolsa + chicas * C.etiquetaChica + grandes * C.etiquetaGrande;
-      add(`Combo ${t === 50 ? 'Chico' : 'Grande'} ${cal || ''} (pastas ${vgFmt(pasta)} · ${lavU} lav. · ${desU} desod. · ${bolsas} bolsas · ${chicas}+${grandes} etiq.)`, tot);
+      add(`Combo ${t === 50 ? 'Chico' : 'Grande'} ${cal || ''}`.trim(), pr, tot,
+        `3 pastas ${vgFmt(pasta)} · ${lavU ? lavU + ' lavandina · ' : ''}${desU} desodorante${it.canje_lavandina ? ' (canje)' : ''} · ${bolsas} bolsas · ${chicas} etiq. chicas + ${grandes} grande${grandes > 1 ? 's' : ''}`);
       return;
     }
     if (VG_BOLSAS[it.tipo]) {
@@ -4958,26 +4963,25 @@ const vgCostoDEF = (p, C, costosManuales = {}) => {
       const fracc = t === 200 && (it.divisiones || []).length > 1;
       const bolsas = VG_BOLSAS[it.tipo][t]; const chicas = fracc ? 12 : 3;
       const nom = (VG_TIPOS.find(x => x[0] === it.tipo) || [0, it.tipo])[1];
-      add(`${nom} ${it.calidad || ''} ${t} L${fracc ? ' fracc.' : ''} (pasta ${vgFmt(pasta)} · ${bolsas} bolsas · ${chicas} etiq.)`, pasta + bolsas * C.bolsa + chicas * C.etiquetaChica);
+      add(`${nom} ${it.calidad || ''} ${t} L${fracc ? ' fraccionado' : ''}`.replace(/\s+/g, ' '), pr, pasta + bolsas * C.bolsa + chicas * C.etiquetaChica,
+        `pasta ${vgFmt(pasta)} · ${bolsas} bolsa${bolsas > 1 ? 's' : ''} · ${chicas} etiquetas`);
       return;
     }
     if (it.tipo === 'lavandina') {
-      if (it.canje_lavandina) { const u = Math.max(1, vgLitros(it.fragancias_canje) / 50 || t / 50); add(`Lavandina → canje desodorante ${u * 50} L`, u * C.desodorante50 + 3 * u * C.etiquetaChica); }
-      else { const u = t / 50; add(`Lavandina ${t} L (${u} u. · ${3 * u} etiq.)`, u * C.lavandina50 + 3 * u * C.etiquetaChica); }
+      if (it.canje_lavandina) { const u = Math.max(1, vgLitros(it.fragancias_canje) / 50 || t / 50); add(`Lavandina ${t} L → canje desodorante`, pr, u * C.desodorante50 + 3 * u * C.etiquetaChica, `${u} desodorante de 50 L · ${3 * u} etiquetas`); }
+      else { const u = t / 50; add(`Lavandina ${t} L`, pr, u * C.lavandina50 + 3 * u * C.etiquetaChica, `${u} unidad${u > 1 ? 'es' : ''} de 50 L · ${3 * u} etiquetas`); }
       return;
     }
-    if (it.tipo === 'desodorante') { const u = t / 50; add(`Desodorante ${t} L (${u} u. · ${3 * u} etiq.)`, u * C.desodorante50 + 3 * u * C.etiquetaChica); return; }
-    det.push([`⚠️ Ítem sin costo reconocido: ${it.nombre || it.tipo || '?'}`, 0]);
+    if (it.tipo === 'desodorante') { const u = t / 50; add(`Desodorante ${t} L`, pr, u * C.desodorante50 + 3 * u * C.etiquetaChica, `${u} unidad${u > 1 ? 'es' : ''} de 50 L · ${3 * u} etiquetas`); return; }
+    filas.push({ nombre: `⚠️ ${it.nombre || it.tipo || 'Ítem'}`, precio: pr, costo: 0, sub: 'sin costo reconocido' }); det.push([`⚠️ ${it.nombre || it.tipo || '?'}`, 0]);
   });
-  (p.extras?.agregados || []).forEach((a, idx) => {
-    const pr = vgN(a.precio); const k = 'a' + idx; const tiene = costosManuales[k] != null && costosManuales[k] !== '';
-    const c = tiene ? vgN(costosManuales[k]) : pr * 0.5; if (!tiene) manEstimado = true;
-    manPrecio += pr; manCosto += c; det.push([`⭐ ${a.nombre || 'Producto extra'}${tiene ? '' : ' (50% estimado)'}`, c, 'manual']);
-  });
+  (p.extras?.agregados || []).forEach((a, idx) => manual('a' + idx, a.nombre || 'Producto extra', vgN(a.precio), '⭐'));
   const env = desgloseEnvases(p.envases || 0, p.extras);
-  if (env.baldes) add(`Baldes/envases cargados (${env.baldes})`, env.baldes * C.balde);
-  if (env.cajas) add(`Cajas (${env.cajas})`, env.cajas * C.caja);
-  return { cat, det, manPrecio, manCosto, manEstimado };
+  if (env.baldes || env.cajas) {
+    const c = env.baldes * C.balde + env.cajas * C.caja;
+    add(`Envases${env.baldes ? ` · ${env.baldes} balde${env.baldes > 1 ? 's' : ''}` : ''}${env.cajas ? ` · ${env.cajas} caja${env.cajas > 1 ? 's' : ''}` : ''}`, vgN(p.totales?.envases), c, env.cajas ? 'las cajas no se cobran al cliente' : '');
+  }
+  return { cat, det, filas, manPrecio, manCosto, manEstimado };
 };
 
 // Rentabilidad completa de un DEF con las reglas de comisiones
@@ -5160,46 +5164,129 @@ const ModuloVentasGanancia = ({ onVolver, onCambioNoLeidas }) => {
   const R = p => sinCostos ? null : vgRentabilidad(p, vgCostoVigente(costos, p.ts), admin[p.codigo]?.costos_manuales || {});
   const totHoy = sinCostos ? null : deHoy.reduce((a, p) => { const r = R(p); a.cob += r.total; a.g += r.gTot; return a; }, { cob: 0, g: 0 });
 
-  const fila = (l, v, color, bold) => (
-    <div style={{ display:'flex', justifyContent:'space-between', fontSize: bold ? 14 : 12.5, padding:'2px 0', color: bold ? '#fff' : 'rgba(255,255,255,0.72)', fontWeight: bold ? 900 : 500 }}>
-      <span>{l}</span><b style={{ color: color || '#fff', fontWeight: bold ? 900 : 750 }}>{v}</b>
-    </div>
-  );
-  const Desglose = ({ p, r }) => (
-    <div>
-      {fila('Cliente abonó', vgFmt(r.total))}
-      {r.envioFlex > 0 && fila('Envío Flex', vgFmt(-r.envioFlex), '#fca5a5')}
-      {fila(`Comi Depo ${String(vgCostoVigente(costos, p.ts).comiDepo).replace('.', ',')}%`, vgFmt(-r.comiDepo), '#fca5a5')}
-      {r.conComiVentas && fila(`Comi Ventas ${String(vgCostoVigente(costos, p.ts).comiVentas).replace('.', ',')}%`, vgFmt(-r.comiVentas), '#fca5a5')}
-      <div onClick={e => { e.stopPropagation(); setVerDet(verDet === p.codigo ? null : p.codigo); }} style={{ cursor:'pointer' }}>
-        {fila(<span>Costo mercadería <span style={{ fontSize:10.5, color:'#93c5fd' }}>{verDet === p.codigo ? '▲ ocultar' : '▼ ver detalle'}</span></span>, vgFmt(-r.costo), '#fca5a5')}
+  const pct = (a, b) => b > 0 ? Math.round(a / b * 100) : 0;
+  const hoyMargen = totHoy && totHoy.cob ? pct(totHoy.g, totHoy.cob) : null;
+
+  // ── Tarjeta de la lista (compacta, grande y legible) ──
+  const Tarjeta = ({ p, r, nueva }) => (
+    <div onClick={() => setAbierto(p.codigo)} style={{ borderRadius:16, padding:'13px 14px', marginBottom:9, cursor:'pointer',
+      background: nueva ? 'linear-gradient(180deg,rgba(250,204,21,0.12),rgba(250,204,21,0.04))' : 'rgba(255,255,255,0.04)',
+      border: nueva ? '1px solid rgba(250,204,21,0.55)' : '1px solid rgba(255,255,255,0.09)', borderLeft: nueva ? `5px solid ${AM}` : `5px solid ${mkColor(r.u)}55` }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+        {nueva ? <span style={{ fontSize:9.5, fontWeight:900, background:AM, color:'#1e293b', borderRadius:6, padding:'2px 7px' }}>NUEVA</span> : <span style={{ fontSize:12, color:'#38bdf8', fontWeight:900 }}>✓✓</span>}
+        <span style={{ fontWeight:900, fontSize:14, color: mkColor(r.u) }}>{r.u}</span>
+        <span style={{ fontSize:12, color:C.tx2, flex:1, minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.cliente?.nombre || ''}</span>
+        <span style={{ fontSize:12, color:C.tx3, fontWeight:700 }}>{arHora(p.ts)}</span>
       </div>
-      {verDet === p.codigo && (
-        <div onClick={e => e.stopPropagation()} style={{ margin:'4px 0 6px', padding:'8px 10px', borderRadius:10, background:'rgba(0,0,0,0.25)', fontSize:11.5 }}>
-          {r.cst.det.map(([t, v, tipo], i) => (
-            <div key={i} style={{ display:'flex', justifyContent:'space-between', gap:8, padding:'2px 0', color:'rgba(255,255,255,0.75)' }}><span style={{ minWidth:0 }}>{t}</span><b style={{ whiteSpace:'nowrap' }}>{vgFmt(v)}</b></div>
-          ))}
-          {[...(p.items || []).map((it, i) => it.tipoItem === 'manual' ? ['i' + i, it.nombre || 'Producto manual', it.precio] : null), ...(p.extras?.agregados || []).map((a, i) => ['a' + i, a.nombre || 'Producto extra', a.precio])].filter(Boolean).map(([k, nom, pr]) => (
-            <div key={k} style={{ display:'flex', alignItems:'center', gap:6, marginTop:6 }}>
-              <span style={{ flex:1, fontSize:11, color:'#fde68a' }}>Costo real de “{nom}” (vendido a {vgFmt(vgN(pr))}):</span>
-              <input inputMode="decimal" placeholder="50%" defaultValue={admin[p.codigo]?.costos_manuales?.[k] ?? ''} onBlur={e => guardarCostoManual(p.codigo, k, e.target.value.trim())} style={{ ...s.inp, width:100, padding:'6px 8px', fontSize:12, textAlign:'right' }} />
-            </div>
-          ))}
+      <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:10 }}>
+        <div>
+          <div style={{ fontSize:10, fontWeight:800, color:C.tx3, letterSpacing:'0.08em' }}>COBRADO</div>
+          <div style={{ fontSize:18, fontWeight:900 }}>{vgFmt(r.total)}</div>
         </div>
-      )}
-      <div style={{ borderTop:'1px solid rgba(255,255,255,0.12)', marginTop:6, paddingTop:6 }}>
-        {r.cst.manPrecio > 0 ? <>
-          {fila('💰 Ganancia catálogo (real)', vgFmt(r.gCat), r.gCat >= 0 ? '#4ade80' : '#f87171', true)}
-          {fila(`🟡 Ganancia manual (${r.cst.manEstimado ? 'estimada 50%' : 'con costo cargado'})`, vgFmt(r.gMan), '#fde68a')}
-          {fila('📊 Ganancia total', vgFmt(r.gTot), r.gTot >= 0 ? '#4ade80' : '#f87171', true)}
-        </> : fila('💰 Ganancia', vgFmt(r.gTot), r.gTot >= 0 ? '#4ade80' : '#f87171', true)}
+        <div style={{ textAlign:'right' }}>
+          <div style={{ fontSize:10, fontWeight:800, color:C.tx3, letterSpacing:'0.08em' }}>GANANCIA{r.cst.manEstimado ? ' *' : ''}</div>
+          <div style={{ fontSize:18, fontWeight:900, color: r.gTot >= 0 ? '#4ade80' : '#f87171' }}>{vgFmt(r.gTot)} <span style={{ fontSize:12, color:C.tx2, fontWeight:800 }}>{pct(r.gTot, r.neto)}%</span></div>
+        </div>
       </div>
+      <div style={{ fontSize:10.5, color:C.tx3, marginTop:4 }}>{p.codigo} · {gModalidad(p)}{r.cst.manEstimado ? ' · * incluye producto manual estimado' : ''} · tocá para ver el detalle</div>
     </div>
   );
 
+  // ── Detalle a pantalla completa ──
+  const Detalle = ({ p, r, nueva }) => {
+    const Cv = vgCostoVigente(costos, p.ts);
+    const segs = [
+      ['Mercadería', r.costo, '#f87171'],
+      ['Comisiones', r.comiDepo + r.comiVentas, '#fb923c'],
+      ['Envío Flex', r.envioFlex, '#94a3b8'],
+      ['Ganancia', Math.max(0, r.gTot), '#4ade80'],
+    ].filter(x => x[1] > 0);
+    const fl = (l, v, opts = {}) => (
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:10, padding:'7px 0', borderBottom: opts.sinLinea ? 'none' : '1px solid rgba(255,255,255,0.06)', fontSize: opts.grande ? 17 : 14.5 }}>
+        <span style={{ color: opts.grande ? '#fff' : 'rgba(255,255,255,0.8)', fontWeight: opts.grande ? 900 : 600 }}>{l}</span>
+        <b style={{ color: opts.color || '#fff', fontWeight: opts.grande ? 900 : 800, whiteSpace:'nowrap' }}>{v}</b>
+      </div>
+    );
+    return (
+      <div style={{ position:'fixed', inset:0, zIndex:450, background:'#0A0F16', overflowY:'auto', WebkitOverflowScrolling:'touch' }}>
+        <div style={{ maxWidth:640, margin:'0 auto', padding:'14px 16px 40px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
+            <button onClick={() => { setAbierto(null); setVerDet(null); }} style={{ padding:'10px 16px', borderRadius:10, border:'1px solid rgba(255,255,255,0.18)', background:'rgba(255,255,255,0.07)', color:'#fff', fontWeight:800, fontSize:14, cursor:'pointer', fontFamily:'inherit' }}>← Volver</button>
+            <div style={{ flex:1 }} />
+            {nueva ? <span style={{ fontSize:11, fontWeight:900, background:AM, color:'#1e293b', borderRadius:8, padding:'4px 9px' }}>NUEVA</span> : <span style={{ fontSize:12, color:'#38bdf8', fontWeight:900 }}>✓✓ leída</span>}
+          </div>
+
+          <div style={{ fontSize:13, color:C.tx2, fontWeight:700 }}>{p.codigo} · {fmtFechaDDMMAAAA(p.ts)} {arHora(p.ts)}</div>
+          <div style={{ fontSize:22, fontWeight:900, marginTop:2 }}><span style={{ color: mkColor(r.u) }}>{r.u}</span> vendió</div>
+          <div style={{ fontSize:14, color:C.tx2, marginBottom:14 }}>{p.cliente?.nombre || 'Cliente sin nombre'} · {gModalidad(p)}{p.cliente?.localidad ? ` · ${p.cliente.localidad}` : ''}</div>
+
+          {/* Resultado */}
+          <div style={{ ...s.card, textAlign:'center', padding:'18px 14px', borderColor: r.gTot >= 0 ? 'rgba(74,222,128,0.4)' : 'rgba(248,113,113,0.4)' }}>
+            <div style={{ fontSize:11, fontWeight:900, color:C.tx3, letterSpacing:'0.12em' }}>GANANCIA DE ESTA VENTA</div>
+            <div style={{ fontSize:36, fontWeight:900, color: r.gTot >= 0 ? '#4ade80' : '#f87171', letterSpacing:'-0.03em' }}>{vgFmt(r.gTot)}</div>
+            <div style={{ fontSize:14, color:C.tx2, fontWeight:700 }}>{pct(r.gTot, r.neto)}% de lo vendido (sin envío)</div>
+            {r.cst.manPrecio > 0 && <div style={{ fontSize:12.5, color:'#fde68a', marginTop:6 }}>Catálogo {vgFmt(r.gCat)} (real) + manual {vgFmt(r.gMan)} ({r.cst.manEstimado ? 'estimado 50%' : 'con costo cargado'})</div>}
+            {/* Barra: en qué se va cada peso cobrado */}
+            <div style={{ display:'flex', height:14, borderRadius:7, overflow:'hidden', marginTop:14, background:'rgba(255,255,255,0.06)' }}>
+              {segs.map(([l, v, c]) => <div key={l} style={{ width:`${v / r.total * 100}%`, background:c }} />)}
+            </div>
+            <div style={{ display:'flex', flexWrap:'wrap', justifyContent:'center', gap:'4px 12px', marginTop:8 }}>
+              {segs.map(([l, v, c]) => <span key={l} style={{ fontSize:11.5, fontWeight:800, color:c }}>■ {l} {pct(v, r.total)}%</span>)}
+            </div>
+          </div>
+
+          {/* Cuentas */}
+          <div style={s.card}>
+            <div style={s.cTit}>La cuenta</div>
+            {fl('Cliente abonó', vgFmt(r.total))}
+            {r.envioFlex > 0 && fl('Envío Flex (es del transporte)', vgFmt(-r.envioFlex), { color:'#fca5a5' })}
+            {fl(`Comi Depo ${String(Cv.comiDepo).replace('.', ',')}%`, vgFmt(-r.comiDepo), { color:'#fca5a5' })}
+            {r.conComiVentas ? fl(`Comi Ventas ${String(Cv.comiVentas).replace('.', ',')}% (${r.u})`, vgFmt(-r.comiVentas), { color:'#fca5a5' }) : fl('Comi Ventas', 'no corresponde', { color:C.tx3 })}
+            {fl('Costo de la mercadería', vgFmt(-r.costo), { color:'#fca5a5' })}
+            {fl('Ganancia', vgFmt(r.gTot), { grande:true, sinLinea:true, color: r.gTot >= 0 ? '#4ade80' : '#f87171' })}
+          </div>
+
+          {/* Producto por producto */}
+          <div style={s.card}>
+            <div style={s.cTit}>Producto por producto</div>
+            {r.cst.filas.map((f, i) => {
+              const m = f.precio - f.costo;
+              return (
+                <div key={i} style={{ padding:'10px 0', borderBottom: i < r.cst.filas.length - 1 ? '1px solid rgba(255,255,255,0.07)' : 'none' }}>
+                  <div style={{ fontSize:15, fontWeight:850, marginBottom:4 }}>{f.nombre}</div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 }}>
+                    {[['Vendido', vgFmt(f.precio), '#fff'], ['Costo', vgFmt(f.costo), '#fca5a5'], ['Margen', `${vgFmt(m)}${f.precio ? ` · ${pct(m, f.precio)}%` : ''}`, m >= 0 ? '#86efac' : '#fca5a5']].map(([l, v, c]) => (
+                      <div key={l} style={{ background:'rgba(255,255,255,0.04)', borderRadius:10, padding:'7px 8px' }}>
+                        <div style={{ fontSize:9.5, fontWeight:900, color:C.tx3, letterSpacing:'0.08em' }}>{l.toUpperCase()}</div>
+                        <div style={{ fontSize:13.5, fontWeight:850, color:c }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {f.sub && <div style={{ fontSize:11.5, color:C.tx3, marginTop:5 }}>{f.sub}</div>}
+                  {f.manual && (
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8 }}>
+                      <span style={{ flex:1, fontSize:12.5, color:'#fde68a', fontWeight:700 }}>Costo real de este producto:</span>
+                      <input inputMode="decimal" placeholder="$" defaultValue={admin[p.codigo]?.costos_manuales?.[f.manual] ?? ''} onBlur={e => guardarCostoManual(p.codigo, f.manual, e.target.value.trim())} style={{ ...s.inp, width:120, padding:'9px 10px', fontSize:14, textAlign:'right' }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <div style={{ fontSize:11.5, color:C.tx3, marginTop:6 }}>El margen por producto es antes de comisiones. Las comisiones se descuentan en “La cuenta”.</div>
+          </div>
+
+          {nueva && <div style={{ marginTop:6 }}><VgHold onDone={() => { marcar(p.codigo, true); setAbierto(null); }} /></div>}
+          {!nueva && inicio != null && p.ts >= inicio && <button onClick={() => { marcar(p.codigo, false); setAbierto(null); }} style={{ ...s.bS, marginTop:6 }}>Volver a marcar como no leída</button>}
+        </div>
+      </div>
+    );
+  };
+
+  const pAbierto = abierto && !sinCostos ? defs.find(p => p.codigo === abierto) : null;
   let diaPrev = null;
   return (
     <div>
+      {pAbierto && <Detalle p={pAbierto} r={R(pAbierto)} nueva={esNoLeida(pAbierto)} />}
       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
         <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>🏠 Inicio</button>
         <div style={{ flex:1 }} />
@@ -5227,9 +5314,15 @@ const ModuloVentasGanancia = ({ onVolver, onCambioNoLeidas }) => {
         </div>
       )}
       {totHoy && deHoy.length > 0 && (
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
-          <div style={{ ...s.card, marginBottom:0, padding:12 }}><div style={s.cTit}>Cobrado hoy ({deHoy.length})</div><div style={{ fontSize:19, fontWeight:900 }}>{vgFmt(totHoy.cob)}</div></div>
-          <div style={{ ...s.card, marginBottom:0, padding:12 }}><div style={s.cTit}>Ganancia hoy</div><div style={{ fontSize:19, fontWeight:900, color: totHoy.g >= 0 ? '#4ade80' : '#f87171' }}>{vgFmt(totHoy.g)}</div></div>
+        <div style={{ ...s.card, padding:14 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:6 }}>
+            <div style={s.cTit}>Hoy · {deHoy.length} venta{deHoy.length !== 1 ? 's' : ''}</div>
+            {hoyMargen !== null && <div style={{ fontSize:12, fontWeight:800, color:C.tx2 }}>margen {hoyMargen}%</div>}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            <div><div style={{ fontSize:10, fontWeight:800, color:C.tx3, letterSpacing:'0.08em' }}>COBRADO</div><div style={{ fontSize:22, fontWeight:900 }}>{vgFmt(totHoy.cob)}</div></div>
+            <div style={{ textAlign:'right' }}><div style={{ fontSize:10, fontWeight:800, color:C.tx3, letterSpacing:'0.08em' }}>GANANCIA</div><div style={{ fontSize:22, fontWeight:900, color: totHoy.g >= 0 ? '#4ade80' : '#f87171' }}>{vgFmt(totHoy.g)}</div></div>
+          </div>
         </div>
       )}
 
@@ -5237,46 +5330,19 @@ const ModuloVentasGanancia = ({ onVolver, onCambioNoLeidas }) => {
       {pedidos && lista.length === 0 && <div style={{ textAlign:'center', padding:30, color:'rgba(255,255,255,0.45)', fontSize:13 }}>{filtro === 'sinleer' ? 'No hay ventas sin leer. 🎉' : 'No hay ventas para mostrar.'}</div>}
 
       {pedidos && !sinCostos && visibles.map(p => {
-        const r = R(p); const nueva = esNoLeida(p); const abiertoEste = abierto === p.codigo;
+        const r = R(p); const nueva = esNoLeida(p);
         const dia = etiquetaDia(p.ts); const sep = dia !== diaPrev; diaPrev = dia;
         return (
           <React.Fragment key={p.codigo}>
-            {sep && <div style={{ textAlign:'center', margin:'8px 0 10px' }}><span style={{ fontSize:10, fontWeight:900, letterSpacing:'0.12em', color:C.tx2, background:'rgba(255,255,255,0.07)', borderRadius:8, padding:'3px 10px' }}>{dia}</span></div>}
-            {nueva || abiertoEste ? (
-              <div onClick={() => !nueva && setAbierto(null)} style={{ borderRadius:16, padding:'12px 14px', marginBottom:10, cursor: nueva ? 'default' : 'pointer',
-                background: nueva ? 'linear-gradient(180deg,rgba(250,204,21,0.10),rgba(250,204,21,0.03))' : 'rgba(255,255,255,0.05)',
-                border: nueva ? '1px solid rgba(250,204,21,0.55)' : '1px solid rgba(255,255,255,0.12)', borderLeft: nueva ? `4px solid ${AM}` : '1px solid rgba(255,255,255,0.12)' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:5 }}>
-                  {nueva && <span style={{ width:9, height:9, borderRadius:'50%', background:AM, boxShadow:`0 0 8px ${AM}`, flexShrink:0 }} />}
-                  <Chip codigo={p.codigo} tipo="DEF" />
-                  {nueva && <span style={{ fontSize:9, fontWeight:900, background:AM, color:'#1e293b', borderRadius:6, padding:'1px 6px' }}>NUEVA</span>}
-                  {!nueva && <span style={{ fontSize:11, color:'#38bdf8', fontWeight:900 }}>✓✓</span>}
-                  <span style={{ marginLeft:'auto', fontSize:11, color:C.tx3, fontWeight:700 }}>{arHora(p.ts)}</span>
-                </div>
-                <div style={{ fontSize:12.5, color:C.tx2, marginBottom:8 }}>
-                  <span style={{ fontWeight:900, color: mkColor(r.u) }}>{r.u}</span> vendió · {gModalidad(p)}{p.cliente?.nombre ? ` · ${p.cliente.nombre}` : ''}
-                </div>
-                <Desglose p={p} r={r} />
-                {nueva && <div style={{ marginTop:10 }}><VgHold onDone={() => marcar(p.codigo, true)} /></div>}
-                {!nueva && <div style={{ fontSize:10.5, color:C.tx3, textAlign:'center', marginTop:8 }}>Tocá para cerrar</div>}
-              </div>
-            ) : (
-              <div onClick={() => setAbierto(p.codigo)} style={{ display:'flex', alignItems:'center', gap:9, padding:'9px 12px', marginBottom:6, borderRadius:12, background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.06)', cursor:'pointer', opacity: p.ts >= (inicio || Infinity) ? 0.9 : 0.75 }}>
-                <span style={{ fontSize:11, color:'#38bdf8', fontWeight:900 }}>✓✓</span>
-                <div style={{ flex:1, minWidth:0, fontSize:11.5, color:C.tx2, lineHeight:1.3 }}>
-                  <b style={{ color:'#fff' }}>{p.codigo}</b> · <span style={{ color: mkColor(r.u), fontWeight:800 }}>{r.u}</span> · {vgFmt(r.total)}
-                  <div style={{ fontSize:10.5, color:C.tx3 }}>Ganancia <b style={{ color: r.gTot >= 0 ? '#86efac' : '#fca5a5' }}>{vgFmt(r.gTot)}</b>{r.cst.manEstimado ? ' (incluye estimado)' : ''} · tocá para ver</div>
-                </div>
-                <span style={{ fontSize:10.5, color:C.tx3, fontWeight:700 }}>{arHora(p.ts)}</span>
-              </div>
-            )}
+            {sep && <div style={{ textAlign:'center', margin:'10px 0' }}><span style={{ fontSize:10.5, fontWeight:900, letterSpacing:'0.12em', color:C.tx2, background:'rgba(255,255,255,0.07)', borderRadius:8, padding:'4px 12px' }}>{dia}</span></div>}
+            <Tarjeta p={p} r={r} nueva={nueva} />
           </React.Fragment>
         );
       })}
       {pedidos && !sinCostos && lista.length > limite && <button onClick={() => setLimite(l => l + 60)} className="sel-btn" style={{ ...s.bS, marginTop:6 }}>Ver más ventas anteriores</button>}
 
       {deshacer && (
-        <div style={{ position:'fixed', left:16, right:16, bottom:20, zIndex:400, maxWidth:560, margin:'0 auto', display:'flex', alignItems:'center', gap:10, padding:'12px 14px', borderRadius:14, background:'#1e293b', border:'1px solid rgba(255,255,255,0.18)', boxShadow:'0 10px 30px rgba(0,0,0,0.5)' }}>
+        <div style={{ position:'fixed', left:16, right:16, bottom:20, zIndex:500, maxWidth:560, margin:'0 auto', display:'flex', alignItems:'center', gap:10, padding:'12px 14px', borderRadius:14, background:'#1e293b', border:'1px solid rgba(255,255,255,0.18)', boxShadow:'0 10px 30px rgba(0,0,0,0.5)' }}>
           <span style={{ flex:1, fontSize:13, fontWeight:700 }}>✓✓ {deshacer} marcada como leída</span>
           <button onClick={() => { const c = deshacer; setDeshacer(null); marcar(c, false); }} style={{ padding:'7px 12px', borderRadius:10, border:'none', background:AM, color:'#1e293b', fontWeight:900, fontSize:12.5, cursor:'pointer', fontFamily:'inherit' }}>Deshacer</button>
         </div>

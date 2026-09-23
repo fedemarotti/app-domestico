@@ -5109,6 +5109,151 @@ const VgEditorCostos = ({ actual, onGuardado, onCerrar }) => {
   );
 };
 
+// ── INFORMES de Ventas y Ganancia (hoy / ayer / semana / mes / período) ──
+const VgInforme = ({ defs, R, onVerVenta }) => {
+  const [per, setPer] = useState('hoy');
+  const [dISO, setDISO] = useState(''); const [hISO, setHISO] = useState('');
+  const [verTodas, setVerTodas] = useState(false);
+  const now = Date.now(); const D = 86400000;
+  const rango = React.useMemo(() => {
+    const h0 = arInicioDeDia(now);
+    if (per === 'hoy') return { desde: h0, hasta: now, pd: h0 - D, ph: now - D, et: `Hoy · ${fmtFechaDDMMAAAA(now)}`, pet: 'ayer a esta hora' };
+    if (per === 'ayer') return { desde: h0 - D, hasta: h0 - 1, pd: h0 - 2 * D, ph: h0 - D - 1, et: `Ayer · ${fmtFechaDDMMAAAA(h0 - D)}`, pet: 'anteayer' };
+    if (per === 'semana') { const dow = (new Date(now - AR_OFFSET_MS).getUTCDay() + 6) % 7; const d = h0 - dow * D; return { desde: d, hasta: now, pd: d - 7 * D, ph: now - 7 * D, et: `Semana (desde el lunes ${fmtFechaDDMMAAAA(d).slice(0, 5)})`, pet: 'la semana pasada' }; }
+    if (per === 'mes') { const { y, m } = arParts(now); const d = arInicioDeMes(y, m); const pm = m === 0 ? 11 : m - 1, py = m === 0 ? y - 1 : y; const pd = arInicioDeMes(py, pm);
+      return { desde: d, hasta: now, pd, ph: Math.min(pd + (now - d), arFinDeMes(py, pm)), et: `${MESES_NOMBRE[m]} ${y}`, pet: 'el mismo tramo del mes pasado' }; }
+    if (dISO && hISO) { const { desde, hasta } = arRangoDesdeISO(dISO, hISO); const dur = hasta - desde + 1; return { desde, hasta, pd: desde - dur, ph: desde - 1, et: `${fmtFechaDDMMAAAA(desde)} al ${fmtFechaDDMMAAAA(hasta)}`, pet: 'el período anterior igual' }; }
+    return null;
+  }, [per, dISO, hISO]);
+
+  const calc = (lista) => {
+    const t = { n: 0, cob: 0, env: 0, neto: 0, depo: 0, vtas: 0, costo: 0, g: 0, est: 0, vend: {}, prod: {}, mod: {}, dias: {} };
+    lista.forEach(p => {
+      const r = R(p); t.n++; t.cob += r.total; t.env += r.envioFlex; t.neto += r.neto; t.depo += r.comiDepo; t.vtas += r.comiVentas; t.costo += r.costo; t.g += r.gTot;
+      if (r.cst.manEstimado) t.est++;
+      const v = t.vend[r.u] || (t.vend[r.u] = { n: 0, cob: 0, com: 0, g: 0, neto: 0 }); v.n++; v.cob += r.total; v.com += r.comiVentas; v.g += r.gTot; v.neto += r.neto;
+      const md = gModalidad(p); const mo = t.mod[md] || (t.mod[md] = { n: 0, g: 0 }); mo.n++; mo.g += r.gTot;
+      r.cst.filas.forEach(f => { const k = f.nombre.replace(/^[^\wÁÉÍÓÚáéíóúÑñ]+\s*/, ''); const o = t.prod[k] || (t.prod[k] = { u: 0, v: 0, c: 0, est: false }); o.u++; o.v += f.precio; o.c += f.costo; if (f.estimado) o.est = true; });
+      const dk = arInicioDeDia(p.ts); const di = t.dias[dk] || (t.dias[dk] = { g: 0, cob: 0, n: 0 }); di.g += r.gTot; di.cob += r.total; di.n++;
+    });
+    return t;
+  };
+  const enR = rango ? defs.filter(p => p.ts >= rango.desde && p.ts <= rango.hasta) : [];
+  const t = rango ? calc(enR) : null;
+  const tp = rango ? calc(defs.filter(p => p.ts >= rango.pd && p.ts <= rango.ph)) : null;
+  const pct = (a, b) => b > 0 ? Math.round(a / b * 100) : 0;
+  const cmp = (a, b) => { const c = gPct(a, b); return c === null ? <span style={{ color:C.tx3 }}>sin datos de {rango.pet}</span> : <span style={{ color: c >= 0 ? '#4ade80' : '#f87171' }}>{c >= 0 ? '▲ +' : '▼ '}{c}% vs {rango.pet}</span>; };
+  const chip = (k, l) => <button key={k} onClick={() => setPer(k)} style={{ padding:'8px 13px', borderRadius:20, fontSize:12, fontWeight:850, cursor:'pointer', fontFamily:'inherit',
+    background: per === k ? 'rgba(250,204,21,0.2)' : 'rgba(255,255,255,0.06)', border: per === k ? '1px solid rgba(250,204,21,0.6)' : '1px solid rgba(255,255,255,0.14)', color: per === k ? '#fde68a' : 'rgba(255,255,255,0.75)' }}>{l}</button>;
+  const fl = (l, v, color, grande) => (
+    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:10, padding:'7px 0', borderBottom: grande ? 'none' : '1px solid rgba(255,255,255,0.06)', fontSize: grande ? 17 : 14.5 }}>
+      <span style={{ color: grande ? '#fff' : 'rgba(255,255,255,0.8)', fontWeight: grande ? 900 : 600 }}>{l}</span><b style={{ color: color || '#fff', fontWeight: grande ? 900 : 800, whiteSpace:'nowrap' }}>{v}</b>
+    </div>
+  );
+  const Big = ({ lbl, val, sub, color }) => (
+    <div style={{ ...s.card, marginBottom:0, padding:12 }}>
+      <div style={{ fontSize:10, fontWeight:900, color:C.tx3, letterSpacing:'0.08em' }}>{lbl}</div>
+      <div style={{ fontSize:20, fontWeight:900, color: color || '#fff' }}>{val}</div>
+      {sub && <div style={{ fontSize:11, fontWeight:700, marginTop:2 }}>{sub}</div>}
+    </div>
+  );
+  const exportar = () => mkCsv(`ventas-y-ganancia-${rango.et.replace(/[^\w]+/g, '-')}.csv`,
+    ['Fecha','Hora','DEF','Vendió','Modalidad','Cliente','Cobrado','Envío Flex','Comi Depo','Comi Ventas','Costo mercadería','Ganancia','Margen %','Incluye estimado'],
+    [...enR].sort((a, b) => a.ts - b.ts).map(p => { const r = R(p); return [fmtFechaDDMMAAAA(p.ts), arHora(p.ts), p.codigo, r.u, gModalidad(p), p.cliente?.nombre || '', Math.round(r.total), Math.round(r.envioFlex), Math.round(r.comiDepo), Math.round(r.comiVentas), Math.round(r.costo), Math.round(r.gTot), pct(r.gTot, r.neto), r.cst.manEstimado ? 'sí' : '']; }));
+
+  const diasArr = t ? Object.entries(t.dias).map(([k, v]) => ({ t: Number(k), ...v })).sort((a, b) => a.t - b.t) : [];
+  const maxDia = Math.max(1, ...diasArr.map(d => Math.abs(d.g)));
+  const prodArr = t ? Object.entries(t.prod).map(([k, v]) => ({ nombre: k, ...v, m: v.v - v.c })).sort((a, b) => b.m - a.m) : [];
+  const vendArr = t ? Object.entries(t.vend).map(([k, v]) => ({ k, ...v })).sort((a, b) => b.g - a.g) : [];
+
+  return (
+    <div>
+      <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:8 }}>{chip('hoy','HOY')}{chip('ayer','AYER')}{chip('semana','SEMANA')}{chip('mes','MES')}{chip('periodo','📅 PERÍODO')}</div>
+      {per === 'periodo' && (
+        <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+          <input type="date" value={dISO} onChange={e => setDISO(e.target.value)} style={{ ...s.inp, flex:1 }} />
+          <input type="date" value={hISO} onChange={e => setHISO(e.target.value)} style={{ ...s.inp, flex:1 }} />
+        </div>
+      )}
+      {!rango && <div style={{ padding:20, textAlign:'center', color:C.tx3 }}>Elegí las dos fechas del período.</div>}
+      {rango && <>
+        <div style={{ fontSize:13, color:C.tx2, fontWeight:700, marginBottom:10 }}>{rango.et} · {t.n} venta{t.n !== 1 ? 's' : ''}</div>
+        {t.n === 0 ? <div style={{ ...s.card, textAlign:'center', color:C.tx3 }}>No hay ventas en este período.</div> : <>
+          <div style={{ ...s.card, textAlign:'center', padding:'16px 14px', borderColor:'rgba(74,222,128,0.4)' }}>
+            <div style={{ fontSize:11, fontWeight:900, color:C.tx3, letterSpacing:'0.12em' }}>GANANCIA DEL PERÍODO</div>
+            <div style={{ fontSize:34, fontWeight:900, color: t.g >= 0 ? '#4ade80' : '#f87171' }}>{vgFmt(t.g)}</div>
+            <div style={{ fontSize:13.5, color:C.tx2, fontWeight:700 }}>margen {pct(t.g, t.neto)}% · {cmp(t.g, tp.g)}</div>
+            {t.est > 0 && <div style={{ fontSize:11.5, color:'#fde68a', marginTop:4 }}>{t.est} venta{t.est !== 1 ? 's' : ''} con producto manual estimado al 50%</div>}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
+            <Big lbl="COBRADO" val={vgFmt(t.cob)} sub={cmp(t.cob, tp.cob)} />
+            <Big lbl="VENTAS" val={t.n} sub={cmp(t.n, tp.n)} />
+            <Big lbl="TICKET PROMEDIO" val={vgFmt(t.cob / t.n)} />
+            <Big lbl="GANANCIA POR VENTA" val={vgFmt(t.g / t.n)} color="#4ade80" />
+          </div>
+
+          <div style={s.card}>
+            <div style={s.cTit}>La cuenta del período</div>
+            {fl('Cobrado a clientes', vgFmt(t.cob))}
+            {t.env > 0 && fl('Envíos Flex (del transporte)', vgFmt(-t.env), '#fca5a5')}
+            {fl('Comi Depo', vgFmt(-t.depo), '#fca5a5')}
+            {fl('Comi Ventas (MALE + VENDEDOR 2)', vgFmt(-t.vtas), '#fca5a5')}
+            {fl('Costo de la mercadería', vgFmt(-t.costo), '#fca5a5')}
+            {fl('Ganancia', vgFmt(t.g), t.g >= 0 ? '#4ade80' : '#f87171', true)}
+          </div>
+
+          {diasArr.length > 1 && (
+            <div style={s.card}>
+              <div style={s.cTit}>Ganancia por día</div>
+              <div style={{ display:'flex', alignItems:'flex-end', gap:3, height:120, borderBottom:'1px solid rgba(255,255,255,0.12)' }}>
+                {diasArr.map(d => <div key={d.t} title={`${fmtFechaDDMMAAAA(d.t)}: ${vgFmt(d.g)} (${d.n} ventas)`} style={{ flex:1, height:`${Math.max(2, Math.abs(d.g) / maxDia * 100)}%`, background: d.g >= 0 ? '#4ade80' : '#f87171', borderRadius:'4px 4px 0 0', opacity:0.85 }} />)}
+              </div>
+              <div style={{ display:'flex', justifyContent:'space-between', fontSize:10.5, color:C.tx3, marginTop:4 }}><span>{fmtFechaDDMMAAAA(diasArr[0].t).slice(0, 5)}</span><span>máx. {vgFmt(maxDia)}</span><span>{fmtFechaDDMMAAAA(diasArr[diasArr.length - 1].t).slice(0, 5)}</span></div>
+            </div>
+          )}
+
+          <div style={s.card}>
+            <div style={s.cTit}>Por quién vendió</div>
+            {vendArr.map(v => (
+              <div key={v.k} style={{ padding:'9px 0', borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:5 }}>
+                  <span style={{ fontWeight:900, fontSize:15, color: mkColor(v.k) }}>{v.k} <span style={{ fontSize:12, color:C.tx2, fontWeight:700 }}>· {v.n} venta{v.n !== 1 ? 's' : ''}</span></span>
+                  <span style={{ fontWeight:900, fontSize:15, color:'#4ade80' }}>{vgFmt(v.g)}</span>
+                </div>
+                <div style={{ display:'flex', height:8, borderRadius:4, overflow:'hidden', background:'rgba(255,255,255,0.06)', marginBottom:5 }}><div style={{ width:`${pct(Math.max(0, v.g), Math.max(1, t.g))}%`, background: mkColor(v.k) }} /></div>
+                <div style={{ fontSize:12, color:C.tx2 }}>Cobró {vgFmt(v.cob)}{v.com ? ` · comisión ${vgFmt(v.com)}` : ''} · margen {pct(v.g, v.neto)}% · {pct(v.g, t.g)}% de la ganancia</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={s.card}>
+            <div style={s.cTit}>Qué productos dejaron más ganancia</div>
+            {prodArr.slice(0, verTodas ? 100 : 8).map(pr => (
+              <div key={pr.nombre} style={{ padding:'9px 0', borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', gap:8, alignItems:'baseline' }}>
+                  <span style={{ fontWeight:850, fontSize:14, minWidth:0 }}>{pr.nombre} <span style={{ fontSize:12, color:C.tx3 }}>× {pr.u}</span></span>
+                  <span style={{ fontWeight:900, fontSize:14, color: pr.m >= 0 ? '#86efac' : '#fca5a5', whiteSpace:'nowrap' }}>{vgFmt(pr.m)}</span>
+                </div>
+                <div style={{ fontSize:12, color:C.tx2, marginTop:2 }}>Vendido {vgFmt(pr.v)} · costo {vgFmt(pr.c)} · margen {pct(pr.m, pr.v)}%{pr.est ? ' · costo estimado' : ''}</div>
+              </div>
+            ))}
+            {prodArr.length > 8 && <button onClick={() => setVerTodas(!verTodas)} style={{ ...s.bS, marginTop:8 }}>{verTodas ? 'Ver menos' : `Ver los ${prodArr.length} productos`}</button>}
+            <div style={{ fontSize:11, color:C.tx3, marginTop:6 }}>Margen antes de comisiones.</div>
+          </div>
+
+          <div style={s.card}>
+            <div style={s.cTit}>Por modalidad</div>
+            {[['RETIRO','Retira en planta'],['FLEX','Envío Flex'],['INTERIOR','Interior']].filter(([k]) => t.mod[k]).map(([k, l]) => <React.Fragment key={k}>{fl(`${l} · ${t.mod[k].n} venta${t.mod[k].n !== 1 ? 's' : ''}`, vgFmt(t.mod[k].g), '#86efac')}</React.Fragment>)}
+          </div>
+
+          <button onClick={exportar} style={{ ...glassBtn(RGB.vd, { pad:'12px 16px', size:13.5, weight:750 }), marginBottom:12 }}>⬇ Descargar informe (Excel)</button>
+          <button onClick={() => onVerVenta && onVerVenta(rango)} style={{ ...s.bS, marginBottom:12 }}>Ver estas ventas una por una</button>
+        </>}
+      </>}
+    </div>
+  );
+};
+
 const ModuloVentasGanancia = ({ onVolver, onCambioNoLeidas }) => {
   const AM = '#facc15';
   const [pedidos, setPedidos] = useState(null);
@@ -5123,6 +5268,8 @@ const ModuloVentasGanancia = ({ onVolver, onCambioNoLeidas }) => {
   const [deshacer, setDeshacer] = useState(null); // codigo marcado recién
   const [sync, setSync] = useState(null);
   const [limite, setLimite] = useState(60);
+  const [vista, setVista] = useState('lista'); // 'lista' | 'informe'
+  const [rangoLista, setRangoLista] = useState(null);
 
   const cargar = async () => {
     setErr(null);
@@ -5155,6 +5302,7 @@ const ModuloVentasGanancia = ({ onVolver, onCambioNoLeidas }) => {
   let lista = defs;
   if (filtro === 'sinleer') lista = lista.filter(esNoLeida);
   if (filtro === 'fecha' && fechaISO) { const { desde, hasta } = arRangoDesdeISO(fechaISO, fechaISO); lista = lista.filter(p => p.ts >= desde && p.ts <= hasta); }
+  if (rangoLista) lista = lista.filter(p => p.ts >= rangoLista.desde && p.ts <= rangoLista.hasta);
   const visibles = lista.slice(0, limite);
   const hoy0 = arInicioDeDia(Date.now());
   const etiquetaDia = ts => { const d = arInicioDeDia(ts); return d === hoy0 ? 'HOY' : d === hoy0 - 86400000 ? 'AYER' : fmtFechaDDMMAAAA(ts); };
@@ -5296,6 +5444,15 @@ const ModuloVentasGanancia = ({ onVolver, onCambioNoLeidas }) => {
         <div style={{ fontSize:22, fontWeight:900, letterSpacing:'-0.4px' }}>💰 Ventas</div>
         {noLeidas > 0 && <span style={{ fontSize:11.5, fontWeight:900, background:'#ef4444', color:'#fff', borderRadius:20, padding:'4px 10px' }}>{noLeidas} sin leer</span>}
       </div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:12 }}>
+        {[['lista','💬 Venta por venta'],['informe','📊 Informes']].map(([k, l]) => (
+          <button key={k} onClick={() => { setVista(k); setRangoLista(null); }} style={{ padding:'11px 8px', borderRadius:12, fontSize:13, fontWeight:900, cursor:'pointer', fontFamily:'inherit',
+            background: vista === k ? 'linear-gradient(180deg,rgba(250,204,21,0.22),rgba(250,204,21,0.08))' : 'rgba(255,255,255,0.05)', border: vista === k ? '1px solid rgba(250,204,21,0.6)' : '1px solid rgba(255,255,255,0.12)', color: vista === k ? '#fde68a' : 'rgba(255,255,255,0.7)' }}>{l}</button>
+        ))}
+      </div>
+      {vista === 'informe' && !sinCostos && <VgInforme defs={defs} R={R} onVerVenta={(rg) => { setRangoLista(rg); setFiltro('todas'); setVista('lista'); }} />}
+      {vista === 'lista' && <>
+      {rangoLista && <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10, padding:'8px 12px', borderRadius:10, background:'rgba(250,204,21,0.1)', border:'1px solid rgba(250,204,21,0.35)', fontSize:12.5, fontWeight:700, color:'#fde68a' }}><span style={{ flex:1 }}>Mostrando: {rangoLista.et}</span><button onClick={() => setRangoLista(null)} style={{ padding:'4px 10px', borderRadius:8, border:'none', background:'rgba(255,255,255,0.12)', color:'#fff', fontWeight:800, cursor:'pointer', fontFamily:'inherit' }}>✕ Ver todas</button></div>}
       <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:10 }}>
         {[['todas','Todas'],['sinleer','Sin leer'],['fecha','📅 Fecha']].map(([k, l]) => (
           <button key={k} onClick={() => { setFiltro(k); setLimite(60); }} style={{ padding:'7px 12px', borderRadius:20, fontSize:11.5, fontWeight:800, cursor:'pointer', fontFamily:'inherit',
@@ -5341,6 +5498,7 @@ const ModuloVentasGanancia = ({ onVolver, onCambioNoLeidas }) => {
       })}
       {pedidos && !sinCostos && lista.length > limite && <button onClick={() => setLimite(l => l + 60)} className="sel-btn" style={{ ...s.bS, marginTop:6 }}>Ver más ventas anteriores</button>}
 
+      </>}
       {deshacer && (
         <div style={{ position:'fixed', left:16, right:16, bottom:20, zIndex:500, maxWidth:560, margin:'0 auto', display:'flex', alignItems:'center', gap:10, padding:'12px 14px', borderRadius:14, background:'#1e293b', border:'1px solid rgba(255,255,255,0.18)', boxShadow:'0 10px 30px rgba(0,0,0,0.5)' }}>
           <span style={{ flex:1, fontSize:13, fontWeight:700 }}>✓✓ {deshacer} marcada como leída</span>

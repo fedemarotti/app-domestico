@@ -5823,6 +5823,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
                 <Tile icon="📊" label={<>LIQUIDA-<br/>CIONES</>} rgb={RGB.az} onClick={()=>setEtapa('liquidaciones')} />
                 <Tile icon="🛵" label={<>LIQUIDACIÓN<br/>FLEX</>} rgb={RGB.na} onClick={()=>setEtapa('liquidacion_flex')} />
                 <Tile icon="📈" label="GESTIÓN" rgb={RGB.vi} onClick={()=>setEtapa('gestion')} />
+                <Tile icon="📣" label="MARKETING" rgb="244,114,182" onClick={()=>setEtapa('marketing')} />
                 <Tile icon="🧪" label={<>FÓRMULAS<br/>PRODUCCIÓN</>} rgb={RGB.vd} onClick={()=>{ window.location.href = 'formulas-produccion.html'; }} />
               </G>
             </>)}
@@ -5861,6 +5862,13 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 
         {/* ── GESTIÓN (solo admin) ── */}
         {etapa==='gestion' && esAdmin(usuarioActual) && <ModuloGestion onVolver={irInicio} />}
+        {etapa==='marketing' && esAdmin(usuarioActual) && (
+          <div>
+            <button onClick={irInicio} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', marginBottom:12, fontFamily:'inherit' }}>🏠 Inicio</button>
+            <div style={{ fontSize:11.5, color:C.tx3, marginBottom:8 }}>Vista idéntica a la del usuario de marketing (sin costos ni comisiones).</div>
+            <ModuloMarketing />
+          </div>
+        )}
         {etapa==='ventas_ganancia' && esAdmin(usuarioActual) && <ModuloVentasGanancia onVolver={irInicio} onCambioNoLeidas={setNoLeidasVG} />}
 
       </div>

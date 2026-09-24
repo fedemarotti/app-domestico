@@ -150,7 +150,12 @@ const FRAGANCIAS = [
   { label:'Limón',       icon:'🍋' }, { label:'Olor a Limpio',icon:'✨' },
 ];
 const PRECIO_ENVASE = 5000; // 24/09/2026: balde pasa de $4.000 a $5.000
-// Envases: baldes (con cargo) y cajas (sin cargo) pueden CONVIVIR en un pedido.
+const PRECIO_CAJA = 1500;   // 24/09/2026: las cajas dejan de ser sin cargo → $1.500 c/u
+// Cada pedido guarda el precio con que se cotizó (extras.precioCaja / extras.precioBalde).
+// Pedidos anteriores no lo tienen: caja = sin cargo, balde = precio actual (retrocompat).
+const precioCajaDe  = ex => typeof ex?.precioCaja  === 'number' ? ex.precioCaja  : 0;
+const precioBaldeDe = ex => typeof ex?.precioBalde === 'number' ? ex.precioBalde : PRECIO_ENVASE;
+// Envases: baldes y cajas (ambos con cargo desde 24/09/2026) pueden CONVIVIR en un pedido.
 // Modelo nuevo: envases = cant. de baldes; extras.cajas = cant. de cajas.
 // Retrocompat: extras.tipoEnvase ('cajas'/'bolsas' de la versión anterior) y pedidos viejos sin nada.
 const desgloseEnvases = (env, ex) => {
@@ -160,13 +165,13 @@ const desgloseEnvases = (env, ex) => {
   if (t === 'bolsas') return { baldes: 0, cajas: 0 };
   return { baldes: env ?? 0, cajas: 0 };
 };
-const costoEnvases = (env, ex) => desgloseEnvases(env, ex).baldes * PRECIO_ENVASE;
+const costoEnvases = (env, ex) => { const d = desgloseEnvases(env, ex); return d.baldes * precioBaldeDe(ex) + d.cajas * precioCajaDe(ex); };
 const minBultosDe = (env, ex) => { const d = desgloseEnvases(env, ex); return Math.max(1, d.baldes + d.cajas); };
 const lineasEnvasesWA = (env, ex) => {
   const { baldes, cajas } = desgloseEnvases(env, ex);
   const out = [];
-  if (baldes > 0) out.push(`• 🪣 Envases (${baldes}) — *${fmt(baldes*PRECIO_ENVASE)}*`);
-  if (cajas > 0)  out.push(`• 📦 En caja${cajas!==1?'s':''} sin cargo (${cajas})`);
+  if (baldes > 0) out.push(`• 🪣 Baldes (${baldes}) — *${fmt(baldes*precioBaldeDe(ex))}*`);
+  if (cajas > 0)  out.push(precioCajaDe(ex) > 0 ? `• 📦 Cajas (${cajas}) — *${fmt(cajas*precioCajaDe(ex))}*` : `• 📦 En caja${cajas!==1?'s':''} sin cargo (${cajas})`);
   if (baldes === 0 && cajas === 0) out.push(`• 🛍️ _Sin envase — se entrega en bolsas (sin cargo)_`);
   return out;
 };
@@ -639,12 +644,12 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
                 </div>
               </div>
               <div style={{ marginBottom:10 }}>
-                <div style={{ fontSize:12, color:'rgba(255,255,255,0.6)', fontWeight:700, marginBottom:8 }}>📦 Cajas — sin cargo</div>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,0.6)', fontWeight:700, marginBottom:8 }}>📦 Cajas — {fmt(PRECIO_CAJA)} c/u (con cargo)</div>
                 <div style={{ display:'flex', alignItems:'center', gap:16 }}>
                   <button onClick={()=>setCajas(Math.max(0,cajas-1))} style={btnStyle}>−</button>
                   <span style={{ fontSize:26, fontWeight:900, minWidth:44, textAlign:'center' }}>{cajas}</span>
                   <button onClick={()=>setCajas(cajas+1)} style={btnStyle}>+</button>
-                  {cajas>0 && <span style={{ color:'#4ade80', fontWeight:800 }}>Sin cargo</span>}
+                  {cajas>0 && <span style={{ color:C.na, fontWeight:800 }}>{fmt(cajas*PRECIO_CAJA)}</span>}
                 </div>
               </div>
               <button onClick={elegirSinEnvase} className="sel-btn" style={{
@@ -797,8 +802,8 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
   const [extras, setExtras]   = useState(() => {
     const d = desgloseEnvases(preloaded?.envases || 0, preloaded?.extras);
     return preloaded?.extras
-      ? { ...preloaded.extras, cajas: d.cajas }
-      : { agregados:[], envio:null, bultos: Math.max(1, d.baldes + d.cajas), esInterior:false, retiraLocal:false, localidad:'', cajas:0 };
+      ? { ...preloaded.extras, cajas: d.cajas, precioCaja: PRECIO_CAJA, precioBalde: PRECIO_ENVASE }
+      : { agregados:[], envio:null, bultos: Math.max(1, d.baldes + d.cajas), esInterior:false, retiraLocal:false, localidad:'', cajas:0, precioCaja: PRECIO_CAJA, precioBalde: PRECIO_ENVASE };
   });
   const [paso, setPaso]       = useState('inicio');
   const [cur, setCur]         = useState({ tipo:null, cantidad:null, calidad:null });
@@ -838,7 +843,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
   }, [envases, extras.cajas]);
 
   const totalProd    = items.reduce((s,i)=>s+i.precio,0);
-  const totalEnvases = envases * PRECIO_ENVASE; // envases = baldes (las cajas no se cobran)
+  const totalEnvases = envases * PRECIO_ENVASE + (extras.cajas || 0) * PRECIO_CAJA; // baldes + cajas (ambos con cargo)
   const totalAgr     = extras.agregados.reduce((s,a)=>s+(parseFloat(a.precio)||0),0);
   const totalEnvio   = (extras.retiraLocal||extras.esInterior) ? 0
     : typeof extras.envio === 'number' ? extras.envio
@@ -1864,7 +1869,8 @@ function imprimirPedido(pedido, solo=null) {
       return rows;
     }).join('');
 
-    const precioEnvaseUnit = dBaldes>0 ? tot.envases/dBaldes : 0;
+    const precioCajaUnit = precioCajaDe(ex);
+    const precioEnvaseUnit = dBaldes>0 ? ((tot.envases||0) - dCajas*precioCajaUnit)/dBaldes : 0;
     const envasesRowHtml = [
       ...(dBaldes>0 ? Array.from({length:dBaldes}).map((_,i)=>`${divRow}
       <tr>
@@ -1873,8 +1879,8 @@ function imprimirPedido(pedido, solo=null) {
       </tr>`) : []),
       ...(dCajas>0 ? [`${divRow}
       <tr>
-        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0284c7;font-weight:900;margin-right:6px;">▸</span><strong>📦 EN CAJAS SIN CARGO (${dCajas} CAJA${dCajas!==1?'S':''})</strong></td>
-        <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">SIN CARGO</td>
+        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0284c7;font-weight:900;margin-right:6px;">▸</span><strong>${precioCajaUnit>0 ? `📦 CAJAS (${dCajas}) × ${fmtDoc(precioCajaUnit)}` : `📦 EN CAJAS SIN CARGO (${dCajas} CAJA${dCajas!==1?'S':''})`}</strong></td>
+        <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">${precioCajaUnit>0 ? fmtDoc(dCajas*precioCajaUnit) : 'SIN CARGO'}</td>
       </tr>`] : []),
       ...(dBaldes===0 && dCajas===0 ? [`${divRow}
       <tr>
@@ -2029,7 +2035,7 @@ function imprimirPedido(pedido, solo=null) {
         </div>`;
       }).join('')}
       ${(ex.agregados||[]).length>0?`<div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;margin:10px 0 5px;border-top:2px solid #e2e8f0;padding-top:8px;">⭐ Productos Extra</div>${ex.agregados.map(a=>`<div style="padding:8px 10px;border-left:4px solid #0d5c3a;background:#f8fafc;margin-bottom:7px;border-radius:4px;display:flex;justify-content:space-between;align-items:center;"><div><div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;">${lpEsc(lpTit(a))}</div>${a.listaId ? lpSubHtml(a, { precio:false, grande:true }) : ''}</div><div style="font-size:13px;font-weight:700;color:#0d5c3a;">${a.listaId && !(parseFloat(a.precio) > 0) ? 'SIN CARGO' : fmtDoc(parseFloat(a.precio)||0)}</div></div>`).join('')}`:''}
-      ${dBaldes>0?`<div style="padding:8px 10px;border-left:4px solid #f97316;background:#fff7ed;margin-bottom:7px;border-radius:4px;font-weight:800;">🪣 Envases vacíos (baldes): ${dBaldes}</div>`:''}${dCajas>0?`<div style="padding:8px 10px;border-left:4px solid #0284c7;background:#e0f2fe;margin-bottom:7px;border-radius:4px;font-weight:800;">📦 EN CAJAS SIN CARGO: ${dCajas} caja${dCajas!==1?'s':''}</div>`:''}${dBaldes===0&&dCajas===0?`<div style="padding:8px 10px;border-left:4px solid #b45309;background:#fefce8;margin-bottom:7px;border-radius:6px;font-size:12px;font-weight:800;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:''}
+      ${dBaldes>0?`<div style="padding:8px 10px;border-left:4px solid #f97316;background:#fff7ed;margin-bottom:7px;border-radius:4px;font-weight:800;">🪣 Envases vacíos (baldes): ${dBaldes}</div>`:''}${dCajas>0?`<div style="padding:8px 10px;border-left:4px solid #0284c7;background:#e0f2fe;margin-bottom:7px;border-radius:4px;font-weight:800;">📦 ${precioCajaDe(ex)>0?'EN CAJAS':'EN CAJAS SIN CARGO'}: ${dCajas} caja${dCajas!==1?'s':''}</div>`:''}${dBaldes===0&&dCajas===0?`<div style="padding:8px 10px;border-left:4px solid #b45309;background:#fefce8;margin-bottom:7px;border-radius:6px;font-size:12px;font-weight:800;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:''}
       <div style="margin-top:10px;padding:8px 12px;background:#e0f2fe;border-left:4px solid #0284c7;border-radius:6px;font-size:11px;">
         <span style="font-weight:900;color:#0284c7;">📦 ENTREGA:</span>
         <span style="font-weight:700;margin-left:6px;">${esR?'RETIRA EN PLANTA':esI?'INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI':'ENVÍO FLEX AMBA — '+( cliente.localidad||ex.localidad||'')}</span>
@@ -2079,7 +2085,7 @@ function imprimirPedido(pedido, solo=null) {
         <div style="font-size:22px;font-weight:900;letter-spacing:1px;">${bultoPalabra}</div>
       </div>
       ${dCajas>0?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #0284c7;border-radius:6px;text-align:center;">
-        <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#0284c7;line-height:1.5;">📦 EN CAJAS SIN CARGO: ${dCajas} CAJA${dCajas!==1?'S':''}${dBaldes>0?` + ${dBaldes} BALDE${dBaldes!==1?'S':''}`:''}</div>
+        <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#0284c7;line-height:1.5;">📦 ${precioCajaDe(ex)>0?'EN CAJAS':'EN CAJAS SIN CARGO'}: ${dCajas} CAJA${dCajas!==1?'S':''}${dBaldes>0?` + ${dBaldes} BALDE${dBaldes!==1?'S':''}`:''}</div>
       </div>`:''}${dBaldes===0&&dCajas===0?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #b45309;border-radius:6px;text-align:center;">
         <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#b45309;line-height:1.5;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS<br/>POR ELECCIÓN DEL CLIENTE.</div>
       </div>`:''}
@@ -2246,11 +2252,11 @@ function imprimirPedido(pedido, solo=null) {
           <span>🪣 <strong>ENVASE ${i+1} de ${dBaldes}</strong></span>
         </div>`).join('')}`:'',
       dCajas>0?`
-      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:6px;color:#0284c7;">📦 Cajas (sin cargo)</div>
+      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:6px;color:#0284c7;">📦 Cajas${precioCajaDe(ex)>0?'':' (sin cargo)'}</div>
       ${Array.from({length:dCajas}).map((_,i)=>`
         <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
           <div style="width:18px;height:18px;border:2px solid #0284c7;border-radius:3px;flex-shrink:0;"></div>
-          <span>📦 <strong>CAJA ${i+1} de ${dCajas}</strong> — SIN CARGO</span>
+          <span>📦 <strong>CAJA ${i+1} de ${dCajas}</strong>${precioCajaDe(ex)>0?'':' — SIN CARGO'}</span>
         </div>`).join('')}`:'',
       (dBaldes===0&&dCajas===0)?`\n      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:4px;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:'',
     ].join('');
@@ -2437,7 +2443,12 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
       const totalProd  = carrito.reduce((s,i) => s + Number(i.precio||0), 0);
       // Baldes heredados de la PRE: se respeta el importe ya cotizado (una PRE hecha con el precio viejo
       // del balde no cambia al pasar a DEF). Si la PRE no lo tiene guardado, se calcula con el precio actual.
-      const totalEnv   = (typeof pre.totales?.envases === 'number' && dEnv.baldes > 0) ? pre.totales.envases : dEnv.baldes * PRECIO_ENVASE; // cajas sin cargo
+      const heredaEnv  = typeof pre.totales?.envases === 'number' && (dEnv.baldes + dEnv.cajas) > 0;
+      const totalEnv   = heredaEnv ? pre.totales.envases : dEnv.baldes * PRECIO_ENVASE + dEnv.cajas * PRECIO_CAJA;
+      // Precios unitarios con que quedó cotizado (para imprimibles y WhatsApp)
+      const precioCajaDEF  = typeof pre.extras?.precioCaja === 'number' ? pre.extras.precioCaja : (heredaEnv ? 0 : PRECIO_CAJA);
+      const precioBaldeDEF = typeof pre.extras?.precioBalde === 'number' ? pre.extras.precioBalde
+                           : (heredaEnv && dEnv.baldes > 0 ? (pre.totales.envases - dEnv.cajas * precioCajaDEF) / dEnv.baldes : PRECIO_ENVASE);
       const totalAgr   = agregadosHeredados.reduce((s,a) => s + (parseFloat(a.precio)||0), 0);
       // La entrega NO cambió respecto de la PRE → heredar el envío YA COBRADO tal cual,
       // sin recalcular. PRE y DEF nunca pueden diferir en plata si no se editó nada.
@@ -2465,7 +2476,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
         ts: pedidoFinal ? pedidoFinal.ts : Date.now(),
         cliente, items:carrito,
         envases:dEnv.baldes,
-        extras:{ ...extrasUsados, agregados:agregadosHeredados, cajas:dEnv.cajas },
+        extras:{ ...extrasUsados, agregados:agregadosHeredados, cajas:dEnv.cajas, precioCaja: precioCajaDEF, precioBalde: precioBaldeDEF },
         totales:{ productos:totalProd, envases:totalEnv, agregados:totalAgr, envio:totalEnvio, total },
         zonaEnvio:zona, estado: pedidoFinal ? pedidoFinal.estado : 'pendiente',
         creadoPor: pedidoFinal ? pedidoFinal.creadoPor : (usuarioActual?.email || null)
@@ -3134,8 +3145,8 @@ _Doméstico · Moreno, Bs. As._`
           </div>
         ))}
         {(ex.agregados||[]).map((a,i) => <div key={i} style={{ fontSize:13 }}>• {a.nombre} — <span style={{ color:'#f97316' }}>{precioAgrTxt(a)}</span></div>)}
-        {desgloseEnvases(env,ex).baldes>0 && <div style={{ fontSize:13, marginBottom:4 }}>🪣 Envases ({desgloseEnvases(env,ex).baldes}) — <span style={{ color:'#f97316' }}>{fmt(tot.envases)}</span></div>}
-        {desgloseEnvases(env,ex).cajas>0 && <div style={{ fontSize:13, marginBottom:4 }}>📦 En cajas sin cargo ({desgloseEnvases(env,ex).cajas})</div>}
+        {desgloseEnvases(env,ex).baldes>0 && <div style={{ fontSize:13, marginBottom:4 }}>🪣 Baldes ({desgloseEnvases(env,ex).baldes}) — <span style={{ color:'#f97316' }}>{fmt((tot.envases||0) - desgloseEnvases(env,ex).cajas*precioCajaDe(ex))}</span></div>}
+        {desgloseEnvases(env,ex).cajas>0 && <div style={{ fontSize:13, marginBottom:4 }}>{precioCajaDe(ex)>0 ? <>📦 Cajas ({desgloseEnvases(env,ex).cajas}) — <span style={{ color:'#f97316' }}>{fmt(desgloseEnvases(env,ex).cajas*precioCajaDe(ex))}</span></> : <>📦 En cajas sin cargo ({desgloseEnvases(env,ex).cajas})</>}</div>}
         {desgloseEnvases(env,ex).baldes===0 && desgloseEnvases(env,ex).cajas===0 && <div style={{ fontSize:12, color:'rgba(255,200,0,0.7)' }}>🛍️ Sin envase — se entrega en bolsas</div>}
       </div>
 
@@ -5357,7 +5368,7 @@ const vgCostoDEF = (p, C, costosManuales = {}) => {
   const env = desgloseEnvases(p.envases || 0, p.extras);
   if (env.baldes || env.cajas) {
     const c = env.baldes * C.balde + env.cajas * C.caja;
-    add(`Envases${env.baldes ? ` · ${env.baldes} balde${env.baldes > 1 ? 's' : ''}` : ''}${env.cajas ? ` · ${env.cajas} caja${env.cajas > 1 ? 's' : ''}` : ''}`, vgN(p.totales?.envases), c, env.cajas ? 'las cajas no se cobran al cliente' : '');
+    add(`Envases${env.baldes ? ` · ${env.baldes} balde${env.baldes > 1 ? 's' : ''}` : ''}${env.cajas ? ` · ${env.cajas} caja${env.cajas > 1 ? 's' : ''}` : ''}`, vgN(p.totales?.envases), c, env.cajas && !precioCajaDe(p.extras) ? 'cajas sin cargo (pedido anterior al 24/09)' : '');
   }
   return { cat, det, filas, manPrecio, manCosto, manEstimado };
 };

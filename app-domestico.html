@@ -172,7 +172,9 @@ const lineasEnvasesWA = (env, ex) => {
 };
 // Tarifas Flex por bulto. 24/09/2026: Moreno 4500→5200, Cordón 1 5500→6500, Cordón 2 6500→7500, Cordón 3 9500→10500.
 // `previo` = tarifa anterior: solo para reconocer la zona de pedidos viejos en Liquidación Flex.
-const FLEX_CAMBIO_TARIFA_TS = Date.UTC(2026, 8, 24, 3, 0, 0); // 24/09/2026 00:00 AR
+const FLEX_CAMBIO_TARIFA_TS = 1790211889602; // 23/09/2026 22:04 AR — momento en que se publicaron las tarifas nuevas
+// Precio de un agregado para textos: bonificaciones de la lista en $0 → SIN CARGO
+const precioAgrTxt = a => (a && a.listaId && !(parseFloat(a.precio) > 0)) ? 'SIN CARGO' : fmt(parseFloat(a?.precio) || 0);
 const ZONAS_ENVIO = [
   { zona:'Moreno', previo:4500, color:'#ef4444', precio:5200, localidades:['MORENO','PASO DEL REY','CUARTEL V','FRANCISCO ALVAREZ','LA REJA','TRUJUI','BORDENAVE'] },
   { zona:'Cordón 1', previo:5500, color:'#fb923c', precio:6500, localidades:['JOSE C PAZ','JOSE C. PAZ','SAN MIGUEL','ITUZAINGO','ITUZAINGÓ','MERLO','MALVINAS ARGENTINAS'] },
@@ -574,7 +576,7 @@ const ItemLibre = ({ lista, setLista }) => {
       <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:12 }}>
         <div><label style={s.lbl}>Descripción</label><input value={nom} onChange={e=>setNom(e.target.value)} style={s.inp} placeholder="Ej: Tanque plástico, dispenser..." /></div>
         <div><label style={s.lbl}>Importe</label><input type="number" value={prec} onChange={e=>setPrec(e.target.value)} style={s.inp} placeholder="$0" /></div>
-        <button onClick={()=>{ if(!nom||!prec) return; setLista([...lista,{id:uid(),nombre:nom,precio:parseFloat(prec)}]); setNom(''); setPrec(''); }} disabled={!nom||!prec} style={{...s.bS, opacity:(!nom||!prec)?0.45:1}}>Agregar</button>
+        <button onClick={()=>{ if(!nom||!prec) return; setLista([...lista,{id:uid(),nombre:String(nom).replace(/[<>]/g,'').replace(/\s+/g,' ').trim(),precio:parseFloat(prec)}]); setNom(''); setPrec(''); }} disabled={!nom||!prec} style={{...s.bS, opacity:(!nom||!prec)?0.45:1}}>Agregar</button>
       </div>
       {lista.map((a,i)=>(
         <div key={a.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'9px 12px', background:'rgba(255,255,255,0.05)', borderRadius:9, marginBottom:7 }}>
@@ -896,7 +898,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
       `📋 *Código: ${codigo}*`,``,
       `📦 *Productos:*`,
       ...items.map(i=>`• ${i.nombre} — *${fmt(i.precio)}*`),
-      ...extras.agregados.map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),
+      ...extras.agregados.map(a=>`• ${a.nombre} — *${precioAgrTxt(a)}*`),
       ...lineasEnvasesWA(envases, extras),``,
       `📦 *MODALIDAD DE ENTREGA*`,
       (extras.retiraLocal||modalidadPRE==='retiro')?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:(extras.esInterior||modalidadPRE==='interior')?`🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`:typeof extras.envio==='number'&&extras.localidad?`🚚 *ENVÍO FLEX AMBA* — ${extras.localidad} — *${fmt(extras.envio)}*`:zona?`🚚 *ENVÍO FLEX AMBA* — ${extras.localidad} (${zona.zona}) · ${extras.bultos} bulto${extras.bultos!==1?'s':''} — *${fmt(totalEnvio)}*`:(extras.localidad||modalidadPRE==='flex')?`🚚 *ENVÍO FLEX AMBA*${extras.localidad?` — ${extras.localidad}`:''}`:null,``,
@@ -1192,7 +1194,7 @@ const DetalleDEF = ({ itemPRE, onConfirm }) => {
       <div>
         <SH step="Detalle · Manual" title={nombre} />
         <div style={{...s.card, textAlign:'center'}}>
-          <div style={{ fontSize:13, color:'rgba(255,255,255,0.6)' }}>✏️ Producto cargado a mano — sin colores ni fragancias.</div>
+          <div style={{ fontSize:13, color:'rgba(255,255,255,0.6)' }}>{itemPRE?.listaId ? `📋 Producto de la lista de precios${itemPRE.variante ? ' · ' + itemPRE.variante : ''} — no pide colores.` : '✏️ Producto cargado a mano — sin colores ni fragancias.'}</div>
           <div style={{ fontSize:13, color:'#4ade80', fontWeight:700, marginTop:8 }}>✓ Confirmado automáticamente</div>
         </div>
       </div>
@@ -1709,7 +1711,7 @@ const ResumenItemDEF = ({ det, itemPRE }) => {
     const d = det.divisiones[0];
     partes.push(d.fragancia ? `${d.fragancia} ${d.cantidad}lts` : `Color: ${d.color}`);
   }
-  if (partes.length === 0 && (det.tipoItem === 'manual' || itemPRE?.tipoItem === 'manual')) partes.push('✏️ Producto manual');
+  if (partes.length === 0 && (det.tipoItem === 'manual' || itemPRE?.tipoItem === 'manual')) partes.push((det.listaId || itemPRE?.listaId) ? `📋 Lista de precios${(det.variante || itemPRE?.variante) ? ' · ' + (det.variante || itemPRE?.variante) : ''}` : '✏️ Producto manual');
   return <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)', marginTop:3 }}>{partes.join(' · ')}</div>;
 };
 
@@ -2433,7 +2435,9 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
         ? extras.agregados
         : (pre.extras?.agregados ?? []);
       const totalProd  = carrito.reduce((s,i) => s + Number(i.precio||0), 0);
-      const totalEnv   = dEnv.baldes * PRECIO_ENVASE; // solo los baldes se cobran; cajas sin cargo
+      // Baldes heredados de la PRE: se respeta el importe ya cotizado (una PRE hecha con el precio viejo
+      // del balde no cambia al pasar a DEF). Si la PRE no lo tiene guardado, se calcula con el precio actual.
+      const totalEnv   = (typeof pre.totales?.envases === 'number' && dEnv.baldes > 0) ? pre.totales.envases : dEnv.baldes * PRECIO_ENVASE; // cajas sin cargo
       const totalAgr   = agregadosHeredados.reduce((s,a) => s + (parseFloat(a.precio)||0), 0);
       // La entrega NO cambió respecto de la PRE → heredar el envío YA COBRADO tal cual,
       // sin recalcular. PRE y DEF nunca pueden diferir en plata si no se editó nada.
@@ -2852,7 +2856,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
               `🛒 *PRODUCTOS Y DETALLE*`,
               `━━━━━━━━━━━━━━━━`,
               ...lineasProductos,
-              ...(ex.agregados||[]).map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),
+              ...(ex.agregados||[]).map(a=>`• ${a.nombre} — *${precioAgrTxt(a)}*`),
               ...lineasEnvasesWA(env, ex),
               ``,
               `━━━━━━━━━━━━━━━━`,
@@ -3050,7 +3054,7 @@ _Doméstico · Moreno, Bs. As._`
     cl.observaciones?`⚠️ *OBSERVACIONES: ${cl.observaciones.toUpperCase()}*`:null,
     ``,`━━━━━━━━━━━━━━━━`,`🛒 *PRODUCTOS Y DETALLE*`,`━━━━━━━━━━━━━━━━`,
     ...lineasProductos,
-    ...(ex.agregados||[]).map(a=>`• ${a.nombre} — *${fmt(a.precio)}*`),
+    ...(ex.agregados||[]).map(a=>`• ${a.nombre} — *${precioAgrTxt(a)}*`),
     ...lineasEnvasesWA(env, ex),
     ``,`━━━━━━━━━━━━━━━━`,`📦 *MODALIDAD DE ENTREGA*`,
     ex.retiraLocal?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:
@@ -3129,7 +3133,7 @@ _Doméstico · Moreno, Bs. As._`
             {detalleItem(it).filter(l=>l!=null).map((l,j) => <div key={j} style={{ fontSize:11, color:'rgba(255,255,255,0.55)', marginTop:2 }}>{String(l).trim()}</div>)}
           </div>
         ))}
-        {(ex.agregados||[]).map((a,i) => <div key={i} style={{ fontSize:13 }}>• {a.nombre} — <span style={{ color:'#f97316' }}>{fmt(a.precio)}</span></div>)}
+        {(ex.agregados||[]).map((a,i) => <div key={i} style={{ fontSize:13 }}>• {a.nombre} — <span style={{ color:'#f97316' }}>{precioAgrTxt(a)}</span></div>)}
         {desgloseEnvases(env,ex).baldes>0 && <div style={{ fontSize:13, marginBottom:4 }}>🪣 Envases ({desgloseEnvases(env,ex).baldes}) — <span style={{ color:'#f97316' }}>{fmt(tot.envases)}</span></div>}
         {desgloseEnvases(env,ex).cajas>0 && <div style={{ fontSize:13, marginBottom:4 }}>📦 En cajas sin cargo ({desgloseEnvases(env,ex).cajas})</div>}
         {desgloseEnvases(env,ex).baldes===0 && desgloseEnvases(env,ex).cajas===0 && <div style={{ fontSize:12, color:'rgba(255,200,0,0.7)' }}>🛍️ Sin envase — se entrega en bolsas</div>}
@@ -5004,7 +5008,23 @@ const LP_SEED = [
   { id:'envio-extra', cat:'Servicios', nombre:'Envío extra', unidad:'u', escalas:lpE(1, 6500), cantidades:[1,2,3] },
 ].map((p, i) => ({ activo: true, variantes: [], revisar: '', ...p, orden: i }));
 
-const lpNum = v => { const n = typeof v === 'number' ? v : parseFloat(String(v ?? '').replace(',', '.')); return isFinite(n) ? n : 0; };
+// Números en formato argentino: "18.433,69" → 18433.69 · "1.500" → 1500 · "2,5" → 2.5 · "0.5" → 0.5
+const lpNum = v => {
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  let s = String(v ?? '').trim().replace(/[$\s]/g, '');
+  if (!s) return 0;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+  const n = parseFloat(s); return isFinite(n) ? n : 0;
+};
+// Cantidades rápidas: separadas por espacio, ";" o ", ". En productos por unidad también por "," (1,2,5,30).
+const lpParseCantidades = (txt, unidad) => {
+  if (Array.isArray(txt)) return txt.map(lpNum).filter(n => n > 0);
+  let tokens = String(txt || '').split(/[;\s]+|,\s+/).filter(Boolean);
+  if ((unidad || 'u') === 'u') tokens = tokens.flatMap(x => x.split(','));
+  const out = []; tokens.map(lpNum).forEach(n => { if (n > 0 && !out.includes(n)) out.push(n); });
+  return out.sort((a, b) => a - b);
+};
 const lpFmtCant = n => String(Math.round(n * 100) / 100).replace('.', ',');
 const lpFmt2 = n => '$' + (Math.round(n * 100) / 100).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 // Precio unitario según la cantidad: toma el tramo con mayor "desde" que no supere la cantidad
@@ -5142,9 +5162,14 @@ const ModuloListaPrecios = ({ onVolver }) => {
     if (!edit.nombre.trim()) { setMsg('Falta el nombre.'); return; }
     const limpio = { ...edit, nombre: edit.nombre.replace(/[<>]/g, '').trim(),
       escalas: (edit.escalas || []).filter(e => String(e.desde).trim() !== '').map(e => ({ desde: lpNum(e.desde), precio: lpNum(e.precio) })).sort((a, b) => a.desde - b.desde),
-      cantidades: (Array.isArray(edit.cantidades) ? edit.cantidades : String(edit.cantidades).split(/[;\s]+|,(?=\s*\d)/)).map(lpNum).filter(n => n > 0),
+      cantidades: lpParseCantidades(edit.cantidades, edit.unidad),
       variantes: (Array.isArray(edit.variantes) ? edit.variantes : String(edit.variantes).split(',')).map(v => String(v).trim()).filter(Boolean) };
     if (!limpio.escalas.length) limpio.escalas = [{ desde: 1, precio: 0 }];
+    if (limpio.escalas.some(e => e.precio < 0 || e.desde < 0)) { setMsg('Los precios y las cantidades no pueden ser negativos.'); return; }
+    if (new Set(limpio.escalas.map(e => e.desde)).size !== limpio.escalas.length) { setMsg('Hay dos escalas con el mismo "Desde". Corregí una.'); return; }
+    if (limpio.activo !== false && limpio.cat !== 'Bonificaciones' && !(lpPrecioBase(limpio) > 0)) { setMsg('Falta el precio. Si todavía no lo tenés, desmarcá "Visible para vendedores" para guardarlo oculto.'); return; }
+    if (costoEd.trim() !== '' && lpNum(costoEd) < 0) { setMsg('El costo no puede ser negativo.'); return; }
+    if (!limpio.cantidades.length) limpio.cantidades = [1, 2, 5, 10];
     limpio.revisar = ''; // guardarlo = revisado
     setMsg('Guardando…');
     const err = await lpGuardar(limpio);

@@ -564,8 +564,10 @@ const ItemLibre = ({ lista, setLista }) => {
   const [nom, setNom] = useState('');
   const [prec, setPrec] = useState('');
   return (
+    <div>
+    <ListaPreciosPicker titulo="📋 AGREGAR DE LA LISTA DE PRECIOS" onAgregar={a=>setLista([...lista,{ id:uid(), ...a }])} />
     <div style={s.card}>
-      <div style={s.cTit}>➕ AGREGAR PRODUCTOS / EXTRAS</div>
+      <div style={s.cTit}>➕ AGREGADOS · O CARGAR OTRO A MANO</div>
       <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:12 }}>
         <div><label style={s.lbl}>Descripción</label><input value={nom} onChange={e=>setNom(e.target.value)} style={s.inp} placeholder="Ej: Tanque plástico, dispenser..." /></div>
         <div><label style={s.lbl}>Importe</label><input type="number" value={prec} onChange={e=>setPrec(e.target.value)} style={s.inp} placeholder="$0" /></div>
@@ -580,6 +582,7 @@ const ItemLibre = ({ lista, setLista }) => {
           </div>
         </div>
       ))}
+    </div>
     </div>
   );
 };
@@ -971,7 +974,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
             <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
               <button onClick={()=>{ setCur({tipo:null,cantidad:null,calidad:null}); setPaso('tipo'); }} className="sel-btn" style={s.bP}>➕ Producto Individual</button>
               <button onClick={()=>setPaso('c_tam')} className="sel-btn" style={s.bV}>📦 Combo Pre-armado</button>
-              <button onClick={()=>{ setManual({ nombre:'', precio:'' }); setPaso('manual'); }} className="sel-btn" style={s.bLiq}>✏️ Producto Manual</button>
+              <button onClick={()=>{ setManual({ nombre:'', precio:'' }); setPaso('manual'); }} className="sel-btn" style={s.bLiq}>📋 Otros productos</button>
               {items.length>0 && <button onClick={()=>{ snap(); setPaso('extras'); }} className="sel-btn" style={s.bS}>Continuar → Extras y envío</button>}
             </div>
           )}
@@ -1073,7 +1076,8 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
         return (
           <div>
             <button onClick={()=>setPaso('inicio')} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.75)', border:'1px solid rgba(255,255,255,0.14)', borderRadius:8, fontWeight:600, fontSize:12, cursor:'pointer', marginBottom:18 }}>← Atrás</button>
-            <SH step="Pre-cotización · Manual" title="Producto manual" />
+            <SH step="Pre-cotización · Lista de precios" title="Otros productos" />
+            <ListaPreciosPicker titulo="📋 ELEGIR DE LA LISTA DE PRECIOS" soloUno onAgregar={a=>{ setItems([...items,{ id:uid(), tipoItem:'manual', ...a }]); setManual({ nombre:'', precio:'' }); setPaso('inicio'); }} />
             <div style={s.card}>
               <div style={s.cTit}>✏️ Cargar producto a mano</div>
               <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
@@ -3622,7 +3626,7 @@ const ModuloGestion = ({ onVolver }) => {
         if (it.calidad && porCalidad[it.calidad] !== undefined) porCalidad[it.calidad] += gNum(it.precio);
       } else if (it.tipoItem === 'manual' && it.nombre) {
         // Producto manual: cuenta por nombre (facturación + unidades), sin litros
-        addProd(String(it.nombre).trim(), gNum(it.precio), 0, 1);
+        addProd(String(it.listaId && it.nombreBase ? it.nombreBase : it.nombre).trim(), gNum(it.precio), 0, it.listaId && it.unidad === 'u' ? (Number(it.cant) || 1) : 1);
       } else itemsViejos += 1;
     }));
     const topProd = Object.entries(prod).map(([k, v]) => ({ nombre: k, ...v })).sort((a, b) => b.fact - a.fact);
@@ -4497,7 +4501,7 @@ const ModuloMarketing = () => {
       const pr = gNum(it.precio);
       if (esCombo && lt) { const lts = lt * 5; add(`Combo ${lt === 50 ? 'Chico' : 'Grande'}${it.calidad ? ' ' + it.calidad : ''}`, pr, 1, lts); fCombo += pr; porFmt[lt] += pr; litros += lts; if (porCal[it.calidad] !== undefined) porCal[it.calidad] += pr; }
       else if (!esCombo && it.tipo && lt) { const nom = it.tipo.charAt(0).toUpperCase() + it.tipo.slice(1); add(`${nom}${it.calidad ? ' ' + it.calidad : ''} ${lt} L`, pr, 1, lt); fIndiv += pr; porFmt[lt] += pr; litros += lt; if (porCal[it.calidad] !== undefined) porCal[it.calidad] += pr; }
-      else if (it.tipoItem === 'manual' && it.nombre) { add(String(it.nombre).trim(), pr, 1, 0); fManual += pr; }
+      else if (it.tipoItem === 'manual' && it.nombre) { add(String(it.listaId && it.nombreBase ? it.nombreBase : it.nombre).trim(), pr, it.listaId && it.unidad === 'u' ? (Number(it.cant) || 1) : 1, 0); fManual += pr; }
     }));
     const topProd = Object.entries(prod).map(([k, v]) => ({ nombre: k, ...v })).sort((a, b) => b.f - a.f);
 
@@ -4907,6 +4911,338 @@ const AppMarketing = ({ usuarioActual, onCerrarSesion }) => (
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// LISTA DE PRECIOS — productos precargados con precio (y escalas por cantidad) para no
+// tipear a mano. Tabla Supabase `lista_precios` (leen todos los logueados, escribe solo admin).
+// El COSTO de cada producto NO va en esa tabla (la leen los vendedores): va en
+// costos_historial.data.lista = { id: costoUnitario } (solo admin, versionado).
+// Si la tabla todavía no existe o está vacía, la app usa LP_SEED para que funcione igual.
+// ═══════════════════════════════════════════════════════════════════════════════
+const LP_CATS = ['Productos','Envases','Extras / aditivos','Químicos / piscina','Reventa','Línea autos','Bonificaciones','Servicios'];
+const LP_FRAG_PISO = ['Lavanda','Chicle','Cherry','Pino','Summer','Marina','Citronella','Sandía','Rosa','Olor a limpio','Arpege','Naranja','Limón'];
+const LP_FRAG_PERFUMINA = ['Vivere','Confort','Coni','Secret'];
+const lpE = (...pares) => { const r = []; for (let i = 0; i < pares.length; i += 2) r.push({ desde: pares[i], precio: pares[i + 1] }); return r; };
+const LP_SEED = [
+  // Productos complementarios — lista oficial (promo, precio s/IVA)
+  { id:'perfumina-10', cat:'Productos', nombre:'Perfumina concentrada 10 L', unidad:'u', escalas:lpE(1, 18433.69), cantidades:[1,2,3,5], variantes:LP_FRAG_PERFUMINA },
+  { id:'perfumina-25', cat:'Productos', nombre:'Perfumina concentrada 25 L', unidad:'u', escalas:lpE(1, 43418.33), cantidades:[1,2,3,5], variantes:LP_FRAG_PERFUMINA },
+  { id:'shampoo-auto-sil-50', cat:'Productos', nombre:'Shampoo para auto con silicona 50 L', unidad:'u', escalas:lpE(1, 31252.58), cantidades:[1,2,3,5] },
+  { id:'shampoo-auto-silteflon-50', cat:'Productos', nombre:'Shampoo para auto con silicona y teflón 50 L', unidad:'u', escalas:lpE(1, 33839.95), cantidades:[1,2,3,5] },
+  { id:'lavandina-color-25', cat:'Productos', nombre:'Lavandina ropa color 25 L', unidad:'u', escalas:lpE(1, 15202.50), cantidades:[1,2,3,5] },
+  { id:'lavandina-color-50', cat:'Productos', nombre:'Lavandina ropa color 50 L', unidad:'u', escalas:lpE(1, 24324.00), cantidades:[1,2,3,5] },
+  { id:'lavandina-blanca-25', cat:'Productos', nombre:'Lavandina ropa blanca 25 L', unidad:'u', escalas:lpE(1, 14638.13), cantidades:[1,2,3,5] },
+  { id:'lavandina-blanca-50', cat:'Productos', nombre:'Lavandina ropa blanca 50 L', unidad:'u', escalas:lpE(1, 23448.75), cantidades:[1,2,3,5] },
+  { id:'desengrasante-25', cat:'Productos', nombre:'Desengrasante concentrado 25 L', unidad:'u', escalas:lpE(1, 77922.00), cantidades:[1,2,3,5] },
+  { id:'desengrasante-50', cat:'Productos', nombre:'Desengrasante concentrado 50 L', unidad:'u', escalas:lpE(1, 127705.50), cantidades:[1,2,3,5] },
+  { id:'jabon-manos-50', cat:'Productos', nombre:'Pasta jabón de manos 50 L', unidad:'u', escalas:lpE(1, 30539.52), cantidades:[1,2,3,5] },
+  // Vendidos a mano en ago-sep 2026
+  { id:'desengrasante-naranja', cat:'Productos', nombre:'Desengrasante naranja industrial', unidad:'u', escalas:lpE(1, 18000), cantidades:[1,2,3,5], revisar:'Falta presentación (litros)' },
+  { id:'detergente-limon-10', cat:'Productos', nombre:'Detergente limón 10 L', unidad:'u', escalas:lpE(1, 6500), cantidades:[1,2,3,5], revisar:'Precio cobrado una sola vez' },
+  { id:'desodorante-marina-05', cat:'Productos', nombre:'Desodorante marina 1/2 L', unidad:'u', escalas:lpE(1, 4250), cantidades:[1,2,5,10] },
+  { id:'cloro-20', cat:'Productos', nombre:'Cloro 20 L', unidad:'u', escalas:lpE(1, 15600), cantidades:[1,2,3,5] },
+  { id:'cloro-bidon', cat:'Productos', nombre:'Cloro bidón', unidad:'u', escalas:lpE(1, 4000), cantidades:[1,2,5,10], revisar:'Falta presentación (litros)' },
+
+  { id:'bidon-5', cat:'Envases', nombre:'Bidón 5 L', unidad:'u', escalas:lpE(1, 850, 21, 800), cantidades:[10,20,30,50,100,200] },
+  { id:'botella-1', cat:'Envases', nombre:'Botella 1 L', unidad:'u', escalas:lpE(1, 500), cantidades:[10,20,24,50,100] },
+  { id:'pet-1', cat:'Envases', nombre:'Envase PET 1 L', unidad:'u', escalas:lpE(1, 350), cantidades:[10,20,50,100] },
+  { id:'botella-05', cat:'Envases', nombre:'Botella 1/2 L', unidad:'u', escalas:lpE(1, 400), cantidades:[10,20,50,100,150] },
+  { id:'cunete-50', cat:'Envases', nombre:'Cuñete / tanque 50 L', unidad:'u', escalas:lpE(1, 12000), cantidades:[1,2,3,5,10] },
+  { id:'tacho-200', cat:'Envases', nombre:'Tacho 200 L', unidad:'u', escalas:lpE(1, 40000), cantidades:[1,2,3] },
+  { id:'balde-20', cat:'Envases', nombre:'Balde 20 L para transporte', unidad:'u', escalas:lpE(1, 5000), cantidades:[1,2,3,5] },
+  { id:'caja-traslado', cat:'Envases', nombre:'Caja para traslado', unidad:'u', escalas:lpE(1, 1500), cantidades:[1,2,3,5] },
+
+  { id:'perfume-jabon-50', cat:'Extras / aditivos', nombre:'Perfume extra Jabón p/ 50 L', unidad:'u', escalas:lpE(1, 6000), cantidades:[1,2,3,4] },
+  { id:'perfume-jabon-200', cat:'Extras / aditivos', nombre:'Perfume extra Jabón p/ 200 L', unidad:'u', escalas:lpE(1, 24000), cantidades:[1,2] },
+  { id:'perfume-suavi-50', cat:'Extras / aditivos', nombre:'Perfume extra Suavizante p/ 50 L', unidad:'u', escalas:lpE(1, 6000), cantidades:[1,2,3,4] },
+  { id:'perfume-suavi-200', cat:'Extras / aditivos', nombre:'Perfume extra Suavizante p/ 200 L', unidad:'u', escalas:lpE(1, 24000), cantidades:[1,2] },
+  { id:'extra-esencia', cat:'Extras / aditivos', nombre:'Extra esencia detergente', unidad:'u', escalas:lpE(1, 0), cantidades:[1,2,3,4], activo:false, revisar:'Se cobró $3.200 / $6.000 / $9.210 — definir' },
+  { id:'aditivo-espuma', cat:'Extras / aditivos', nombre:'Aditivo espuma detergente', unidad:'u', escalas:lpE(1, 0), cantidades:[1,2,3,4], activo:false, revisar:'Se cobró $6.000 / $8.000 — definir' },
+  { id:'colorante-05', cat:'Extras / aditivos', nombre:'Colorante 1/2 L', unidad:'u', escalas:lpE(1, 6500), cantidades:[1,2,3], variantes:['Amarillo','Verde'] },
+  { id:'perfume-suelto', cat:'Extras / aditivos', nombre:'Perfume suelto', unidad:'L', escalas:lpE(1, 4000), cantidades:[1,2,3,5] },
+
+  { id:'percarbonato', cat:'Químicos / piscina', nombre:'Percarbonato', unidad:'kg', escalas:lpE(0.5, 0), cantidades:[0.5,1,2,3,5,20], activo:false, revisar:'Se cobró $8.500 a $9.500 el kg — definir' },
+  { id:'acido-citrico', cat:'Químicos / piscina', nombre:'Ácido cítrico', unidad:'kg', escalas:lpE(0.5, 10200), cantidades:[0.5,1,2,5] },
+  { id:'bicarbonato', cat:'Químicos / piscina', nombre:'Bicarbonato de sodio', unidad:'kg', escalas:lpE(0.5, 4800), cantidades:[0.5,1,2.5,5] },
+  { id:'pastillas-cloro', cat:'Químicos / piscina', nombre:'Pastillas de cloro', unidad:'kg', escalas:lpE(0.5, 0), cantidades:[1,2,4,5], activo:false, revisar:'Se cobró $5.500 / $7.000 el kg — definir' },
+  { id:'cloro-granulado', cat:'Químicos / piscina', nombre:'Cloro granulado fino', unidad:'kg', escalas:lpE(0.5, 5500), cantidades:[1,2,4,5] },
+
+  { id:'trapo-piso', cat:'Reventa', nombre:'Trapo de piso rallado', unidad:'u', escalas:lpE(1, 1430), cantidades:[1,5,10,24] },
+  { id:'rejilla-x10', cat:'Reventa', nombre:'Rejilla doble pabilo x10', unidad:'pack', escalas:lpE(1, 3640), cantidades:[1,2,3,5] },
+  { id:'esponjas-x10', cat:'Reventa', nombre:'Esponjas x10', unidad:'pack', escalas:lpE(1, 450), cantidades:[1,2,3,5], revisar:'Precio cobrado una sola vez' },
+  { id:'rollo-3x150', cat:'Reventa', nombre:'Rollo cocina 3x150 paños x8', unidad:'pack', escalas:lpE(1, 11040), cantidades:[1,2,3,5] },
+  { id:'rollo-panda', cat:'Reventa', nombre:'Rollo cocina Panda 6x200 (cod 5061)', unidad:'u', escalas:lpE(1, 11614), cantidades:[1,2,3,5] },
+  { id:'ph-panda', cat:'Reventa', nombre:'Papel higiénico Panda 50x24 (cod 6002)', unidad:'u', escalas:lpE(1, 15798), cantidades:[1,2,3,5] },
+  { id:'bolson-5kg', cat:'Reventa', nombre:'Bolsón 30 rollos 5 kg (cod 100)', unidad:'u', escalas:lpE(1, 15600), cantidades:[1,2,3,5] },
+  { id:'bolson-4kg', cat:'Reventa', nombre:'Bolsón 30 rollos 4 kg (cod 90)', unidad:'u', escalas:lpE(1, 13720), cantidades:[1,2,3,5] },
+  { id:'bolson-15kg', cat:'Reventa', nombre:'Bolsón 30 rollos 1,5 kg (cod 30)', unidad:'u', escalas:lpE(1, 6580), cantidades:[1,2,3,5] },
+  { id:'bolsa-40x60', cat:'Reventa', nombre:'Bolsa reforzada 40x60', unidad:'u', escalas:lpE(1, 462), cantidades:[1,5,10,20] },
+  { id:'bolsa-45x60', cat:'Reventa', nombre:'Bolsa reforzada 45x60 (cod 1)', unidad:'u', escalas:lpE(1, 652), cantidades:[1,5,10,20] },
+  { id:'bolsa-80x110', cat:'Reventa', nombre:'Bolsa reforzada 80x110', unidad:'u', escalas:lpE(1, 2604), cantidades:[1,5,10,20] },
+
+  { id:'abrillantador-ext-1', cat:'Línea autos', nombre:'Abrillantador exterior 1 L', unidad:'u', escalas:lpE(1, 8000), cantidades:[1,2,3,5] },
+  { id:'silicona-1', cat:'Línea autos', nombre:'Silicona 1 L', unidad:'u', escalas:lpE(1, 14000), cantidades:[1,2,3,5] },
+  { id:'revividor-int-1', cat:'Línea autos', nombre:'Revividor interior auto 1 L', unidad:'u', escalas:lpE(1, 9000), cantidades:[1,2,3,5] },
+
+  { id:'deso-piso-50-sc', cat:'Bonificaciones', nombre:'Desodorante de piso 50 L SIN CARGO', unidad:'u', escalas:lpE(1, 0), cantidades:[1,2], variantes:LP_FRAG_PISO },
+  { id:'medio-conc-piso-sc', cat:'Bonificaciones', nombre:'1/2 concentrado de piso SIN CARGO', unidad:'u', escalas:lpE(1, 0), cantidades:[1,2], variantes:LP_FRAG_PISO, activo:false, revisar:'Se usó en agosto; en septiembre pasó a 50 L' },
+
+  { id:'envio-extra', cat:'Servicios', nombre:'Envío extra', unidad:'u', escalas:lpE(1, 6500), cantidades:[1,2,3] },
+].map((p, i) => ({ activo: true, variantes: [], revisar: '', ...p, orden: i }));
+
+const lpNum = v => { const n = typeof v === 'number' ? v : parseFloat(String(v ?? '').replace(',', '.')); return isFinite(n) ? n : 0; };
+const lpFmtCant = n => String(Math.round(n * 100) / 100).replace('.', ',');
+const lpFmt2 = n => '$' + (Math.round(n * 100) / 100).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+// Precio unitario según la cantidad: toma el tramo con mayor "desde" que no supere la cantidad
+const lpPrecioUnit = (prod, cant) => {
+  const esc = [...(prod?.escalas || [])].filter(e => e && e.desde != null).sort((a, b) => lpNum(a.desde) - lpNum(b.desde));
+  if (!esc.length) return 0;
+  let p = lpNum(esc[0].precio);
+  esc.forEach(e => { if (lpNum(cant) >= lpNum(e.desde)) p = lpNum(e.precio); });
+  return p;
+};
+const lpPrecioBase = prod => lpPrecioUnit(prod, lpNum((prod?.escalas || [])[0]?.desde) || 1);
+
+let LP_CACHE = null; // { lista, origen: 'supabase' | 'seed' }
+const lpCargar = async (forzar = false) => {
+  if (LP_CACHE && !forzar) return LP_CACHE;
+  try {
+    if (supaClient) {
+      const { data, error } = await supaClient.from('lista_precios').select('id,orden,data').order('orden', { ascending: true });
+      if (!error && data && data.length) {
+        LP_CACHE = { lista: data.map(r => ({ activo: true, variantes: [], cantidades: [1, 2, 5, 10], escalas: [], ...(r.data || {}), id: r.id, orden: r.orden ?? 0 })), origen: 'supabase' };
+        return LP_CACHE;
+      }
+      if (error) LP_CACHE = { lista: LP_SEED, origen: 'seed', error: error.message };
+      else LP_CACHE = { lista: LP_SEED, origen: 'seed', vacia: true };
+      return LP_CACHE;
+    }
+  } catch (e) { LP_CACHE = { lista: LP_SEED, origen: 'seed', error: String(e) }; return LP_CACHE; }
+  LP_CACHE = { lista: LP_SEED, origen: 'seed' }; return LP_CACHE;
+};
+const lpGuardar = async (prod) => {
+  const { id, orden, ...data } = prod;
+  const { error } = await supaClient.from('lista_precios').upsert({ id, orden: orden ?? 0, data, actualizado: new Date().toISOString() }, { onConflict: 'id' });
+  if (error) return error.message || 'error';
+  LP_CACHE = null; return null;
+};
+
+// Selector para vendedores: tocar producto → elegir cantidad (chips) → Agregar. Sin tipear.
+// onAgregar recibe { nombre, precio, listaId, cant, precioUnit, variante, unidad }
+const ListaPreciosPicker = ({ onAgregar, titulo = '📋 LISTA DE PRECIOS', soloUno = false }) => {
+  const [lp, setLp] = useState(LP_CACHE);
+  const [cat, setCat] = useState(null);
+  const [q, setQ] = useState('');
+  const [sel, setSel] = useState(null);
+  const [cant, setCant] = useState('');
+  const [vari, setVari] = useState('');
+  const [ok, setOk] = useState('');
+  useEffect(() => { let vivo = true; lpCargar(true).then(r => { if (vivo) setLp(r); }); return () => { vivo = false; }; }, []);
+  const lista = (lp?.lista || []).filter(p => p.activo !== false);
+  const cats = LP_CATS.filter(c => lista.some(p => p.cat === c)).concat([...new Set(lista.map(p => p.cat))].filter(c => !LP_CATS.includes(c)));
+  const qn = q.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const vis = lista.filter(p => (!cat || p.cat === cat) && (!qn || p.nombre.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes(qn)));
+  const elegir = p => { setSel(p); setCant(String((p.cantidades || [])[0] ?? 1)); setVari((p.variantes || [])[0] || ''); setOk(''); };
+  const cN = lpNum(cant);
+  const pu = sel ? lpPrecioUnit(sel, cN) : 0;
+  const total = Math.round(pu * cN);
+  const hayEsc = sel && (sel.escalas || []).length > 1;
+  const agregar = () => {
+    if (!sel || !(cN > 0)) return;
+    const nomVar = vari ? ` (${vari})` : '';
+    const nombre = `${lpFmtCant(cN)}${sel.unidad && sel.unidad !== 'u' ? ' ' + sel.unidad : ''} x ${sel.nombre}${nomVar}`.replace(/[<>]/g, '');
+    onAgregar({ nombre, precio: total, listaId: sel.id, cant: cN, precioUnit: pu, variante: vari || null, unidad: sel.unidad || 'u', nombreBase: sel.nombre });
+    setOk(`✓ Agregado: ${nombre}`); if (!soloUno) setSel(null);
+  };
+  const chip = (act, rgb) => ({ padding:'8px 12px', borderRadius:999, border:`1px solid ${act ? `rgba(${rgb},0.7)` : C.ln}`, background: act ? `rgba(${rgb},0.22)` : 'rgba(255,255,255,0.04)', color: act ? '#fff' : C.tx2, fontWeight:750, fontSize:12.5, cursor:'pointer', fontFamily:'inherit', whiteSpace:'nowrap' });
+  return (
+    <div style={s.card}>
+      <div style={s.cTit}>{titulo}</div>
+      {lp?.origen === 'seed' && lp?.error && <div style={{ fontSize:11, color:'#fde68a', marginBottom:8 }}>Usando lista precargada (sin conexión a la lista editable).</div>}
+      {!sel && (<>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔎 Buscar producto…" style={{ ...s.inp, marginBottom:10 }} />
+        <div style={{ display:'flex', gap:6, overflowX:'auto', paddingBottom:6, marginBottom:8 }}>
+          <button onClick={() => setCat(null)} style={chip(!cat, RGB.na)}>Todos</button>
+          {cats.map(c => <button key={c} onClick={() => setCat(c === cat ? null : c)} style={chip(cat === c, RGB.na)}>{c}</button>)}
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:8, maxHeight:330, overflowY:'auto' }}>
+          {vis.map(p => (
+            <button key={p.id} onClick={() => elegir(p)} className="sel-btn" style={{ ...glassBtn(p.cat === 'Bonificaciones' ? RGB.vd : null, { pad:'10px 10px', size:12.5, weight:700, radius:12, align:'left' }), display:'flex', flexDirection:'column', gap:4, minHeight:64 }}>
+              <span style={{ lineHeight:1.2 }}>{p.nombre}</span>
+              <span style={{ color: lpPrecioBase(p) > 0 ? '#FDBA74' : '#6ee7b7', fontWeight:850, fontSize:12 }}>{lpPrecioBase(p) > 0 ? `${lpFmt2(lpPrecioBase(p))}${p.unidad && p.unidad !== 'u' ? ' / ' + p.unidad : ''}` : 'Sin cargo'}{(p.escalas || []).length > 1 ? ' ·escala' : ''}</span>
+            </button>
+          ))}
+          {!vis.length && <div style={{ fontSize:12.5, color:C.tx3, padding:8 }}>{lp ? 'No hay productos con ese filtro.' : 'Cargando lista…'}</div>}
+        </div>
+      </>)}
+      {sel && (
+        <div>
+          <button onClick={() => setSel(null)} style={{ padding:'6px 12px', background:'rgba(255,255,255,0.06)', color:C.tx2, border:`1px solid ${C.ln}`, borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', marginBottom:10, fontFamily:'inherit' }}>← Lista</button>
+          <div style={{ fontSize:17, fontWeight:850, marginBottom:2 }}>{sel.nombre}</div>
+          <div style={{ fontSize:12, color:C.tx3, marginBottom:12 }}>{hayEsc ? (sel.escalas || []).map(e => `desde ${lpFmtCant(lpNum(e.desde))} ${sel.unidad || 'u'}: ${lpFmt2(lpNum(e.precio))}`).join(' · ') : `${lpFmt2(lpPrecioBase(sel))} por ${sel.unidad || 'u'}`}</div>
+          {(sel.variantes || []).length > 0 && (<>
+            <label style={s.lbl}>{sel.cat === 'Bonificaciones' || /perfumina/i.test(sel.nombre) ? 'Fragancia' : 'Variante'}</label>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:12 }}>
+              {sel.variantes.map(v => <button key={v} onClick={() => setVari(v)} style={chip(vari === v, RGB.vd)}>{v}</button>)}
+            </div>
+          </>)}
+          <label style={s.lbl}>Cantidad ({sel.unidad || 'u'})</label>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:8 }}>
+            {(sel.cantidades || [1, 2, 5, 10]).map(n => <button key={n} onClick={() => setCant(String(n))} style={{ ...chip(cN === lpNum(n), RGB.na), minWidth:48, fontSize:15 }}>{lpFmtCant(lpNum(n))}</button>)}
+          </div>
+          <input inputMode="decimal" value={cant} onChange={e => setCant(e.target.value)} placeholder="Otra cantidad" style={{ ...s.inp, marginBottom:12 }} />
+          <div style={{ textAlign:'center', marginBottom:12 }}>
+            <div style={{ fontSize:12.5, color:C.tx2 }}>{lpFmtCant(cN)} {sel.unidad || 'u'} × {lpFmt2(pu)}</div>
+            <div style={s.tot}>{total > 0 ? fmt(total) : 'Sin cargo'}</div>
+          </div>
+          <button onClick={agregar} disabled={!(cN > 0)} className="sel-btn" style={{ ...s.bP, opacity: cN > 0 ? 1 : 0.45 }}>✓ Agregar</button>
+        </div>
+      )}
+      {ok && !sel && <div style={{ fontSize:12.5, color:'#4ade80', fontWeight:750, marginTop:10 }}>{ok}</div>}
+    </div>
+  );
+};
+
+// ADMIN — editar la lista: precios, escalas, cantidades rápidas, variantes, activo y COSTO.
+const ModuloListaPrecios = ({ onVolver }) => {
+  const [lp, setLp] = useState(null);
+  const [costos, setCostos] = useState(null);     // lista de versiones de costos_historial
+  const [edit, setEdit] = useState(null);          // producto en edición (copia)
+  const [costoEd, setCostoEd] = useState('');
+  const [msg, setMsg] = useState('');
+  const [cat, setCat] = useState(null);
+  const recargar = async () => { const [a, b] = await Promise.all([lpCargar(true), vgCargarCostos()]); setLp(a); setCostos(b.error ? [] : b.lista); };
+  useEffect(() => { recargar(); }, []);
+  const ultimo = costos && costos.length ? costos[costos.length - 1] : null;
+  const costoDe = id => { const v = ultimo?.data?.lista?.[id]; return v == null || v === '' ? null : lpNum(v); };
+  const precargar = async () => {
+    setMsg('Precargando…');
+    const filas = LP_SEED.map(p => { const { id, orden, ...data } = p; return { id, orden, data, actualizado: new Date().toISOString() }; });
+    const { error } = await supaClient.from('lista_precios').upsert(filas, { onConflict: 'id' });
+    if (error) { setMsg('No se pudo precargar: ' + error.message + ' — ¿se creó la tabla lista_precios en Supabase?'); return; }
+    setMsg(`✓ ${filas.length} productos precargados.`); recargar();
+  };
+  const abrir = p => { setEdit(JSON.parse(JSON.stringify({ variantes: [], cantidades: [1, 2, 5, 10], escalas: [{ desde: 1, precio: 0 }], activo: true, revisar: '', ...p }))); const c = costoDe(p.id); setCostoEd(c == null ? '' : String(c)); setMsg(''); };
+  const nuevo = () => { const id = 'p-' + Date.now().toString(36); abrir({ id, nombre: '', cat: cat || 'Productos', unidad: 'u', escalas: [{ desde: 1, precio: '' }], cantidades: [1, 2, 5, 10], variantes: [], activo: true, orden: (lp?.lista || []).length }); };
+  const guardar = async () => {
+    if (!edit.nombre.trim()) { setMsg('Falta el nombre.'); return; }
+    const limpio = { ...edit, nombre: edit.nombre.replace(/[<>]/g, '').trim(),
+      escalas: (edit.escalas || []).filter(e => String(e.desde).trim() !== '').map(e => ({ desde: lpNum(e.desde), precio: lpNum(e.precio) })).sort((a, b) => a.desde - b.desde),
+      cantidades: (Array.isArray(edit.cantidades) ? edit.cantidades : String(edit.cantidades).split(/[;\s]+|,(?=\s*\d)/)).map(lpNum).filter(n => n > 0),
+      variantes: (Array.isArray(edit.variantes) ? edit.variantes : String(edit.variantes).split(',')).map(v => String(v).trim()).filter(Boolean) };
+    if (!limpio.escalas.length) limpio.escalas = [{ desde: 1, precio: 0 }];
+    limpio.revisar = ''; // guardarlo = revisado
+    setMsg('Guardando…');
+    const err = await lpGuardar(limpio);
+    if (err) { setMsg('No se pudo guardar: ' + err); return; }
+    // Costo: nueva versión en costos_historial solo si cambió (las ventas viejas conservan su costo)
+    const nuevoC = costoEd.trim() === '' ? null : lpNum(costoEd);
+    if (nuevoC !== costoDe(limpio.id)) {
+      const base = ultimo?.data || {};
+      const data = { ...base, lista: { ...(base.lista || {}), [limpio.id]: nuevoC } };
+      const { error } = await supaClient.from('costos_historial').insert({ vigente_desde: Date.now(), data });
+      if (error) { setMsg('Precio guardado, pero el costo no: ' + error.message); await recargar(); return; }
+    }
+    setMsg('✓ Guardado'); setEdit(null); recargar();
+  };
+  const back = { padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', marginBottom:12, fontFamily:'inherit' };
+  const lista = lp?.lista || [];
+  const cats = LP_CATS.filter(c => lista.some(p => p.cat === c)).concat([...new Set(lista.map(p => p.cat))].filter(c => !LP_CATS.includes(c)));
+
+  if (edit) {
+    const setE = (k, v) => setEdit(o => ({ ...o, [k]: v }));
+    const pb = lpNum((edit.escalas || [])[0]?.precio); const cN = costoEd.trim() === '' ? null : lpNum(costoEd);
+    return (
+      <div>
+        <button onClick={() => setEdit(null)} style={back}>← Lista de precios</button>
+        <div style={{ fontSize:20, fontWeight:900, marginBottom:12 }}>{edit.nombre || 'Producto nuevo'}</div>
+        {edit.revisar && <div style={{ fontSize:12, color:'#fde68a', background:'rgba(250,204,21,0.08)', border:'1px solid rgba(250,204,21,0.3)', borderRadius:10, padding:'8px 10px', marginBottom:12 }}>⚠️ {edit.revisar}</div>}
+        <div style={s.card}>
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <div><label style={s.lbl}>Nombre</label><input value={edit.nombre} onChange={e => setE('nombre', e.target.value)} style={s.inp} /></div>
+            <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:8 }}>
+              <div><label style={s.lbl}>Categoría</label><select value={edit.cat} onChange={e => setE('cat', e.target.value)} style={s.inp}>{LP_CATS.map(c => <option key={c}>{c}</option>)}</select></div>
+              <div><label style={s.lbl}>Unidad</label><select value={edit.unidad} onChange={e => setE('unidad', e.target.value)} style={s.inp}>{['u','kg','L','pack'].map(c => <option key={c}>{c}</option>)}</select></div>
+            </div>
+          </div>
+        </div>
+        <div style={s.card}>
+          <div style={s.cTit}>Precio de venta por {edit.unidad} (escalas)</div>
+          {(edit.escalas || []).map((e, i) => (
+            <div key={i} style={{ display:'grid', gridTemplateColumns:'1fr 1.4fr auto', gap:8, marginBottom:8, alignItems:'end' }}>
+              <div><label style={s.lbl}>Desde</label><input inputMode="decimal" value={e.desde} onChange={ev => setE('escalas', edit.escalas.map((x, j) => j === i ? { ...x, desde: ev.target.value } : x))} style={s.inp} /></div>
+              <div><label style={s.lbl}>Precio unitario</label><input inputMode="decimal" value={e.precio} onChange={ev => setE('escalas', edit.escalas.map((x, j) => j === i ? { ...x, precio: ev.target.value } : x))} style={s.inp} placeholder="$0" /></div>
+              <button onClick={() => setE('escalas', edit.escalas.filter((_, j) => j !== i))} disabled={edit.escalas.length < 2} style={{ background:'rgba(239,68,68,0.15)', color:'#f87171', border:'none', borderRadius:10, padding:'13px 12px', cursor:'pointer', opacity: edit.escalas.length < 2 ? 0.3 : 1 }}>✕</button>
+            </div>
+          ))}
+          <button onClick={() => setE('escalas', [...(edit.escalas || []), { desde: '', precio: '' }])} style={s.bS}>+ Agregar escala (ej: desde 50 u, precio menor)</button>
+        </div>
+        <div style={s.card}>
+          <div style={s.cTit}>🔒 Costo (solo vos lo ves)</div>
+          <label style={s.lbl}>Costo unitario por {edit.unidad}</label>
+          <input inputMode="decimal" value={costoEd} onChange={e => setCostoEd(e.target.value)} style={s.inp} placeholder="Vacío = se estima 50% del precio" />
+          {cN != null && pb > 0 && <div style={{ fontSize:12.5, marginTop:8, color: pb - cN >= 0 ? '#4ade80' : '#f87171', fontWeight:750 }}>Margen: {lpFmt2(pb - cN)} por {edit.unidad} ({Math.round((pb - cN) / pb * 100)}%)</div>}
+          <div style={{ fontSize:11, color:C.tx3, marginTop:6 }}>Al cambiarlo se crea una versión nueva de costos desde este momento; las ventas anteriores mantienen su costo.</div>
+        </div>
+        <div style={s.card}>
+          <div style={s.cTit}>Botones para el vendedor</div>
+          <label style={s.lbl}>Cantidades rápidas (separadas por espacio)</label>
+          <input value={Array.isArray(edit.cantidades) ? edit.cantidades.join(' ') : edit.cantidades} onChange={e => setE('cantidades', e.target.value)} style={{ ...s.inp, marginBottom:10 }} placeholder="1 2 5 30" />
+          <label style={s.lbl}>Variantes / fragancias (separadas por coma, opcional)</label>
+          <input value={Array.isArray(edit.variantes) ? edit.variantes.join(', ') : edit.variantes} onChange={e => setE('variantes', e.target.value)} style={{ ...s.inp, marginBottom:10 }} placeholder="Lavanda, Pino, Marina" />
+          <label style={{ display:'flex', alignItems:'center', gap:10, fontSize:14, fontWeight:700, cursor:'pointer' }}>
+            <input type="checkbox" checked={edit.activo !== false} onChange={e => setE('activo', e.target.checked)} style={{ width:20, height:20 }} />
+            Visible para vendedores
+          </label>
+        </div>
+        {msg && <div style={{ fontSize:13, color: msg.startsWith('✓') ? '#4ade80' : '#fde68a', marginBottom:10, fontWeight:700 }}>{msg}</div>}
+        <button onClick={guardar} className="sel-btn" style={s.bP}>💾 Guardar</button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <button onClick={onVolver} style={back}>🏠 Inicio</button>
+      <div style={{ fontSize:22, fontWeight:900, marginBottom:4 }}>🏷️ Lista de precios</div>
+      <div style={{ fontSize:12, color:C.tx2, marginBottom:14 }}>Lo que cargues acá aparece en "Agregar productos / extras" y en "Producto manual" para que el vendedor solo toque producto y cantidad. El costo lo ves solo vos y se usa en Ventas y Ganancia.</div>
+      {!lp && <div style={{ color:C.tx3 }}>Cargando…</div>}
+      {lp?.origen === 'seed' && (
+        <div style={{ ...s.card, border:'1px solid rgba(250,204,21,0.4)' }}>
+          <div style={{ fontSize:13.5, fontWeight:800, color:'#fde68a', marginBottom:6 }}>{lp.error ? '⚠️ Falta crear la tabla lista_precios en Supabase' : 'La lista editable está vacía'}</div>
+          <div style={{ fontSize:12, color:C.tx2, marginBottom:10 }}>Mientras tanto los vendedores ya ven la lista precargada ({LP_SEED.filter(p => p.activo !== false).length} productos). Precargala para poder editarla.</div>
+          <button onClick={precargar} style={s.bP}>⬇️ Precargar {LP_SEED.length} productos</button>
+        </div>
+      )}
+      {msg && <div style={{ fontSize:13, color: msg.startsWith('✓') ? '#4ade80' : '#fde68a', marginBottom:10, fontWeight:700 }}>{msg}</div>}
+      {lp?.origen === 'supabase' && <button onClick={nuevo} style={{ ...s.bV, marginBottom:12 }}>+ Producto nuevo</button>}
+      <div style={{ display:'flex', gap:6, overflowX:'auto', paddingBottom:6, marginBottom:8 }}>
+        <button onClick={() => setCat(null)} style={{ padding:'7px 12px', borderRadius:999, border:`1px solid ${!cat ? 'rgba(249,115,22,0.7)' : C.ln}`, background: !cat ? 'rgba(249,115,22,0.2)' : 'transparent', color:'#fff', fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>Todos</button>
+        {cats.map(c => <button key={c} onClick={() => setCat(c)} style={{ padding:'7px 12px', borderRadius:999, border:`1px solid ${cat === c ? 'rgba(249,115,22,0.7)' : C.ln}`, background: cat === c ? 'rgba(249,115,22,0.2)' : 'transparent', color:'#fff', fontWeight:700, fontSize:12, cursor:'pointer', whiteSpace:'nowrap', fontFamily:'inherit' }}>{c}</button>)}
+      </div>
+      {cats.filter(c => !cat || c === cat).map(c => (
+        <div key={c} style={{ marginBottom:14 }}>
+          <div style={s.cTit}>{c}</div>
+          {lista.filter(p => p.cat === c).map(p => {
+            const pb = lpPrecioBase(p); const co = costoDe(p.id);
+            return (
+              <button key={p.id} onClick={() => lp.origen === 'supabase' ? abrir(p) : setMsg('Primero tocá "Precargar" para poder editar.')} style={{ ...s.bO, marginBottom:6, opacity: p.activo === false ? 0.5 : 1 }}>
+                <span style={{ minWidth:0 }}>
+                  <span style={{ display:'block', fontWeight:800 }}>{p.revisar ? '⚠️ ' : ''}{p.nombre}{p.activo === false ? ' · oculto' : ''}</span>
+                  <span style={{ display:'block', fontSize:11.5, color:C.tx3 }}>{(p.escalas || []).length > 1 ? (p.escalas || []).map(e => `≥${lpFmtCant(lpNum(e.desde))}: ${lpFmt2(lpNum(e.precio))}`).join(' · ') : `por ${p.unidad || 'u'}`}{co != null ? ` · costo ${lpFmt2(co)}` : ' · sin costo'}</span>
+                </span>
+                <span style={{ textAlign:'right', flexShrink:0 }}>
+                  <span style={{ display:'block', color: pb > 0 ? '#FDBA74' : '#6ee7b7', fontWeight:900 }}>{pb > 0 ? lpFmt2(pb) : (p.cat === 'Bonificaciones' ? 'Sin cargo' : 'Sin precio')}</span>
+                  {co != null && pb > 0 && <span style={{ display:'block', fontSize:11, color: pb - co >= 0 ? '#4ade80' : '#f87171', fontWeight:800 }}>{Math.round((pb - co) / pb * 100)}% margen</span>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // VENTAS Y GANANCIA — solo ADMIN. Bandeja estilo WhatsApp de DEF confirmados con
 // rentabilidad por venta. Costos en Supabase (tabla costos_historial, solo admin por RLS);
 // estado leído / costo de productos manuales en tabla ventas_admin (solo admin).
@@ -4934,17 +5270,18 @@ const vgFmt = n => (n < 0 ? '− ' : '') + '$' + Math.round(Math.abs(n)).toLocal
 const vgCostoDEF = (p, C, costosManuales = {}) => {
   const det = []; const filas = []; let cat = 0; let manPrecio = 0, manCosto = 0, manEstimado = false;
   const add = (nombre, precio, costo, sub) => { det.push([nombre, costo]); filas.push({ nombre, precio, costo, sub }); cat += costo; };
-  const manual = (key, nombre, precio, icono) => {
+  const manual = (key, nombre, precio, icono, it) => {
     const tiene = costosManuales[key] != null && costosManuales[key] !== '';
-    const c = tiene ? vgN(costosManuales[key]) : precio * 0.5; if (!tiene) manEstimado = true;
+    const cLista = !tiene && it && it.listaId && C.lista && C.lista[it.listaId] != null && C.lista[it.listaId] !== '' ? vgN(C.lista[it.listaId]) * vgN(it.cant || 1) : null;
+    const c = tiene ? vgN(costosManuales[key]) : cLista != null ? cLista : precio * 0.5; if (!tiene && cLista == null) manEstimado = true;
     manPrecio += precio; manCosto += c; det.push([nombre, c, 'manual']);
-    filas.push({ nombre: `${icono} ${nombre}`, precio, costo: c, sub: tiene ? 'costo cargado por vos' : 'costo estimado 50% (tocá para cargar el real)', manual: key, estimado: !tiene });
+    filas.push({ nombre: `${icono} ${nombre}`, precio, costo: c, sub: tiene ? 'costo cargado por vos' : cLista != null ? 'costo de la lista de precios' : 'costo estimado 50% (tocá para cargar el real)', manual: key, estimado: !tiene && cLista == null });
   };
   (p.items || []).forEach((it, idx) => {
     const esCombo = it.tipoItem === 'combo' || it.tipo === 'combo';
     const t = it.cantidad === 200 ? 200 : 50;
     const pr = vgN(it.precio);
-    if (it.tipoItem === 'manual') { manual('i' + idx, it.nombre || 'Producto manual', pr, '✍️'); return; }
+    if (it.tipoItem === 'manual') { manual('i' + idx, it.nombre || 'Producto manual', pr, '✍️', it); return; }
     if (esCombo) {
       const cal = it.calidad; let pasta = 0;
       VG_TIPOS.forEach(([k]) => { pasta += vgN(C.pasta?.[k]?.[t]?.[cal]); });
@@ -4975,7 +5312,7 @@ const vgCostoDEF = (p, C, costosManuales = {}) => {
     if (it.tipo === 'desodorante') { const u = t / 50; add(`Desodorante ${t} L`, pr, u * C.desodorante50 + 3 * u * C.etiquetaChica, `${u} unidad${u > 1 ? 'es' : ''} de 50 L · ${3 * u} etiquetas`); return; }
     filas.push({ nombre: `⚠️ ${it.nombre || it.tipo || 'Ítem'}`, precio: pr, costo: 0, sub: 'sin costo reconocido' }); det.push([`⚠️ ${it.nombre || it.tipo || '?'}`, 0]);
   });
-  (p.extras?.agregados || []).forEach((a, idx) => manual('a' + idx, a.nombre || 'Producto extra', vgN(a.precio), '⭐'));
+  (p.extras?.agregados || []).forEach((a, idx) => manual('a' + idx, a.nombre || 'Producto extra', vgN(a.precio), '⭐', a));
   const env = desgloseEnvases(p.envases || 0, p.extras);
   if (env.baldes || env.cajas) {
     const c = env.baldes * C.balde + env.cajas * C.caja;
@@ -5824,6 +6161,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
                 <Tile icon="🛵" label={<>LIQUIDACIÓN<br/>FLEX</>} rgb={RGB.na} onClick={()=>setEtapa('liquidacion_flex')} />
                 <Tile icon="📈" label="GESTIÓN" rgb={RGB.vi} onClick={()=>setEtapa('gestion')} />
                 <Tile icon="📣" label="MARKETING" rgb="244,114,182" onClick={()=>setEtapa('marketing')} />
+                <Tile icon="🏷️" label={<>LISTA DE<br/>PRECIOS</>} rgb="250,204,21" onClick={()=>setEtapa('lista_precios')} />
                 <Tile icon="🧪" label={<>FÓRMULAS<br/>PRODUCCIÓN</>} rgb={RGB.vd} onClick={()=>{ window.location.href = 'formulas-produccion.html'; }} />
               </G>
             </>)}
@@ -5869,6 +6207,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
             <ModuloMarketing />
           </div>
         )}
+        {etapa==='lista_precios' && esAdmin(usuarioActual) && <ModuloListaPrecios onVolver={irInicio} />}
         {etapa==='ventas_ganancia' && esAdmin(usuarioActual) && <ModuloVentasGanancia onVolver={irInicio} onCambioNoLeidas={setNoLeidasVG} />}
 
       </div>

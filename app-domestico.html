@@ -149,7 +149,7 @@ const FRAGANCIAS = [
   { label:'Sandía',      icon:'🍉' }, { label:'Citronella',   icon:'🌿' }, { label:'Rosa',       icon:'🌹' },
   { label:'Limón',       icon:'🍋' }, { label:'Olor a Limpio',icon:'✨' },
 ];
-const PRECIO_ENVASE = 4000;
+const PRECIO_ENVASE = 5000; // 24/09/2026: balde pasa de $4.000 a $5.000
 // Envases: baldes (con cargo) y cajas (sin cargo) pueden CONVIVIR en un pedido.
 // Modelo nuevo: envases = cant. de baldes; extras.cajas = cant. de cajas.
 // Retrocompat: extras.tipoEnvase ('cajas'/'bolsas' de la versión anterior) y pedidos viejos sin nada.
@@ -170,11 +170,14 @@ const lineasEnvasesWA = (env, ex) => {
   if (baldes === 0 && cajas === 0) out.push(`• 🛍️ _Sin envase — se entrega en bolsas (sin cargo)_`);
   return out;
 };
+// Tarifas Flex por bulto. 24/09/2026: Moreno 4500→5200, Cordón 1 5500→6500, Cordón 2 6500→7500, Cordón 3 9500→10500.
+// `previo` = tarifa anterior: solo para reconocer la zona de pedidos viejos en Liquidación Flex.
+const FLEX_CAMBIO_TARIFA_TS = Date.UTC(2026, 8, 24, 3, 0, 0); // 24/09/2026 00:00 AR
 const ZONAS_ENVIO = [
-  { zona:'Moreno', color:'#ef4444', precio:4500, localidades:['MORENO','PASO DEL REY','CUARTEL V','FRANCISCO ALVAREZ','LA REJA','TRUJUI','BORDENAVE'] },
-  { zona:'Cordón 1', color:'#fb923c', precio:5500, localidades:['JOSE C PAZ','JOSE C. PAZ','SAN MIGUEL','ITUZAINGO','ITUZAINGÓ','MERLO','MALVINAS ARGENTINAS'] },
-  { zona:'Cordón 2', color:'#3b82f6', precio:6500, localidades:['LA MATANZA','MORON','MORÓN','HURLINGHAM','3 DE FEBRERO','TRES DE FEBRERO','SAN MARTIN','SAN MARTÍN','VICENTE LOPEZ','VICENTE LÓPEZ','SAN FERNANDO','TIGRE','SAN ISIDRO','AVELLANEDA','LANUS','LANÚS','LOMAS DE ZAMORA','BERAZATEGUI','FLORENCIO VARELA','ALMIRANTE BROWN','QUILMES','EZEIZA','ESTEBAN ECHEVERRIA','ESTEBAN ECHEVERRÍA','CABA','CAPITAL FEDERAL','BUENOS AIRES','CIUDAD DE BUENOS AIRES','PALERMO','BELGRANO','CABALLITO','FLORES','RAMOS MEJIA','RAMOS MEJÍA','SAN JUSTO','TAPIALES','CIUDADELA','EL PALOMAR','HAEDO','CASTELAR','VILLA LUZURIAGA'] },
-  { zona:'Cordón 3', color:'#22c55e', precio:9500, localidades:['ESCOBAR','INGENIERO MASCHWITZ','ING MASCHWITZ','PILAR','ZARATE','ZÁRATE','CAMPANA','LUJAN','LUJÁN','GENERAL RODRIGUEZ','GENERAL RODRÍGUEZ','MARCOS PAZ','CAÑUELAS','GUERNICA','SAN VICENTE','VILLA ELISA','BERISSO','LA PLATA','ENSENADA','DERQUI','VILLA ROSA','NORDELTA','EXALTACION DE LA CRUZ','EXALTACIÓN DE LA CRUZ','GENERAL LAS HERAS','CORONEL BRANDSEN','BRANDSEN','DEL VISO','MAGDALENA','LOBOS','MONTE','NAVARRO','SUIPACHA','MERCEDES'] },
+  { zona:'Moreno', previo:4500, color:'#ef4444', precio:5200, localidades:['MORENO','PASO DEL REY','CUARTEL V','FRANCISCO ALVAREZ','LA REJA','TRUJUI','BORDENAVE'] },
+  { zona:'Cordón 1', previo:5500, color:'#fb923c', precio:6500, localidades:['JOSE C PAZ','JOSE C. PAZ','SAN MIGUEL','ITUZAINGO','ITUZAINGÓ','MERLO','MALVINAS ARGENTINAS'] },
+  { zona:'Cordón 2', previo:6500, color:'#3b82f6', precio:7500, localidades:['LA MATANZA','MORON','MORÓN','HURLINGHAM','3 DE FEBRERO','TRES DE FEBRERO','SAN MARTIN','SAN MARTÍN','VICENTE LOPEZ','VICENTE LÓPEZ','SAN FERNANDO','TIGRE','SAN ISIDRO','AVELLANEDA','LANUS','LANÚS','LOMAS DE ZAMORA','BERAZATEGUI','FLORENCIO VARELA','ALMIRANTE BROWN','QUILMES','EZEIZA','ESTEBAN ECHEVERRIA','ESTEBAN ECHEVERRÍA','CABA','CAPITAL FEDERAL','BUENOS AIRES','CIUDAD DE BUENOS AIRES','PALERMO','BELGRANO','CABALLITO','FLORES','RAMOS MEJIA','RAMOS MEJÍA','SAN JUSTO','TAPIALES','CIUDADELA','EL PALOMAR','HAEDO','CASTELAR','VILLA LUZURIAGA'] },
+  { zona:'Cordón 3', previo:9500, color:'#22c55e', precio:10500, localidades:['ESCOBAR','INGENIERO MASCHWITZ','ING MASCHWITZ','PILAR','ZARATE','ZÁRATE','CAMPANA','LUJAN','LUJÁN','GENERAL RODRIGUEZ','GENERAL RODRÍGUEZ','MARCOS PAZ','CAÑUELAS','GUERNICA','SAN VICENTE','VILLA ELISA','BERISSO','LA PLATA','ENSENADA','DERQUI','VILLA ROSA','NORDELTA','EXALTACION DE LA CRUZ','EXALTACIÓN DE LA CRUZ','GENERAL LAS HERAS','CORONEL BRANDSEN','BRANDSEN','DEL VISO','MAGDALENA','LOBOS','MONTE','NAVARRO','SUIPACHA','MERCEDES'] },
 ];
 
 function detectarZona(loc) {
@@ -625,7 +628,7 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
           return (
             <>
               <div style={{ marginBottom:14 }}>
-                <div style={{ fontSize:12, color:'rgba(255,255,255,0.6)', fontWeight:700, marginBottom:8 }}>🪣 Baldes — $4.000 c/u (con cargo)</div>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,0.6)', fontWeight:700, marginBottom:8 }}>🪣 Baldes — {fmt(PRECIO_ENVASE)} c/u (con cargo)</div>
                 <div style={{ display:'flex', alignItems:'center', gap:16 }}>
                   <button onClick={()=>setBaldes(Math.max(0,envases-1))} style={btnStyle}>−</button>
                   <span style={{ fontSize:26, fontWeight:900, minWidth:44, textAlign:'center' }}>{envases}</span>
@@ -6910,12 +6913,13 @@ function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrar
 const FLEX_NA = '#fb923c';
 
 // Zona de un pedido flex: 1) override manual  2) por localidad  3) inferida por $/bulto
-function zonaDePedidoFlex(localidad, unit) {
+function zonaDePedidoFlex(localidad, unit, ts) {
   const porLoc = detectarZona(localidad);
   if (porLoc) return { zona: porLoc.zona, color: porLoc.color, precio: porLoc.precio, origen: 'localidad' };
   const u = Math.round(Number(unit) || 0);
   if (u > 0) {
-    const porPrecio = ZONAS_ENVIO.find(z => z.precio === u);
+    const viejo = typeof ts === 'number' && ts < FLEX_CAMBIO_TARIFA_TS;
+    const porPrecio = ZONAS_ENVIO.find(z => (viejo ? z.previo : z.precio) === u) || ZONAS_ENVIO.find(z => z.precio === u || z.previo === u);
     if (porPrecio) return { zona: porPrecio.zona, color: porPrecio.color, precio: porPrecio.precio, origen: 'importe' };
   }
   return { zona: 'Sin zona', color: '#94a3b8', precio: 0, origen: 'sin' };
@@ -7030,7 +7034,7 @@ function ModuloLiquidacionFlex({ onVolver }) {
         const unit  = Number(ov.unit ?? unitBase) || 0;
         const total = ov.unit != null || ov.bultos != null ? Math.round(unit * bultos) : (totalBase || Math.round(unit * bultos));
         const z = ov.zona ? { zona: ov.zona, color: (ZONAS_ENVIO.find(x => x.zona === ov.zona)?.color) || FLEX_NA, origen: 'manual' }
-                          : zonaDePedidoFlex(localidadBase, unit);
+                          : zonaDePedidoFlex(localidadBase, unit, p.ts);
         return {
           codigo: p.codigo, ts: p.ts, fecha: fmtFechaDDMMAAAA(p.ts),
           hora: arHora(p.ts),

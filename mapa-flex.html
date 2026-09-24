@@ -452,19 +452,19 @@ body {
   <div class="zona-btns" id="zona-btns">
     <button class="zona-btn" data-z="local" style="--zb-color:#EF5350" onclick="selZonaManual('local',this)">
       <span class="zb-label">🔴 Tu Localidad</span>
-      <span class="zb-precio">$4.500</span>
+      <span class="zb-precio">$5.200</span>
     </button>
     <button class="zona-btn" data-z="c1" style="--zb-color:#FB8C00" onclick="selZonaManual('c1',this)">
       <span class="zb-label">🟠 1er Cordón</span>
-      <span class="zb-precio">$5.500</span>
+      <span class="zb-precio">$6.500</span>
     </button>
     <button class="zona-btn" data-z="c2" style="--zb-color:#42A5F5" onclick="selZonaManual('c2',this)">
       <span class="zb-label">🔵 2do Cordón</span>
-      <span class="zb-precio">$6.500</span>
+      <span class="zb-precio">$7.500</span>
     </button>
     <button class="zona-btn" data-z="c3" style="--zb-color:#66BB6A" onclick="selZonaManual('c3',this)">
       <span class="zb-label">🟢 Zona Nueva</span>
-      <span class="zb-precio">$9.500</span>
+      <span class="zb-precio">$10.500</span>
     </button>
   </div>
   <button class="mp-confirm" id="mp-confirm" onclick="confirmarManual()" disabled>Continuar →</button>
@@ -779,7 +779,7 @@ const LOCS = [
 // ================================================================
 // CONFIG
 // ================================================================
-const PRECIO_ZONA = {local:4500, c1:5500, c2:6500, c3:9500};
+const PRECIO_ZONA = {local:5200, c1:6500, c2:7500, c3:10500}; // 24/09/2026
 const ZONA_LBL    = {local:"Tu Localidad", c1:"1er Cordón", c2:"2do Cordón/CABA", c3:"Zona Nueva"};
 const ZONA_COLOR  = {local:"#EF5350", c1:"#FB8C00", c2:"#42A5F5", c3:"#66BB6A"};
 
@@ -791,8 +791,19 @@ let zonaActual = '';
 let modoManualZona = null;
 
 // ── STORAGE ──
-function load() { try { precios = JSON.parse(localStorage.getItem('dom_flex2')||'{}'); } catch(e){precios={};} }
-function save() { localStorage.setItem('dom_flex2', JSON.stringify(precios)); }
+// 24/09/2026: tarifas nuevas. Se conservan las localidades ya usadas (dom_flex2) pero con el precio
+// actualizado según su zona; el precio SIEMPRE sale de PRECIO_ZONA (lo guardado es solo historial).
+function load() {
+  try { precios = JSON.parse(localStorage.getItem('dom_flex3')||'null'); } catch(e){ precios = null; }
+  if (!precios) {
+    let viejos = {}; try { viejos = JSON.parse(localStorage.getItem('dom_flex2')||'{}'); } catch(e){}
+    precios = {};
+    Object.keys(viejos).forEach(id => { const L = (typeof LOCS !== 'undefined') && LOCS.find(x => x.id == id); if (L) precios[id] = PRECIO_ZONA[L.z]; });
+    save(); try { localStorage.removeItem('dom_flex2'); } catch(e){}
+  }
+  Object.keys(precios).forEach(id => { const L = (typeof LOCS !== 'undefined') && LOCS.find(x => x.id == id); if (L) precios[id] = PRECIO_ZONA[L.z]; });
+}
+function save() { try { localStorage.setItem('dom_flex3', JSON.stringify(precios)); } catch(e){} }
 
 // ── REFRESH ──
 function refresh() {
@@ -816,7 +827,7 @@ function ocultarTodosPaneles() {
 // ── SELECCIÓN ──
 function seleccionar(L) {
   sel = L;
-  const precio = precios[L.id] || PRECIO_ZONA[L.z];
+  const precio = PRECIO_ZONA[L.z];
   precios[L.id] = precio;
   save();
   abrirConfirmacion(L.n, ZONA_LBL[L.z], ZONA_COLOR[L.z], precio);

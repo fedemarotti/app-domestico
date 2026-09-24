@@ -1798,9 +1798,9 @@ function imprimirPedido(pedido, solo=null) {
     const itemRowsHtml = items.map(item => {
       let rows = `${divRow}
         <tr>
-          <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0d5c3a;font-weight:900;margin-right:6px;">▸</span><strong>${item.nombre.toUpperCase()}</strong></td>
+          <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0d5c3a;font-weight:900;margin-right:6px;">▸</span><strong>${lpEsc(lpTit(item).toUpperCase())}</strong></td>
           <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">${fmtDoc(item.precio)}</td>
-        </tr>`;
+        </tr>${item.listaId ? `<tr><td colspan="2" style="padding:0 4px 6px 22px;">${lpSubHtml(item)}</td></tr>` : ''}`;
       if (item.tipo === 'combo' || item.tipoItem === 'combo') {
         const subRows = [];
         // JABÓN
@@ -1881,9 +1881,9 @@ function imprimirPedido(pedido, solo=null) {
       `${divRow}<tr><td colspan="2" style="padding:8px 4px 2px;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;">Productos Extra</td></tr>`,
       ...(ex.agregados||[]).map(a=>`${divRow}
       <tr>
-        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0d5c3a;font-weight:900;margin-right:6px;">▸</span><strong>${a.nombre.toUpperCase()}</strong></td>
-        <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">${fmtDoc(parseFloat(a.precio)||0)}</td>
-      </tr>`)
+        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0d5c3a;font-weight:900;margin-right:6px;">▸</span><strong>${lpEsc(lpTit(a).toUpperCase())}</strong></td>
+        <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">${a.listaId && !(parseFloat(a.precio) > 0) ? 'SIN CARGO' : fmtDoc(parseFloat(a.precio)||0)}</td>
+      </tr>${a.listaId ? `<tr><td colspan="2" style="padding:0 4px 6px 22px;">${lpSubHtml(a)}</td></tr>` : ''}`)
     ].join('') : '';
 
     const envioRowHtml = envioLinea?`${divRow}
@@ -2018,11 +2018,12 @@ function imprimirPedido(pedido, solo=null) {
         }
 
         return `<div style="padding:8px 10px;border-left:4px solid #0d5c3a;background:#f8fafc;margin-bottom:7px;border-radius:4px;">
-          <div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;">${item.nombre}</div>
+          <div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;">${lpEsc(lpTit(item))}</div>
+          ${item.listaId ? lpSubHtml(item, { precio:false, grande:true }) : ''}
           ${prodBody}
         </div>`;
       }).join('')}
-      ${(ex.agregados||[]).length>0?`<div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;margin:10px 0 5px;border-top:2px solid #e2e8f0;padding-top:8px;">⭐ Productos Extra</div>${ex.agregados.map(a=>`<div style="padding:8px 10px;border-left:4px solid #0d5c3a;background:#f8fafc;margin-bottom:7px;border-radius:4px;display:flex;justify-content:space-between;align-items:center;"><div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;">${a.nombre}</div><div style="font-size:13px;font-weight:700;color:#0d5c3a;">${fmtDoc(parseFloat(a.precio)||0)}</div></div>`).join('')}`:''}
+      ${(ex.agregados||[]).length>0?`<div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;margin:10px 0 5px;border-top:2px solid #e2e8f0;padding-top:8px;">⭐ Productos Extra</div>${ex.agregados.map(a=>`<div style="padding:8px 10px;border-left:4px solid #0d5c3a;background:#f8fafc;margin-bottom:7px;border-radius:4px;display:flex;justify-content:space-between;align-items:center;"><div><div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;">${lpEsc(lpTit(a))}</div>${a.listaId ? lpSubHtml(a, { precio:false, grande:true }) : ''}</div><div style="font-size:13px;font-weight:700;color:#0d5c3a;">${a.listaId && !(parseFloat(a.precio) > 0) ? 'SIN CARGO' : fmtDoc(parseFloat(a.precio)||0)}</div></div>`).join('')}`:''}
       ${dBaldes>0?`<div style="padding:8px 10px;border-left:4px solid #f97316;background:#fff7ed;margin-bottom:7px;border-radius:4px;font-weight:800;">🪣 Envases vacíos (baldes): ${dBaldes}</div>`:''}${dCajas>0?`<div style="padding:8px 10px;border-left:4px solid #0284c7;background:#e0f2fe;margin-bottom:7px;border-radius:4px;font-weight:800;">📦 EN CAJAS SIN CARGO: ${dCajas} caja${dCajas!==1?'s':''}</div>`:''}${dBaldes===0&&dCajas===0?`<div style="padding:8px 10px;border-left:4px solid #b45309;background:#fefce8;margin-bottom:7px;border-radius:6px;font-size:12px;font-weight:800;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:''}
       <div style="margin-top:10px;padding:8px 12px;background:#e0f2fe;border-left:4px solid #0284c7;border-radius:6px;font-size:11px;">
         <span style="font-weight:900;color:#0284c7;">📦 ENTREGA:</span>
@@ -2144,7 +2145,8 @@ function imprimirPedido(pedido, solo=null) {
       return `<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
         <div style="width:18px;height:18px;border:2px solid #0d5c3a;border-radius:3px;flex-shrink:0;margin-top:1px;"></div>
         <div>
-          <div style="font-weight:700;text-transform:uppercase;">${item.nombre}</div>
+          <div style="font-weight:${item.listaId ? 900 : 700};text-transform:uppercase;">${lpEsc(lpTit(item))}</div>
+          ${item.listaId ? lpSubHtml(item, { precio:false, grande:true }) : ''}
           ${colInfo?`<span style="background:${colInfo.hex};color:${colInfo.tc};border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;">● ${colInfo.label}</span>`:''}
           ${fragSpec?`<div style="font-size:10px;color:#475569;margin-top:2px;">${fragSpec}</div>`:''}
           ${item.canje_lavandina?`<div style="font-size:10px;font-weight:700;color:#f97316;margin-top:2px;">⚠️ CANJE → Desodorante${(item.fragancias_canje||[]).length?' ('+(item.fragancias_canje.map(f=>f.fragancia+' '+f.cantidad+'lts').join(' + '))+')':''}</div>`:''}
@@ -2224,7 +2226,8 @@ function imprimirPedido(pedido, solo=null) {
         <div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
           <div style="width:18px;height:18px;border:2px solid #0d5c3a;border-radius:3px;flex-shrink:0;margin-top:1px;"></div>
           <div>
-            <div style="font-weight:700;font-size:13px;text-transform:uppercase;">${a.nombre}</div>
+            <div style="font-weight:${a.listaId ? 900 : 700};font-size:13px;text-transform:uppercase;">${lpEsc(lpTit(a))}</div>
+            ${a.listaId ? lpSubHtml(a, { precio:false, grande:true }) : ''}
             ${a.precio?`<div style="font-size:12px;color:#0d5c3a;font-weight:700;">${fmtDoc(parseFloat(a.precio)||0)}</div>`:''}
           </div>
         </div>`).join('')}`:'';
@@ -4917,6 +4920,16 @@ const AppMarketing = ({ usuarioActual, onCerrarSesion }) => (
 // costos_historial.data.lista = { id: costoUnitario } (solo admin, versionado).
 // Si la tabla todavía no existe o está vacía, la app usa LP_SEED para que funcione igual.
 // ═══════════════════════════════════════════════════════════════════════════════
+// Imprimibles: productos de la lista → nombre resaltado + debajo variante y cantidad
+const lpEsc = v => String(v ?? '').replace(/[<>&]/g, c => ({ '<':'&lt;', '>':'&gt;', '&':'&amp;' }[c]));
+const lpTit = x => (x && x.listaId && x.nombreBase) ? x.nombreBase : String(x?.nombre || '');
+const lpSubHtml = (x, { precio = true, grande = false } = {}) => {
+  if (!x || !x.listaId) return '';
+  const chip = x.variante ? `<span style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:8px;padding:1px 8px;font-size:${grande ? 11 : 10}px;font-weight:800;text-transform:uppercase;">${lpEsc(x.variante)}</span> ` : '';
+  const cant = `<span style="font-size:${grande ? 12 : 11}px;color:#334155;font-weight:800;">CANTIDAD: ${lpFmtCant(Number(x.cant) || 1)} ${lpEsc(x.unidad || 'u')}</span>`;
+  const pu = precio && Number(x.precioUnit) > 0 ? `<span style="font-size:11px;color:#64748b;"> × ${lpFmt2(Number(x.precioUnit))}</span>` : '';
+  return `<div style="margin-top:3px;line-height:1.9;">${chip}${cant}${pu}</div>`;
+};
 const LP_CATS = ['Productos','Envases','Extras / aditivos','Químicos / piscina','Reventa','Línea autos','Bonificaciones','Servicios'];
 const LP_FRAG_PISO = ['Lavanda','Chicle','Cherry','Pino','Summer','Marina','Citronella','Sandía','Rosa','Olor a limpio','Arpege','Naranja','Limón'];
 const LP_FRAG_PERFUMINA = ['Vivere','Confort','Coni','Secret'];

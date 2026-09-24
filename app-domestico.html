@@ -582,7 +582,7 @@ const ItemLibre = ({ lista, setLista }) => {
         <div key={a.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'9px 12px', background:'rgba(255,255,255,0.05)', borderRadius:9, marginBottom:7 }}>
           <span style={{ fontSize:13 }}>{a.nombre}</span>
           <div style={{ display:'flex', gap:10, alignItems:'center' }}>
-            <span style={{ color:C.na, fontWeight:700 }}>{fmt(a.precio)}</span>
+            <span style={{ color:C.na, fontWeight:700 }}>{precioAgrTxt(a)}</span>
             <button onClick={()=>setLista(lista.filter((_,j)=>j!==i))} style={{ background:'rgba(239,68,68,0.2)', color:'#f87171', border:'none', borderRadius:6, padding:'3px 8px', cursor:'pointer' }}>✕</button>
           </div>
         </div>

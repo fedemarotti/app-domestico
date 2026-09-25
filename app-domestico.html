@@ -4946,13 +4946,15 @@ const lpSubHtml = (x, { precio = true, grande = false } = {}) => {
   const chip = x.variante ? `<span style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:8px;padding:1px 8px;font-size:${grande ? 11 : 10}px;font-weight:800;text-transform:uppercase;">${lpEsc(x.variante)}</span> ` : '';
   const cant = `<span style="font-size:${grande ? 12 : 11}px;color:#334155;font-weight:800;">CANTIDAD: ${lpFmtCant(Number(x.cant) || 1)} ${lpEsc(x.unidad || 'u')}</span>`;
   const pu = precio && Number(x.precioUnit) > 0 ? `<span style="font-size:11px;color:#64748b;"> × ${lpFmt2(Number(x.precioUnit))}</span>` : '';
-  return `<div style="margin-top:3px;line-height:1.9;">${chip}${cant}${pu}</div>`;
+  const planta = grande ? (x.nombrePlanta || ((LP_CACHE?.lista || []).find(p => p.id === x.listaId) || {}).planta || '') : '';
+  const plantaHtml = planta ? `<div style="font-size:11px;color:#7c2d12;font-weight:800;line-height:1.4;">🏭 PLANTA: ${lpEsc(planta)}</div>` : '';
+  return `<div style="margin-top:3px;line-height:1.9;">${chip}${cant}${pu}${plantaHtml}</div>`;
 };
-const LP_CATS = ['Productos','Envases','Extras / aditivos','Químicos / piscina','Reventa','Línea autos','Bonificaciones','Servicios'];
+const LP_CATS = ['Productos','Bolsas de residuos','Papeles','Trapos y esponjas','Art varios','Pileta','Automotor','Envases','Extras / aditivos','Bonificaciones','Servicios','Químicos / piscina','Reventa','Línea autos'];
 const LP_FRAG_PISO = ['Lavanda','Chicle','Cherry','Pino','Summer','Marina','Citronella','Sandía','Rosa','Olor a limpio','Arpege','Naranja','Limón'];
 const LP_FRAG_PERFUMINA = ['Vivere','Confort','Coni','Secret'];
 const lpE = (...pares) => { const r = []; for (let i = 0; i < pares.length; i += 2) r.push({ desde: pares[i], precio: pares[i + 1] }); return r; };
-const LP_SEED = [
+const LP_SEED_V1 = [
   // Productos complementarios — lista oficial (promo, precio s/IVA)
   { id:'perfumina-10', cat:'Productos', nombre:'Perfumina concentrada 10 L', unidad:'u', escalas:lpE(1, 18433.69), cantidades:[1,2,3,5], variantes:LP_FRAG_PERFUMINA },
   { id:'perfumina-25', cat:'Productos', nombre:'Perfumina concentrada 25 L', unidad:'u', escalas:lpE(1, 43418.33), cantidades:[1,2,3,5], variantes:LP_FRAG_PERFUMINA },
@@ -5019,6 +5021,92 @@ const LP_SEED = [
   { id:'envio-extra', cat:'Servicios', nombre:'Envío extra', unidad:'u', escalas:lpE(1, 6500), cantidades:[1,2,3] },
 ].map((p, i) => ({ activo: true, variantes: [], revisar: '', ...p, orden: i }));
 
+// ═══ ART VARIOS — lista de planta 24/09/2026 (Excel "ART VARIOS APP") ═══
+// Manda sobre la lista anterior: lo superpuesto queda OCULTO (no se borra), lo demás se mantiene.
+// nombre = lo que ve el vendedor / cliente · planta = nombre interno (orden de producción y checklist).
+// 10% de descuento por BULTO CERRADO: segunda escala desde la cantidad del bulto.
+const lpB = (precio, bulto) => bulto ? lpE(1, precio, bulto, Math.round(precio * 0.9)) : lpE(1, precio);
+const lpV2 = (id, cat, nombre, planta, unidad, precio, bulto, cantidades) => ({ id, cat, nombre, planta, unidad, escalas: lpB(precio, bulto), cantidades });
+const LP_V2 = [
+  lpV2("bolsa-45x60-p10","Bolsas de residuos","Paquete de bolsa 45 x 60 de 10 unidades","Bolsa Bags Reforzada 45 x 60 (sobre x 10 un. | 50 paq. x bulto)","u",652,50,[1, 5, 10, 50]),
+  lpV2("bolsa-50x70-p10","Bolsas de residuos","Paquete de bolsa 50 x 70 de 10 unidades","Bolsa Bags Reforzada 50 x 70 (sobre x 10 un. | 50 paq. x bulto)","u",849,50,[1, 5, 10, 50]),
+  lpV2("bolsa-60x90-p10","Bolsas de residuos","Paquete de bolsa 60 x 90 de 10 unidades","Bolsa Bags Reforzada 60 x 90 (sobre x 10 un. | 25 paq. x bulto)","u",1863,25,[1, 5, 10, 25]),
+  lpV2("bolsa-60x90eco-p10","Bolsas de residuos","Paquete de bolsa 60 x 90 ECO de 10 unidades","Bolsa Bags Reforzada 60 x 90 ECO (sobre x 10 un. | 25 paq. x bulto)","u",1542,25,[1, 5, 10, 25]),
+  lpV2("bolsa-80x110-p10","Bolsas de residuos","Paquete de bolsa 80 x 110 de 10 unidades","Bolsa Bags Reforzada 80 x 110 (sobre x 10 un. | 25 paq. x bulto)","u",3676,25,[1, 5, 10, 25]),
+  lpV2("bolsa-80x110eco-p10","Bolsas de residuos","Paquete de bolsa 80 x 110 ECO de 10 unidades","Bolsa Bags Reforzada 80 x 110 ECO (sobre x 10 un. | 25 paq. x bulto)","u",2655,25,[1, 5, 10, 25]),
+  lpV2("bolsa-80x110verde-p10","Bolsas de residuos","Paquete de bolsa 80 x 110 Verde de 10 unidades","Bolsa Bags Reforzada 80 x 110 Verde (sobre x 10 un. | 25 paq. x bulto)","u",4269,25,[1, 5, 10, 25]),
+  lpV2("bolsa-90x120eco-p10","Bolsas de residuos","Paquete de bolsa 90 x 120 ECO de 10 unidades","Bolsa Bags Reforzada 90 x 120 ECO (sobre x 10 un. | 20 paq. x bulto)","u",3651,20,[1, 5, 10, 20]),
+  lpV2("bolsa-90x120-p10","Bolsas de residuos","Paquete de bolsa 90 x 120 de 10 unidades","Bolsa Bags Reforzada 90 x 120 (sobre x 10 un. | 20 paq. x bulto)","u",4532,20,[1, 5, 10, 20]),
+  lpV2("rollo-bolsa-45x60","Bolsas de residuos","Rollo de bolsa 45 x 60 (contiene 20 unidades)","Bolsa Bags Miniroll 45 x 60 (rollo x 20 un. | 24 rollos x bulto)","u",1017,24,[1, 5, 10, 24]),
+  lpV2("rollo-bolsa-50x70","Bolsas de residuos","Rollo de bolsa 50 x 70 (contiene 20 unidades)","Bolsa Bags Miniroll 50 x 70 (rollo x 20 un. | 24 rollos x bulto)","u",1276,24,[1, 5, 10, 24]),
+  lpV2("rollo-bolsa-60x90","Bolsas de residuos","Rollo de bolsa 60 x 90 (contiene 10 unidades)","Bolsa Bags Miniroll 60 x 90 (rollo x 10 un. | 24 rollos x bulto)","u",1163,24,[1, 5, 10, 24]),
+  lpV2("rollo-bolsa-80x110","Bolsas de residuos","Rollo de bolsa 80 x 110 (contiene 10 unidades)","Bolsa Bags Miniroll 80 x 110 (rollo x 10 un. | 24 rollos x bulto)","u",2490,24,[1, 5, 10, 24]),
+  lpV2("rollo-bolsa-80x110verde","Bolsas de residuos","Rollo de bolsa 80 x 110 Verde (contiene 10 unidades)","Bolsa Bags Miniroll 80 x 110 Verde (rollo x 10 un. | 12 rollos x bulto)","u",2166,12,[1, 3, 6, 12]),
+  lpV2("ph-premium-panda-50","Papeles","Papel higiénico Premium Panda (24 rollos por 50 metros) por bolsón","Papel Higiénico Blanco Premium Panda 50 x 24 un. (24 un. x bulto)","u",19923,0,[1, 2, 3, 5]),
+  lpV2("ph-premium-panda-100","Papeles","Papel higiénico Premium Panda (24 rollos por 100 metros) por bolsón","Papel Higiénico Blanco Premium Panda 100 x 24 un. (24 un. x bulto)","u",30376,0,[1, 2, 3, 5]),
+  lpV2("ph-super-panda-50","Papeles","Papel higiénico Super Panda (24 rollos por 50 metros) por bolsón","Papel Higiénico Blanco Super Panda 50 x 24 un. (24 un. x bulto)","u",15798,0,[1, 2, 3, 5]),
+  lpV2("ph-super-panda-100","Papeles","Papel higiénico Super Panda (24 rollos por 100 metros) por bolsón","Papel Higiénico Blanco Super Panda 100 x 24 un. (24 un. x bulto)","u",23129,0,[1, 2, 3, 5]),
+  lpV2("ph-jumbo-koala-250","Papeles","Papel jumbo por 250 metros (contiene 8 rollos por bulto)","Papel Higiénico Blanco Super C/CH Koala (8 un. x bulto)","u",16770,0,[1, 2, 3, 5]),
+  lpV2("rollo-ind-premium","Papeles","Rollo Industrial sin precorte Premium (4 unidades por bulto)","Toalla en Rollo Bobina Blanca Premium Panda (4 un. x bulto)","u",28169,0,[1, 2, 3, 5]),
+  lpV2("rollo-ind-comun","Papeles","Rollo Industrial sin precorte común (4 unidades por bulto)","Toalla en Rollo Bobina Blanca Premium Koala (4 un. x bulto)","u",23191,0,[1, 2, 3, 5]),
+  lpV2("toalla-interc-premium","Papeles","Toalla Intercalada Premium x 1000 un. 4 paneles","Toalla Intercalada Premium x 1000 un. 4 paneles (1000 un.)","u",12390,0,[1, 2, 3, 5]),
+  lpV2("toalla-interc-natural","Papeles","Toalla Intercalada Natural x 1000 un. 4 paneles","Toalla Intercalada Natural x 1000 un. 4 paneles (1000 un.)","u",10842,0,[1, 2, 3, 5]),
+  lpV2("bobina-ind-premium","Papeles","Bobina Industrial 20 doble hoja Premium (20 cm x 300 mts)","Bobina Industrial x 20 cm doble hoja Premium (300 mts)","u",31487,0,[1, 2, 3, 5]),
+  lpV2("bobina-ind-eco","Papeles","Bobina Industrial Eco doble hoja (20 cm x 300 mts)","Bobina Industrial Eco x 20 cm doble hoja (300 mts)","u",24816,0,[1, 2, 3, 5]),
+  lpV2("rollo-cocina-6x200","Papeles","Rollos de cocina (contiene 6 rollos por 200 paños cada uno)","Rollo de Cocina Panda 6 x 200 (6 rollos)","u",11614,0,[1, 2, 3, 5]),
+  lpV2("rollo-cocina-6x120","Papeles","Rollos de cocina (contiene seis rollos por 120 paños cada uno, doble hoja)","Rollo de Cocina Panda 6 x 120 (6 rollos)","u",10303,0,[1, 2, 3, 5]),
+  lpV2("ph-pb-30","Papeles","Papel higiénico PB 30 (30 rollos por 30 metros)","Papel Navarro PB 30 mts (30 un.)","u",9680,0,[1, 2, 3, 5]),
+  lpV2("ph-hiar-azul-60","Papeles","Papel higiénico Hiar Azul (30 rollos x 60 metros)","Papel Navarro Hiar Azul 60 mts (30 un.)","u",13552,0,[1, 2, 3, 5]),
+  lpV2("ph-adrian-90","Papeles","Papel higiénico Adrián (30 rollos x 90 metros)","Papel Navarro Adrián 90 mts (30 un.)","u",17424,0,[1, 2, 3, 5]),
+  lpV2("ph-transparente-140","Papeles","Papel higiénico Transparente (30 rollos x 140 metros)","Papel Navarro 5 kg Transparente 140 mts (30 un.)","u",24200,0,[1, 2, 3, 5]),
+  lpV2("rollo-cocina-9x200","Papeles","Rollo de cocina 9 u x 200 paños","Papel Navarro 9 x 200 Paños (9 un.)","u",15488,0,[1, 2, 3, 5]),
+  lpV2("rollo-cocina-8x3x150","Papeles","Rollo de cocina 8 paquetes de 3 u x 150 paños c/u","Papel Navarro 8 x 3 x 150 (3 un.)","u",17424,0,[1, 2, 3, 5]),
+  lpV2("trapo-gris","Trapos y esponjas","Trapo Gris","Trapo Gris (bulto x 60 un.)","u",1080,60,[1, 5, 10, 60]),
+  lpV2("trapo-rallado","Trapos y esponjas","Trapo Rallado","Trapo Rallado (bulto x 60 un.)","u",1980,60,[1, 5, 10, 60]),
+  lpV2("trapo-nido","Trapos y esponjas","Trapo Nido","Trapo Nido (bulto x 60 un.)","u",1800,60,[1, 5, 10, 60]),
+  lpV2("trapo-consorcio","Trapos y esponjas","Trapo Consorcio","Trapo Consorcio (bulto x 60 un.)","u",2160,60,[1, 5, 10, 60]),
+  lpV2("rejilla-simple","Trapos y esponjas","Rejilla Simple","Rejilla Simple (bulto x 120 un.)","u",324,120,[1, 10, 20, 120]),
+  lpV2("rejilla-doble-pabilo","Trapos y esponjas","Rejilla Doble Pabilo","Rejilla Doble Pabilo (bulto x 120 un.)","u",504,120,[1, 10, 20, 120]),
+  lpV2("rejilla-pesada-auto","Trapos y esponjas","Rejilla Pesada Auto","Rejilla Pesada Auto (bulto x 120 un.)","u",2430,120,[1, 10, 20, 120]),
+  lpV2("franela","Trapos y esponjas","Franela","Franela (bulto x 60 un.)","u",1620,60,[1, 5, 10, 60]),
+  lpV2("pano-amarillo-eco","Trapos y esponjas","Paño Amarillo Eco","Paño Amarillo Eco (bulto x 120 un.)","u",720,120,[1, 10, 20, 120]),
+  lpV2("pano-amarillo","Trapos y esponjas","Paño Amarillo","Paño Amarillo (bulto x 120 un.)","u",1080,120,[1, 10, 20, 120]),
+  lpV2("percarbonato-kg","Art varios","Percarbonato","Percarbonato","kg",9500,0,[0.5, 1, 2, 5]),
+  lpV2("bicarbonato-kg","Art varios","Bicarbonato","Bicarbonato","kg",4000,0,[0.5, 1, 2, 5]),
+  lpV2("acido-citrico-kg","Art varios","Ácido cítrico","Acido citrico","kg",8500,0,[0.5, 1, 2, 5]),
+  lpV2("vinagre-limpieza-5l","Art varios","Ácido acético 10% (vinagre de limpieza) x 5 L","Acido acetico 10%(vinagre de limpieza)","u",7000,0,[1, 2, 3, 5]),
+  lpV2("aerosol-aerosoft","Art varios","Aerosoles Aerosoft","Aerosoles Aerosoft","u",4800,0,[1, 3, 6, 12]),
+  lpV2("dicloro","Pileta","Granulado fino para piletas pintadas","Dicloro","kg",7000,0,[1, 2, 5, 10]),
+  lpV2("tricloro","Pileta","Granulado grueso para piletas con venecita","Tricloro","kg",7000,0,[1, 2, 5, 10]),
+  lpV2("pastillas-triple","Pileta","Pastillas de cloro triple función","Triple accion","kg",7000,0,[1, 2, 5, 10]),
+  lpV2("cristalfloc","Pileta","CristalFloc (pastilla clarificante)","CristalFloc","u",6000,0,[1, 2, 5, 10]),
+  lpV2("clarificante","Pileta","Clarificante (para preparar 10 L, cada litro preparado es para 100.000 L)","Clarificante","L",32000,0,[1, 2, 3, 5]),
+  lpV2("alguicida","Pileta","Alguicida (para preparar 10 L, cada litro preparado es para 100.000 L)","Alguicida","L",41000,0,[1, 2, 3, 5]),
+  lpV2("reductor-ph","Pileta","Reductor PH","Reductor PH","L",1100,0,[1, 5, 10, 20]),
+  lpV2("oxiclor","Pileta","Oxiclor (recuperador para aguas verdes)","Oxiclor","kg",13000,0,[1, 2, 5, 10]),
+  lpV2("cloro-liquido","Pileta","Cloro líquido","Cloro liquido","L",800,0,[5, 10, 20, 50]),
+  lpV2("revividor","Automotor","Revividor","Revividor","L",9000,0,[1, 2, 3, 5]),
+  lpV2("silicona","Automotor","Silicona","Silicona","L",14000,0,[1, 2, 3, 5]),
+  lpV2("cera-auto","Automotor","Cera P/auto","Cera P/auto","L",9000,0,[1, 2, 3, 5]),
+  lpV2("abrillantador","Automotor","Abrillantador","Abrillantador","L",8000,0,[1, 2, 3, 5]),
+];
+const LP_V2_MARCA = 'bolsa-45x60-p10'; // si ya está en la lista, la migración ya corrió
+const LP_V2_OCULTAR = ['bolsa-40x60','bolsa-45x60','bolsa-80x110','rollo-3x150','rollo-panda','ph-panda','bolson-5kg','bolson-4kg','bolson-15kg','trapo-piso','rejilla-x10','percarbonato','acido-citrico','bicarbonato','pastillas-cloro','cloro-granulado','cloro-20','cloro-bidon','abrillantador-ext-1','silicona-1','revividor-int-1'];
+const LP_V2_RECAT = { 'esponjas-x10':'Trapos y esponjas', 'shampoo-auto-sil-50':'Automotor', 'shampoo-auto-silteflon-50':'Automotor' };
+const lpAplicarV2 = lista => {
+  if (lista.some(p => p.id === LP_V2_MARCA)) return { lista, cambios: [] };
+  const cambios = [];
+  const out = lista.map(p => {
+    if (LP_V2_OCULTAR.includes(p.id) && p.activo !== false) { const n = { ...p, activo: false, revisar: 'Reemplazado por ART VARIOS (24/09/2026)' }; cambios.push(n); return n; }
+    if (LP_V2_RECAT[p.id] && ['Productos', 'Reventa'].includes(p.cat)) { const n = { ...p, cat: LP_V2_RECAT[p.id] }; cambios.push(n); return n; }
+    return p;
+  });
+  const base = Math.max(0, ...out.map(p => Number(p.orden) || 0)) + 1;
+  LP_V2.forEach((p, i) => { if (!out.some(x => x.id === p.id)) { const n = { activo: true, variantes: [], revisar: '', ...p, orden: base + i }; out.push(n); cambios.push(n); } });
+  return { lista: out, cambios };
+};
+const LP_SEED = lpAplicarV2(LP_SEED_V1).lista;
+
 // Números en formato argentino: "18.433,69" → 18433.69 · "1.500" → 1500 · "2,5" → 2.5 · "0.5" → 0.5
 const lpNum = v => {
   if (typeof v === 'number') return isFinite(v) ? v : 0;
@@ -5055,7 +5143,13 @@ const lpCargar = async (forzar = false) => {
     if (supaClient) {
       const { data, error } = await supaClient.from('lista_precios').select('id,orden,data').order('orden', { ascending: true });
       if (!error && data && data.length) {
-        LP_CACHE = { lista: data.map(r => ({ activo: true, variantes: [], cantidades: [1, 2, 5, 10], escalas: [], ...(r.data || {}), id: r.id, orden: r.orden ?? 0 })), origen: 'supabase' };
+        const m = lpAplicarV2(data.map(r => ({ activo: true, variantes: [], cantidades: [1, 2, 5, 10], escalas: [], ...(r.data || {}), id: r.id, orden: r.orden ?? 0 })));
+        if (m.cambios.length) {
+          // Solo el admin puede escribir (RLS): para el resto falla en silencio y la lista nueva se aplica en memoria.
+          const filas = m.cambios.map(p => { const { id, orden, ...d } = p; return { id, orden: orden ?? 0, data: d, actualizado: new Date().toISOString() }; });
+          supaClient.from('lista_precios').upsert(filas, { onConflict: 'id' }).then(() => {}, () => {});
+        }
+        LP_CACHE = { lista: m.lista, origen: 'supabase' };
         return LP_CACHE;
       }
       if (error) LP_CACHE = { lista: LP_SEED, origen: 'seed', error: error.message };
@@ -5086,7 +5180,7 @@ const ListaPreciosPicker = ({ onAgregar, titulo = '📋 LISTA DE PRECIOS', soloU
   const lista = (lp?.lista || []).filter(p => p.activo !== false);
   const cats = LP_CATS.filter(c => lista.some(p => p.cat === c)).concat([...new Set(lista.map(p => p.cat))].filter(c => !LP_CATS.includes(c)));
   const qn = q.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  const vis = lista.filter(p => (!cat || p.cat === cat) && (!qn || p.nombre.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes(qn)));
+  const vis = lista.filter(p => (!cat || p.cat === cat) && (!qn || `${p.nombre} ${p.planta || ''}`.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes(qn)));
   const elegir = p => { setSel(p); setCant(String((p.cantidades || [])[0] ?? 1)); setVari((p.variantes || [])[0] || ''); setOk(''); };
   const cN = lpNum(cant);
   const pu = sel ? lpPrecioUnit(sel, cN) : 0;
@@ -5096,7 +5190,7 @@ const ListaPreciosPicker = ({ onAgregar, titulo = '📋 LISTA DE PRECIOS', soloU
     if (!sel || !(cN > 0)) return;
     const nomVar = vari ? ` (${vari})` : '';
     const nombre = `${lpFmtCant(cN)}${sel.unidad && sel.unidad !== 'u' ? ' ' + sel.unidad : ''} x ${sel.nombre}${nomVar}`.replace(/[<>]/g, '');
-    onAgregar({ nombre, precio: total, listaId: sel.id, cant: cN, precioUnit: pu, variante: vari || null, unidad: sel.unidad || 'u', nombreBase: sel.nombre });
+    onAgregar({ nombre, precio: total, listaId: sel.id, cant: cN, precioUnit: pu, variante: vari || null, unidad: sel.unidad || 'u', nombreBase: sel.nombre, nombrePlanta: sel.planta || null });
     setOk(`✓ Agregado: ${nombre}`); if (!soloUno) setSel(null);
   };
   const chip = (act, rgb) => ({ padding:'8px 12px', borderRadius:999, border:`1px solid ${act ? `rgba(${rgb},0.7)` : C.ln}`, background: act ? `rgba(${rgb},0.22)` : 'rgba(255,255,255,0.04)', color: act ? '#fff' : C.tx2, fontWeight:750, fontSize:12.5, cursor:'pointer', fontFamily:'inherit', whiteSpace:'nowrap' });
@@ -5210,6 +5304,7 @@ const ModuloListaPrecios = ({ onVolver }) => {
         <div style={s.card}>
           <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
             <div><label style={s.lbl}>Nombre</label><input value={edit.nombre} onChange={e => setE('nombre', e.target.value)} style={s.inp} /></div>
+            <div><label style={s.lbl}>Nombre para planta (orden de producción / checklist)</label><input value={edit.planta || ''} onChange={e => setE('planta', e.target.value)} placeholder="Opcional" style={s.inp} /></div>
             <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:8 }}>
               <div><label style={s.lbl}>Categoría</label><select value={edit.cat} onChange={e => setE('cat', e.target.value)} style={s.inp}>{LP_CATS.map(c => <option key={c}>{c}</option>)}</select></div>
               <div><label style={s.lbl}>Unidad</label><select value={edit.unidad} onChange={e => setE('unidad', e.target.value)} style={s.inp}>{['u','kg','L','pack'].map(c => <option key={c}>{c}</option>)}</select></div>

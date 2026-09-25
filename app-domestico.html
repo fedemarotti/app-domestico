@@ -2476,7 +2476,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
         ts: pedidoFinal ? pedidoFinal.ts : Date.now(),
         cliente, items:carrito,
         envases:dEnv.baldes,
-        extras:{ ...extrasUsados, agregados:agregadosHeredados, cajas:dEnv.cajas, precioCaja: precioCajaDEF, precioBalde: precioBaldeDEF },
+        extras:{ ...extrasUsados, bultos: Math.max(extrasUsados.bultos || 1, dEnv.baldes + dEnv.cajas), agregados:agregadosHeredados, cajas:dEnv.cajas, precioCaja: precioCajaDEF, precioBalde: precioBaldeDEF },
         totales:{ productos:totalProd, envases:totalEnv, agregados:totalAgr, envio:totalEnvio, total },
         zonaEnvio:zona, estado: pedidoFinal ? pedidoFinal.estado : 'pendiente',
         creadoPor: pedidoFinal ? pedidoFinal.creadoPor : (usuarioActual?.email || null)
@@ -6088,7 +6088,11 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 
     // Caso especial: "ultimos" → últimos 10 pedidos
     if (/ULTI/.test(q)) {
-      const ultimos = pedidos.slice(0, 10);
+      const ultimos = [];
+      pedidos.slice(0, 10).forEach(p => {
+        const x = p.tipo === 'PRE' ? (defDePRE(p.codigo) || p) : p;
+        if (!ultimos.find(u => u.codigo === x.codigo)) ultimos.push(x);
+      });
       if (ultimos.length === 0) { setBusResults([]); setBusError('No hay pedidos guardados.'); }
       else { setBusResults(ultimos); setBusError(''); }
       return;
@@ -6180,7 +6184,14 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 
   const irPreNuevo = () => { setCodigoPRE(null); setEtapa('pre'); };
   const irDefNuevo = () => { setCodigoPRE(null); setClientePreload(null); setModalidadPreload(null); setEtapa('pre'); };
-  const irDefDesdePRE = (cod, mod) => { setCodigoPRE(cod); if (mod) setModalidadPreload(mod); setEtapa('def'); };
+  const defDePRE = cod => (pedidos || []).find(x => x.tipo === 'DEF' && x.codigoPRE === cod && x.codigo !== cod);
+  // Una PRE ya confirmada no se vuelve a confirmar: se abre la venta existente (evita ventas duplicadas).
+  const irDEFSeguro = (cod, cli, mod) => {
+    const ya = defDePRE(cod);
+    if (ya) { alert(`⚠️ La ${cod} ya se confirmó como ${ya.codigo}${ya.cliente?.nombre ? ' (' + ya.cliente.nombre + ')' : ''}. Te abro esa venta para no duplicarla.`); setPedidoVer(ya); setPedidoVerOrigen('search'); setEtapa('ver_pedido'); return; }
+    setCodigoPRE(cod); if (cli) setClientePreload(cli); if (mod) setModalidadPreload(mod); setEtapa('def');
+  };
+  const irDefDesdePRE = (cod, mod) => irDEFSeguro(cod, null, mod);
   const irInicio = () => { setEtapa('inicio'); setBusResults([]); setBusqueda(''); setBusError(''); setClientePreload(null); setModalidadPreload(null); listLS().then(arr => setPedidos(Array.isArray(arr) ? arr : [])); };
   const irClientes = () => { setEtapa('clientes'); setBusResults([]); setBusqueda(''); setBusError(''); };
   const nuevoPedidoDesdeCli = (cli) => { setClientePreload(cli); setCodigoPRE(null); setEtapa('pre'); };
@@ -6316,7 +6327,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
         )}
 
         {/* ── PRE NUEVA ── */}
-        {etapa==='pre' && <PreCotizacion onVolver={irInicio} onIrDEF={(cod, cli, mod)=>{ setCodigoPRE(cod); if(cli) setClientePreload(cli); if(mod) setModalidadPreload(mod); setEtapa('def'); }} clienteInicial={clientePreload} usuarioActual={usuarioActual} />}
+        {etapa==='pre' && <PreCotizacion onVolver={irInicio} onIrDEF={irDEFSeguro} clienteInicial={clientePreload} usuarioActual={usuarioActual} />}
 
         {/* ── PRE CARGADA ── */}
         {/* PRE cargada desde búsqueda/clientes. La pantalla se monta RECIÉN cuando llegaron los datos
@@ -6327,7 +6338,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
             ? <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'60vh',color:'rgba(255,255,255,0.6)',fontSize:16,flexDirection:'column',gap:14}}><div style={{width:38,height:38,border:'3px solid rgba(255,255,255,0.15)',borderTop:'3px solid rgba(255,255,255,0.8)',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}></div>Cargando pre-cotización...</div>
             : <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'60vh',color:'rgba(255,255,255,0.7)',fontSize:15,flexDirection:'column',gap:16,textAlign:'center',padding:20}}><div>⚠️ No se encontró la pre-cotización <strong>{etapa.replace('pre_cargado_','')}</strong>.<br/>Revisá la conexión y volvé a buscarla.</div><button onClick={irInicio} className="sel-btn" style={s.bS}>🏠 Volver al inicio</button></div>
         )}
-        {esPRECargado && codigoCargado && <PreCotizacion key={codigoCargado.codigo} onVolver={irInicio} onIrDEF={(cod, cli, mod)=>{ setCodigoPRE(cod); if(cli) setClientePreload(cli); if(mod) setModalidadPreload(mod); setEtapa('def'); }} preloaded={codigoCargado} usuarioActual={usuarioActual} />}
+        {esPRECargado && codigoCargado && <PreCotizacion key={codigoCargado.codigo} onVolver={irInicio} onIrDEF={irDEFSeguro} preloaded={codigoCargado} usuarioActual={usuarioActual} />}
 
         {/* ── CLIENTES ── */}
         {etapa==='clientes' && <ModuloClientes onNuevoPedido={nuevoPedidoDesdeCli} onVolver={irInicio} onAbrirPedido={(p)=>{ if(p.tipo==='PRE'){ setEtapa('pre_cargado_'+p.codigo); } else { setPedidoVer(p); setEtapa('ver_pedido'); } }} />}

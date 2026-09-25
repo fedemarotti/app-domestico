@@ -1200,9 +1200,9 @@ const DetalleDEF = ({ itemPRE, onConfirm }) => {
     useEffect(() => { if (!pideFrag) onConfirm({ ...itemPRE }); }, []);
     if (pideFrag) return (
       <div>
-        <SH step="Detalle · Fragancia" title={nombre} />
+        <SH step={lpTipoVar(itemPRE) === 'color' ? 'Detalle · Color' : 'Detalle · Fragancia'} title={nombre} />
         <div style={s.card}>
-          <div style={s.cTit}>Elegí la fragancia</div>
+          <div style={s.cTit}>{lpTipoVar(itemPRE) === 'color' ? 'Elegí el color' : 'Elegí la fragancia'}</div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,minmax(0,1fr))', gap:6 }}>
             {varsDEF.map(f => (
               <button key={f} onClick={() => onConfirm({ ...itemPRE, variante: f, nombre: `${itemPRE.nombre} (${f})` })} className="sel-btn"
@@ -4967,7 +4967,7 @@ const lpSubHtml = (x, { precio = true, grande = false } = {}) => {
   const plantaHtml = planta ? `<div style="font-size:11px;color:#7c2d12;font-weight:800;line-height:1.4;">🏭 PLANTA: ${lpEsc(planta)}</div>` : '';
   return `<div style="margin-top:3px;line-height:1.9;">${chip}${cant}${pu}${plantaHtml}</div>`;
 };
-const LP_CATS = ['Productos','Bolsas de residuos','Papeles','Trapos y esponjas','Art varios','Pileta','Automotor','Envases','Extras / aditivos','Bonificaciones','Servicios','Químicos / piscina','Reventa','Línea autos'];
+const LP_CATS = ['Productos','Bolsas de residuos','Papeles','Trapos y esponjas','Limpieza ecológica','Pileta','Automotor','Envases','Aditivos - Pastas','Bonificaciones','Servicios','Químicos / piscina','Reventa','Línea autos'];
 const LP_FRAG_PISO = ['Lavanda','Chicle','Cherry','Pino','Summer','Marina','Citronella','Sandía','Rosa','Olor a limpio','Arpege','Naranja','Limón'];
 const LP_FRAG_PERFUMINA = ['Vivere','Confort','Coni','Secret'];
 const lpE = (...pares) => { const r = []; for (let i = 0; i < pares.length; i += 2) r.push({ desde: pares[i], precio: pares[i + 1] }); return r; };
@@ -5122,7 +5122,42 @@ const lpAplicarV2 = lista => {
   LP_V2.forEach((p, i) => { if (!out.some(x => x.id === p.id)) { const n = { activo: true, variantes: [], revisar: '', ...p, orden: base + i }; out.push(n); cambios.push(n); } });
   return { lista: out, cambios };
 };
-const LP_SEED = lpAplicarV2(LP_SEED_V1).lista;
+// ═══ 25/09/2026 (Fede): categorías y nombres ═══
+// "Art varios" → "Limpieza ecológica" · "Extras / aditivos" → "Aditivos - Pastas" · nombres nuevos · aditivos para detergente.
+const LP_V3_MARCA = 'aditivo-det-50';
+const LP_V3_CAT = { 'Art varios':'Limpieza ecológica', 'Extras / aditivos':'Aditivos - Pastas' };
+const LP_V3_NOMBRE = {
+  'vinagre-limpieza-5l':'Vinagre de Limpieza 10 % (Bidón 5 Lt)',
+  'perfume-jabon-50':'Aditivo Perfume Jabón P/ 50 Lts',
+  'perfume-suavi-50':'Aditivo Perfume Extra Suavizante P/50 Lts',
+  'perfume-jabon-200':'Aditivo Perfume Jabón P/ 200 Lts',
+  'perfume-suavi-200':'Aditivo Perfume Extra Suavizante P/200 Lts',
+  'colorante-05':'Colorante 1/2 Lt',
+};
+const LP_V3_NUEVOS = [
+  { id:'aditivo-det-50', cat:'Aditivos - Pastas', nombre:'Aditivo Para Detergente P/50 Lts', planta:'', unidad:'u', escalas:lpE(1, 8000), cantidades:[1,2,3,4] },
+  { id:'aditivo-det-200', cat:'Aditivos - Pastas', nombre:'Aditivo Para Detergente P/200 Lts', planta:'', unidad:'u', escalas:lpE(1, 32000), cantidades:[1,2] },
+];
+const LP_V3_ORDEN = ['perfume-jabon-50','perfume-suavi-50','perfume-jabon-200','perfume-suavi-200','aditivo-det-50','aditivo-det-200','colorante-05'];
+const lpAplicarV3 = lista => {
+  if (lista.some(p => p.id === LP_V3_MARCA)) return { lista, cambios: [] };
+  const cambios = [];
+  let out = lista.map(p => {
+    let n = p;
+    if (LP_V3_CAT[n.cat]) n = { ...n, cat: LP_V3_CAT[n.cat] };
+    if (LP_V3_NOMBRE[n.id]) n = { ...n, nombre: LP_V3_NOMBRE[n.id] };
+    if (n !== p) cambios.push(n);
+    return n;
+  });
+  LP_V3_NUEVOS.forEach(p => { if (!out.some(x => x.id === p.id)) { const n = { activo: true, variantes: [], revisar: '', ...p, orden: 0 }; out.push(n); cambios.push(n); } });
+  // orden de los aditivos como los pasó Fede
+  const base = Math.min(...out.filter(p => LP_V3_ORDEN.includes(p.id)).map(p => Number(p.orden) || 0).filter(o => o > 0).concat([9000]));
+  out = out.map(p => { const i = LP_V3_ORDEN.indexOf(p.id); if (i < 0) return p; const n = { ...p, orden: base + i * 0.01 }; const k = cambios.findIndex(c => c.id === p.id); if (k >= 0) cambios[k] = n; else cambios.push(n); return n; });
+  out.sort((a, b) => (Number(a.orden) || 0) - (Number(b.orden) || 0));
+  return { lista: out, cambios };
+};
+const lpMigrar = lista => { const a = lpAplicarV2(lista); const b = lpAplicarV3(a.lista); const m = new Map(); a.cambios.concat(b.cambios).forEach(p => m.set(p.id, b.lista.find(x => x.id === p.id) || p)); return { lista: b.lista, cambios: [...m.values()] }; };
+const LP_SEED = lpMigrar(LP_SEED_V1).lista;
 
 // Números en formato argentino: "18.433,69" → 18433.69 · "1.500" → 1500 · "2,5" → 2.5 · "0.5" → 0.5
 const lpNum = v => {
@@ -5160,7 +5195,7 @@ const lpCargar = async (forzar = false) => {
     if (supaClient) {
       const { data, error } = await supaClient.from('lista_precios').select('id,orden,data').order('orden', { ascending: true });
       if (!error && data && data.length) {
-        const m = lpAplicarV2(data.map(r => ({ activo: true, variantes: [], cantidades: [1, 2, 5, 10], escalas: [], ...(r.data || {}), id: r.id, orden: r.orden ?? 0 })));
+        const m = lpMigrar(data.map(r => ({ activo: true, variantes: [], cantidades: [1, 2, 5, 10], escalas: [], ...(r.data || {}), id: r.id, orden: r.orden ?? 0 })));
         if (m.cambios.length) {
           // Solo el admin puede escribir (RLS): para el resto falla en silencio y la lista nueva se aplica en memoria.
           const filas = m.cambios.map(p => { const { id, orden, ...d } = p; return { id, orden: orden ?? 0, data: d, actualizado: new Date().toISOString() }; });
@@ -5188,8 +5223,9 @@ const lpGuardar = async (prod) => {
 // pedirVariante=false (PRE): la fragancia se elige al pasar a DEF (como las pastas).
 // Admin: al final, BORRAR PRODUCTOS (✕ = ocultar, reversible en Lista de precios) y AGREGAR PRODUCTO.
 // onAgregar recibe { nombre, precio, listaId, cant, precioUnit, variante, variantes, unidad, nombreBase, nombrePlanta }
-const LP_ICO = { 'Productos':'🧴', 'Bolsas de residuos':'🗑️', 'Papeles':'🧻', 'Trapos y esponjas':'🧽', 'Art varios':'🧪', 'Pileta':'🏊', 'Automotor':'🚗', 'Envases':'🪣', 'Extras / aditivos':'✨', 'Bonificaciones':'🎁', 'Servicios':'🚚', 'Químicos / piscina':'🧪', 'Reventa':'🛒', 'Línea autos':'🚗' };
+const LP_ICO = { 'Limpieza ecológica':'🌿', 'Aditivos - Pastas':'✨', 'Productos':'🧴', 'Bolsas de residuos':'🗑️', 'Papeles':'🧻', 'Trapos y esponjas':'🧽', 'Art varios':'🧪', 'Pileta':'🏊', 'Automotor':'🚗', 'Envases':'🪣', 'Extras / aditivos':'✨', 'Bonificaciones':'🎁', 'Servicios':'🚚', 'Químicos / piscina':'🧪', 'Reventa':'🛒', 'Línea autos':'🚗' };
 const LP_CORTO = { 'Bolsas de residuos':'Bolsas residuos', 'Extras / aditivos':'Extras aditivos', 'Bonificaciones':'Bonifica­ciones', 'Químicos / piscina':'Químicos piscina' };
+const lpTipoVar = p => /colorante/i.test(p?.nombre || p?.nombreBase || '') ? 'color' : 'fragancia';
 const lpNorm = t => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const lpBulto = p => { const e = [...(p?.escalas || [])].sort((a, b) => lpNum(a.desde) - lpNum(b.desde)); return e.length > 1 ? lpNum(e[e.length - 1].desde) : 0; };
 const ListaPreciosPicker = ({ onAgregar, titulo = '📋 LISTA DE PRECIOS', soloUno = false, pedirVariante = true }) => {
@@ -5262,7 +5298,7 @@ const ListaPreciosPicker = ({ onAgregar, titulo = '📋 LISTA DE PRECIOS', soloU
           <span style={{ flex:1, minWidth:0, fontSize:13.5, fontWeight:600, lineHeight:1.3 }}>
             {p.nombre}
             {b > 1 && <span style={{ marginLeft:6, fontSize:9.5, fontWeight:800, color:'#4ade80', background:'rgba(34,197,94,0.13)', padding:'2px 5px', borderRadius:5, whiteSpace:'nowrap' }}>-10% x {b}</span>}
-            {(p.variantes || []).length > 0 && !pedirVariante && <span style={{ marginLeft:6, fontSize:9.5, fontWeight:800, color:'#c4b5fd', background:'rgba(139,92,246,0.16)', padding:'2px 5px', borderRadius:5, whiteSpace:'nowrap' }}>FRAGANCIA EN DEF</span>}
+            {(p.variantes || []).length > 0 && !pedirVariante && <span style={{ marginLeft:6, fontSize:9.5, fontWeight:800, color:'#c4b5fd', background:'rgba(139,92,246,0.16)', padding:'2px 5px', borderRadius:5, whiteSpace:'nowrap' }}>{lpTipoVar(p) === 'color' ? 'COLOR' : 'FRAGANCIA'} EN DEF</span>}
             {qn && p.planta && toks.some(t => lpNorm(p.planta).includes(t) && !lpNorm(p.nombre).includes(t)) && <span style={{ display:'block', fontSize:11, color:C.tx3, marginTop:2 }}>planta: {p.planta}</span>}
           </span>
           <span style={{ textAlign:'right', whiteSpace:'nowrap', fontSize:13.5, fontWeight:850, color: pb > 0 ? '#FDBA74' : '#6ee7b7' }}>
@@ -5295,7 +5331,7 @@ const ListaPreciosPicker = ({ onAgregar, titulo = '📋 LISTA DE PRECIOS', soloU
       <button onClick={() => { setNuevo(null); setMsgA(''); }} style={{ ...btnMini, marginBottom:12 }}>← Volver a la lista</button>
       <div style={s.cTit}>➕ AGREGAR PRODUCTO</div>
       <label style={s.lbl}>1 · Categoría</label>
-      <div style={{ ...grid3, marginBottom:14 }}>{LP_CATS.filter(c => !['Químicos / piscina', 'Reventa', 'Línea autos'].includes(c)).map(c => tile(c, nuevo.cat === c, () => setNuevo({ ...nuevo, cat: c })))}</div>
+      <div style={{ ...grid3, marginBottom:14 }}>{LP_CATS.filter(c => !['Químicos / piscina', 'Reventa', 'Línea autos', 'Art varios', 'Extras / aditivos'].includes(c)).map(c => tile(c, nuevo.cat === c, () => setNuevo({ ...nuevo, cat: c })))}</div>
       <label style={s.lbl}>2 · Nombre (lo que ve el vendedor y el cliente)</label>
       <input value={nuevo.nombre} onChange={e => setNuevo({ ...nuevo, nombre: e.target.value })} placeholder="Ej: Paquete de bolsa 45 x 60 de 10 unidades" style={{ ...s.inp, marginBottom:12 }} />
       <label style={s.lbl}>Nombre para planta (opcional)</label>
@@ -5387,7 +5423,7 @@ const ListaPreciosPicker = ({ onAgregar, titulo = '📋 LISTA DE PRECIOS', soloU
             {(sel.cantidades || [1, 2, 5, 10]).map(n => <button key={n} onClick={() => setCant(lpFmtCant(lpNum(n)))} style={{ padding:'8px 13px', borderRadius:999, border:`1px solid ${cN === lpNum(n) ? 'rgba(249,115,22,0.7)' : C.ln}`, background: cN === lpNum(n) ? 'rgba(249,115,22,0.22)' : 'rgba(255,255,255,0.04)', color: cN === lpNum(n) ? '#fff' : C.tx2, fontWeight:750, fontSize:13.5, cursor:'pointer', fontFamily:'inherit' }}>{lpFmtCant(lpNum(n))}{bulto > 1 && lpNum(n) === bulto ? ' · bulto' : ''}</button>)}
           </div>
           {bulto > 1 && cN > 0 && cN < bulto && cN >= bulto * 0.6 && <div style={{ fontSize:12, color:'#fbbf24', marginBottom:10 }}>Faltan {lpFmtCant(bulto - cN)} {sel.unidad || 'u'} para el bulto cerrado: con {lpFmtCant(bulto)} el total baja a {fmt(Math.round(lpPrecioUnit(sel, bulto) * bulto))}.</div>}
-          {!pedirVariante && (sel.variantes || []).length > 0 && <div style={{ fontSize:12, color:C.tx3, background:'rgba(139,92,246,0.10)', border:'1px solid rgba(139,92,246,0.3)', borderRadius:10, padding:'8px 10px', marginBottom:10 }}>Tiene fragancias ({sel.variantes.slice(0, 4).join(', ')}{sel.variantes.length > 4 ? '…' : ''}). Se eligen al pasar a DEF.</div>}
+          {!pedirVariante && (sel.variantes || []).length > 0 && <div style={{ fontSize:12, color:C.tx3, background:'rgba(139,92,246,0.10)', border:'1px solid rgba(139,92,246,0.3)', borderRadius:10, padding:'8px 10px', marginBottom:10 }}>Tiene {lpTipoVar(sel) === 'color' ? 'colores' : 'fragancias'} ({sel.variantes.slice(0, 4).join(', ')}{sel.variantes.length > 4 ? '…' : ''}). Se eligen al pasar a DEF.</div>}
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', borderTop:`1px solid ${C.ln}`, paddingTop:10, marginBottom:12 }}>
             <span style={{ fontSize:12.5, color:C.tx2 }}>{lpFmtCant(cN)} {sel.unidad || 'u'} × {lpFmt2(pu)}</span>
             <span style={s.tot}>{total > 0 ? fmt(total) : (cN > 0 ? 'Sin cargo' : '$0')}</span>

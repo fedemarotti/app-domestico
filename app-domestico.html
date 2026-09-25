@@ -4995,7 +4995,7 @@ const LP_SEED_V1 = [
   { id:'botella-1', cat:'Envases', nombre:'Botella 1 L', unidad:'u', escalas:lpE(1, 500), cantidades:[10,20,24,50,100] },
   { id:'pet-1', cat:'Envases', nombre:'Envase PET 1 L', unidad:'u', escalas:lpE(1, 350), cantidades:[10,20,50,100] },
   { id:'botella-05', cat:'Envases', nombre:'Botella 1/2 L', unidad:'u', escalas:lpE(1, 400), cantidades:[10,20,50,100,150] },
-  { id:'cunete-50', cat:'Envases', nombre:'Cuñete / tanque 50 L', unidad:'u', escalas:lpE(1, 12000), cantidades:[1,2,3,5,10] },
+  { id:'cunete-50', cat:'Envases', nombre:'Cuñete / tanque 50 L', unidad:'u', escalas:lpE(1, 13000), cantidades:[1,2,3,5,10] },
   { id:'tacho-200', cat:'Envases', nombre:'Tacho 200 L', unidad:'u', escalas:lpE(1, 40000), cantidades:[1,2,3] },
   { id:'balde-20', cat:'Envases', nombre:'Balde 20 L para transporte', unidad:'u', escalas:lpE(1, 5000), cantidades:[1,2,3,5] },
   { id:'caja-traslado', cat:'Envases', nombre:'Caja para traslado', unidad:'u', escalas:lpE(1, 1500), cantidades:[1,2,3,5] },
@@ -5156,7 +5156,16 @@ const lpAplicarV3 = lista => {
   out.sort((a, b) => (Number(a.orden) || 0) - (Number(b.orden) || 0));
   return { lista: out, cambios };
 };
-const lpMigrar = lista => { const a = lpAplicarV2(lista); const b = lpAplicarV3(a.lista); const m = new Map(); a.cambios.concat(b.cambios).forEach(p => m.set(p.id, b.lista.find(x => x.id === p.id) || p)); return { lista: b.lista, cambios: [...m.values()] }; };
+// 25/09/2026: Cuñete / tanque 50 L pasa a $13.000 (se aplica una sola vez; si el admin lo edita después, manda lo suyo).
+const lpAplicarV4 = lista => {
+  const cambios = [];
+  const out = lista.map(p => {
+    if (p.id !== 'cunete-50' || (Number(p.migr) || 0) >= 4) return p;
+    const n = { ...p, escalas: lpE(1, 13000), migr: 4 }; cambios.push(n); return n;
+  });
+  return { lista: out, cambios };
+};
+const lpMigrar = lista => { const a = lpAplicarV2(lista); const b = lpAplicarV3(a.lista); const c = lpAplicarV4(b.lista); const m = new Map(); a.cambios.concat(b.cambios, c.cambios).forEach(p => m.set(p.id, c.lista.find(x => x.id === p.id) || p)); return { lista: c.lista, cambios: [...m.values()] }; };
 const LP_SEED = lpMigrar(LP_SEED_V1).lista;
 
 // Números en formato argentino: "18.433,69" → 18433.69 · "1.500" → 1500 · "2,5" → 2.5 · "0.5" → 0.5

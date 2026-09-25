@@ -1087,7 +1087,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
           <div>
             <button onClick={()=>setPaso('inicio')} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.75)', border:'1px solid rgba(255,255,255,0.14)', borderRadius:8, fontWeight:600, fontSize:12, cursor:'pointer', marginBottom:18 }}>← Atrás</button>
             <SH step="Pre-cotización · Lista de precios" title="Otros productos" />
-            <ListaPreciosPicker titulo="📋 ELEGIR DE LA LISTA DE PRECIOS" soloUno onAgregar={a=>{ setItems([...items,{ id:uid(), tipoItem:'manual', ...a }]); setManual({ nombre:'', precio:'' }); setPaso('inicio'); }} />
+            <ListaPreciosPicker titulo="📋 ELEGIR DE LA LISTA DE PRECIOS" soloUno pedirVariante={false} onAgregar={a=>{ setItems([...items,{ id:uid(), tipoItem:'manual', ...a }]); setManual({ nombre:'', precio:'' }); setPaso('inicio'); }} />
             <div style={s.card}>
               <div style={s.cTit}>✏️ Cargar producto a mano</div>
               <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
@@ -1194,7 +1194,24 @@ const DetalleDEF = ({ itemPRE, onConfirm }) => {
 
   // PRODUCTO MANUAL — no pide detalle de producción: se confirma solo al entrar, con nombre y precio.
   if (tipoItem==='manual') {
-    useEffect(() => { onConfirm({ ...itemPRE }); }, []);
+    // Producto de la lista con fragancias elegidas en DEF (desde 25/09/2026 la PRE no las pide)
+    const varsDEF = itemPRE?.listaId && !itemPRE.variante ? (itemPRE.variantes || ((LP_CACHE?.lista || []).find(p => p.id === itemPRE.listaId) || {}).variantes || []) : [];
+    const pideFrag = varsDEF.length > 0;
+    useEffect(() => { if (!pideFrag) onConfirm({ ...itemPRE }); }, []);
+    if (pideFrag) return (
+      <div>
+        <SH step="Detalle · Fragancia" title={nombre} />
+        <div style={s.card}>
+          <div style={s.cTit}>Elegí la fragancia</div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,minmax(0,1fr))', gap:6 }}>
+            {varsDEF.map(f => (
+              <button key={f} onClick={() => onConfirm({ ...itemPRE, variante: f, nombre: `${itemPRE.nombre} (${f})` })} className="sel-btn"
+                style={{ padding:'12px 4px', borderRadius:10, border:'1px solid rgba(139,92,246,0.45)', background:'rgba(139,92,246,0.12)', color:'#fff', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>{f}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
     return (
       <div>
         <SH step="Detalle · Manual" title={nombre} />
@@ -5166,9 +5183,16 @@ const lpGuardar = async (prod) => {
   LP_CACHE = null; return null;
 };
 
-// Selector para vendedores: tocar producto → elegir cantidad (chips) → Agregar. Sin tipear.
-// onAgregar recibe { nombre, precio, listaId, cant, precioUnit, variante, unidad }
-const ListaPreciosPicker = ({ onAgregar, titulo = '📋 LISTA DE PRECIOS', soloUno = false }) => {
+// Selector para vendedores (25/09/2026): buscador + categorías en grilla de 3 + panel de la categoría abierta.
+// Tocar producto → precio, escala por bulto, cantidad → Agregar. Sin tipear.
+// pedirVariante=false (PRE): la fragancia se elige al pasar a DEF (como las pastas).
+// Admin: al final, BORRAR PRODUCTOS (✕ = ocultar, reversible en Lista de precios) y AGREGAR PRODUCTO.
+// onAgregar recibe { nombre, precio, listaId, cant, precioUnit, variante, variantes, unidad, nombreBase, nombrePlanta }
+const LP_ICO = { 'Productos':'🧴', 'Bolsas de residuos':'🗑️', 'Papeles':'🧻', 'Trapos y esponjas':'🧽', 'Art varios':'🧪', 'Pileta':'🏊', 'Automotor':'🚗', 'Envases':'🪣', 'Extras / aditivos':'✨', 'Bonificaciones':'🎁', 'Servicios':'🚚', 'Químicos / piscina':'🧪', 'Reventa':'🛒', 'Línea autos':'🚗' };
+const LP_CORTO = { 'Bolsas de residuos':'Bolsas residuos', 'Extras / aditivos':'Extras aditivos', 'Bonificaciones':'Bonifica­ciones', 'Químicos / piscina':'Químicos piscina' };
+const lpNorm = t => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const lpBulto = p => { const e = [...(p?.escalas || [])].sort((a, b) => lpNum(a.desde) - lpNum(b.desde)); return e.length > 1 ? lpNum(e[e.length - 1].desde) : 0; };
+const ListaPreciosPicker = ({ onAgregar, titulo = '📋 LISTA DE PRECIOS', soloUno = false, pedirVariante = true }) => {
   const [lp, setLp] = useState(LP_CACHE);
   const [cat, setCat] = useState(null);
   const [q, setQ] = useState('');
@@ -5176,63 +5200,197 @@ const ListaPreciosPicker = ({ onAgregar, titulo = '📋 LISTA DE PRECIOS', soloU
   const [cant, setCant] = useState('');
   const [vari, setVari] = useState('');
   const [ok, setOk] = useState('');
-  useEffect(() => { let vivo = true; lpCargar(true).then(r => { if (vivo) setLp(r); }); return () => { vivo = false; }; }, []);
+  const [admin, setAdmin] = useState(false);
+  const [borrar, setBorrar] = useState(false);
+  const [confBorrar, setConfBorrar] = useState(null);
+  const [nuevo, setNuevo] = useState(null);
+  const [msgA, setMsgA] = useState('');
+  const recargar = () => lpCargar(true).then(r => setLp(r));
+  useEffect(() => {
+    let vivo = true;
+    lpCargar(true).then(r => { if (vivo) setLp(r); });
+    try { supaClient?.auth.getSession().then(({ data }) => { if (vivo) setAdmin(esAdmin(data?.session?.user)); }); } catch (_) {}
+    return () => { vivo = false; };
+  }, []);
   const lista = (lp?.lista || []).filter(p => p.activo !== false);
   const cats = LP_CATS.filter(c => lista.some(p => p.cat === c)).concat([...new Set(lista.map(p => p.cat))].filter(c => !LP_CATS.includes(c)));
-  const qn = q.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  const vis = lista.filter(p => (!cat || p.cat === cat) && (!qn || `${p.nombre} ${p.planta || ''}`.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes(qn)));
-  const elegir = p => { setSel(p); setCant(String((p.cantidades || [])[0] ?? 1)); setVari((p.variantes || [])[0] || ''); setOk(''); };
+  const qn = lpNorm(q.trim());
+  const toks = qn.split(/\s+/).filter(Boolean);
+  const res = qn ? lista.filter(p => { const h = lpNorm(`${p.nombre} ${p.planta || ''} ${p.cat}`); return toks.every(t => h.includes(t)); }) : [];
+  const elegir = p => { if (borrar) return; setSel(p); setCant(String((p.cantidades || [])[0] ?? 1)); setVari(pedirVariante ? ((p.variantes || [])[0] || '') : ''); setOk(''); };
   const cN = lpNum(cant);
   const pu = sel ? lpPrecioUnit(sel, cN) : 0;
   const total = Math.round(pu * cN);
-  const hayEsc = sel && (sel.escalas || []).length > 1;
+  const bulto = sel ? lpBulto(sel) : 0;
   const agregar = () => {
     if (!sel || !(cN > 0)) return;
     const nomVar = vari ? ` (${vari})` : '';
     const nombre = `${lpFmtCant(cN)}${sel.unidad && sel.unidad !== 'u' ? ' ' + sel.unidad : ''} x ${sel.nombre}${nomVar}`.replace(/[<>]/g, '');
-    onAgregar({ nombre, precio: total, listaId: sel.id, cant: cN, precioUnit: pu, variante: vari || null, unidad: sel.unidad || 'u', nombreBase: sel.nombre, nombrePlanta: sel.planta || null });
-    setOk(`✓ Agregado: ${nombre}`); if (!soloUno) setSel(null);
+    onAgregar({ nombre, precio: total, listaId: sel.id, cant: cN, precioUnit: pu, variante: vari || null, variantes: (sel.variantes || []).length ? sel.variantes : null, unidad: sel.unidad || 'u', nombreBase: sel.nombre, nombrePlanta: sel.planta || null });
+    setOk(`✓ Agregado: ${nombre}`); setQ(''); if (!soloUno) setSel(null);
   };
-  const chip = (act, rgb) => ({ padding:'8px 12px', borderRadius:999, border:`1px solid ${act ? `rgba(${rgb},0.7)` : C.ln}`, background: act ? `rgba(${rgb},0.22)` : 'rgba(255,255,255,0.04)', color: act ? '#fff' : C.tx2, fontWeight:750, fontSize:12.5, cursor:'pointer', fontFamily:'inherit', whiteSpace:'nowrap' });
+  const ocultar = async p => {
+    setMsgA('Guardando…');
+    const err = await lpGuardar({ ...p, activo: false });
+    setConfBorrar(null);
+    if (err) { setMsgA('No se pudo borrar: ' + err); return; }
+    setMsgA(`✓ "${p.nombre}" ya no aparece para los vendedores. Se puede reactivar en Administración → Lista de precios.`); recargar();
+  };
+  const guardarNuevo = async () => {
+    const n = nuevo; const precio = lpNum(n.precio); const bu = Math.round(lpNum(n.bulto));
+    if (!n.cat) { setMsgA('Elegí la categoría.'); return; }
+    if (!n.nombre.trim()) { setMsgA('Escribí el nombre del producto.'); return; }
+    if (!(precio > 0) && n.cat !== 'Bonificaciones') { setMsgA('Cargá el precio (mayor a 0).'); return; }
+    if (lista.some(p => lpNorm(p.nombre) === lpNorm(n.nombre.trim()))) { setMsgA('Ya existe un producto con ese nombre.'); return; }
+    const u = n.unidad || 'u';
+    const escalas = bu > 1 ? [{ desde: 1, precio }, { desde: bu, precio: Math.round(precio * 0.9) }] : [{ desde: 1, precio }];
+    const base = u === 'u' || u === 'pack' ? [1, 2, 3, 5] : [0.5, 1, 2, 5];
+    const cantidades = bu > 1 ? [...base.filter(x => x < bu).slice(0, 3), bu] : base;
+    const variantes = String(n.variantes || '').split(',').map(v => v.trim()).filter(Boolean);
+    const orden = Math.max(0, ...(lp?.lista || []).map(p => Number(p.orden) || 0)) + 1;
+    const prod = { id: 'p-' + Date.now(), orden, cat: n.cat, nombre: n.nombre.trim().replace(/[<>]/g, ''), planta: n.planta.trim().replace(/[<>]/g, ''), unidad: u, escalas, cantidades, variantes, activo: true, revisar: '' };
+    setMsgA('Guardando…');
+    const err = await lpGuardar(prod);
+    if (err) { setMsgA('No se pudo guardar: ' + err); return; }
+    setNuevo(null); setMsgA(`✓ Agregado "${prod.nombre}" en ${prod.cat}.`); setCat(prod.cat); recargar();
+  };
+  const fila = p => {
+    const b = lpBulto(p); const pb = lpPrecioBase(p);
+    return (
+      <div key={p.id} style={{ display:'flex', alignItems:'stretch', borderBottom:`1px solid ${C.ln2}` }}>
+        <button onClick={() => elegir(p)} style={{ flex:1, minWidth:0, display:'flex', alignItems:'center', gap:10, padding:'11px 12px', background:'transparent', border:0, color:C.tx, textAlign:'left', cursor: borrar ? 'default' : 'pointer', fontFamily:'inherit' }}>
+          <span style={{ flex:1, minWidth:0, fontSize:13.5, fontWeight:600, lineHeight:1.3 }}>
+            {p.nombre}
+            {b > 1 && <span style={{ marginLeft:6, fontSize:9.5, fontWeight:800, color:'#4ade80', background:'rgba(34,197,94,0.13)', padding:'2px 5px', borderRadius:5, whiteSpace:'nowrap' }}>-10% x {b}</span>}
+            {(p.variantes || []).length > 0 && !pedirVariante && <span style={{ marginLeft:6, fontSize:9.5, fontWeight:800, color:'#c4b5fd', background:'rgba(139,92,246,0.16)', padding:'2px 5px', borderRadius:5, whiteSpace:'nowrap' }}>FRAGANCIA EN DEF</span>}
+            {qn && p.planta && toks.some(t => lpNorm(p.planta).includes(t) && !lpNorm(p.nombre).includes(t)) && <span style={{ display:'block', fontSize:11, color:C.tx3, marginTop:2 }}>planta: {p.planta}</span>}
+          </span>
+          <span style={{ textAlign:'right', whiteSpace:'nowrap', fontSize:13.5, fontWeight:850, color: pb > 0 ? '#FDBA74' : '#6ee7b7' }}>
+            {pb > 0 ? lpFmt2(pb) : 'Sin cargo'}
+            <span style={{ display:'block', fontSize:10, fontWeight:600, color:C.tx3 }}>{pb > 0 ? (p.unidad && p.unidad !== 'u' ? 'por ' + p.unidad : 'c/u') : ''}</span>
+          </span>
+        </button>
+        {borrar && (confBorrar === p.id
+          ? <div style={{ display:'flex', alignItems:'center', gap:6, padding:'0 8px' }}>
+              <button onClick={() => ocultar(p)} style={{ padding:'8px 10px', borderRadius:8, border:'1px solid rgba(239,68,68,0.6)', background:'rgba(239,68,68,0.25)', color:'#fecaca', fontWeight:800, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>Borrar</button>
+              <button onClick={() => setConfBorrar(null)} style={{ padding:'8px 10px', borderRadius:8, border:`1px solid ${C.ln}`, background:'transparent', color:C.tx2, fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>No</button>
+            </div>
+          : <button onClick={() => setConfBorrar(p.id)} aria-label={'Borrar ' + p.nombre} style={{ width:44, border:0, borderLeft:`1px solid ${C.ln2}`, background:'rgba(239,68,68,0.12)', color:'#f87171', fontSize:18, fontWeight:900, cursor:'pointer' }}>✕</button>)}
+      </div>
+    );
+  };
+  const tile = (c, act, onClick, n) => (
+    <button key={c} onClick={onClick} style={{ display:'flex', alignItems:'center', gap:6, height:56, padding:'6px 7px', borderRadius:12, border:`1px solid ${act ? 'rgba(249,115,22,0.75)' : C.ln}`, background: act ? 'rgba(249,115,22,0.14)' : 'rgba(255,255,255,0.04)', color:C.tx, cursor:'pointer', fontFamily:'inherit', fontSize:11, fontWeight:700, lineHeight:1.12, textAlign:'left', overflow:'hidden', minWidth:0 }}>
+      <span style={{ fontSize:17, lineHeight:1, flex:'0 0 auto' }}>{LP_ICO[c] || '📦'}</span>
+      <span lang="es" style={{ display:'flex', flexDirection:'column', gap:2, minWidth:0, hyphens:'auto', WebkitHyphens:'auto' }}>{LP_CORTO[c] || c}{n != null && <span style={{ fontSize:10, fontWeight:600, color:C.tx3 }}>{n} prod.</span>}</span>
+    </button>
+  );
+  const grid3 = { display:'grid', gridTemplateColumns:'repeat(3,minmax(0,1fr))', gap:6 };
+  const panel = { marginTop:10, border:'1px solid rgba(249,115,22,0.45)', borderRadius:14, background:'rgba(0,0,0,0.18)', overflow:'hidden' };
+  const btnMini = { padding:'6px 12px', background:'rgba(255,255,255,0.06)', color:C.tx2, border:`1px solid ${C.ln}`, borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' };
+
+  // ── Alta de producto (admin) ──
+  if (nuevo) return (
+    <div style={s.card}>
+      <button onClick={() => { setNuevo(null); setMsgA(''); }} style={{ ...btnMini, marginBottom:12 }}>← Volver a la lista</button>
+      <div style={s.cTit}>➕ AGREGAR PRODUCTO</div>
+      <label style={s.lbl}>1 · Categoría</label>
+      <div style={{ ...grid3, marginBottom:14 }}>{LP_CATS.filter(c => !['Químicos / piscina', 'Reventa', 'Línea autos'].includes(c)).map(c => tile(c, nuevo.cat === c, () => setNuevo({ ...nuevo, cat: c })))}</div>
+      <label style={s.lbl}>2 · Nombre (lo que ve el vendedor y el cliente)</label>
+      <input value={nuevo.nombre} onChange={e => setNuevo({ ...nuevo, nombre: e.target.value })} placeholder="Ej: Paquete de bolsa 45 x 60 de 10 unidades" style={{ ...s.inp, marginBottom:12 }} />
+      <label style={s.lbl}>Nombre para planta (opcional)</label>
+      <input value={nuevo.planta} onChange={e => setNuevo({ ...nuevo, planta: e.target.value })} placeholder="Sale en la orden de producción y el checklist" style={{ ...s.inp, marginBottom:12 }} />
+      <label style={s.lbl}>3 · Se vende por</label>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, marginBottom:12 }}>
+        {[['u', 'Unidad'], ['kg', 'Kilo'], ['L', 'Litro'], ['pack', 'Pack']].map(([k, t]) => (
+          <button key={k} onClick={() => setNuevo({ ...nuevo, unidad: k })} style={{ padding:'10px 4px', borderRadius:10, border:`1px solid ${nuevo.unidad === k ? 'rgba(249,115,22,0.75)' : C.ln}`, background: nuevo.unidad === k ? 'rgba(249,115,22,0.14)' : 'transparent', color:C.tx, fontWeight:700, fontSize:12.5, cursor:'pointer', fontFamily:'inherit' }}>{t}</button>
+        ))}
+      </div>
+      <label style={s.lbl}>4 · Precio por {nuevo.unidad === 'kg' ? 'kilo' : nuevo.unidad === 'L' ? 'litro' : nuevo.unidad === 'pack' ? 'pack' : 'unidad'} (con 15% OFF, s/IVA)</label>
+      <input inputMode="decimal" value={nuevo.precio} onChange={e => setNuevo({ ...nuevo, precio: e.target.value })} placeholder="$0" style={{ ...s.inp, marginBottom:12, fontSize:18, fontWeight:800 }} />
+      <label style={s.lbl}>Unidades por bulto cerrado (opcional · aplica 10% de descuento)</label>
+      <input inputMode="numeric" value={nuevo.bulto} onChange={e => setNuevo({ ...nuevo, bulto: e.target.value })} placeholder="Ej: 50" style={{ ...s.inp, marginBottom:12 }} />
+      <label style={s.lbl}>Fragancias (opcional, separadas por coma · se eligen en DEF)</label>
+      <input value={nuevo.variantes} onChange={e => setNuevo({ ...nuevo, variantes: e.target.value })} placeholder="Ej: Lavanda, Pino, Marina" style={{ ...s.inp, marginBottom:14 }} />
+      {lpNum(nuevo.precio) > 0 && <div style={{ fontSize:12.5, color:C.tx2, marginBottom:12 }}>Vista previa: <b style={{ color:'#FDBA74' }}>{lpFmt2(lpNum(nuevo.precio))}</b> por {nuevo.unidad}{Math.round(lpNum(nuevo.bulto)) > 1 ? ` · desde ${Math.round(lpNum(nuevo.bulto))} ${nuevo.unidad}: ${lpFmt2(Math.round(lpNum(nuevo.precio) * 0.9))}` : ''}</div>}
+      {msgA && <div style={{ fontSize:12.5, color: msgA.startsWith('✓') ? '#4ade80' : '#fde68a', marginBottom:10 }}>{msgA}</div>}
+      <button onClick={guardarNuevo} className="sel-btn" style={s.bP}>💾 Guardar producto</button>
+    </div>
+  );
+
   return (
     <div style={s.card}>
       <div style={s.cTit}>{titulo}</div>
       {lp?.origen === 'seed' && lp?.error && <div style={{ fontSize:11, color:'#fde68a', marginBottom:8 }}>Usando lista precargada (sin conexión a la lista editable).</div>}
       {!sel && (<>
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔎 Buscar producto…" style={{ ...s.inp, marginBottom:10 }} />
-        <div style={{ display:'flex', gap:6, overflowX:'auto', paddingBottom:6, marginBottom:8 }}>
-          <button onClick={() => setCat(null)} style={chip(!cat, RGB.na)}>Todos</button>
-          {cats.map(c => <button key={c} onClick={() => setCat(c === cat ? null : c)} style={chip(cat === c, RGB.na)}>{c}</button>)}
+        <div style={{ position:'relative', marginBottom:10 }}>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔎 Buscar producto…" style={{ ...s.inp, fontSize:16, paddingRight:44 }} />
+          {q && <button onClick={() => setQ('')} aria-label="Borrar búsqueda" style={{ position:'absolute', right:8, top:'50%', transform:'translateY(-50%)', width:30, height:30, borderRadius:'50%', border:0, background:'rgba(255,255,255,0.1)', color:C.tx, cursor:'pointer' }}>✕</button>}
         </div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:8, maxHeight:330, overflowY:'auto' }}>
-          {vis.map(p => (
-            <button key={p.id} onClick={() => elegir(p)} className="sel-btn" style={{ ...glassBtn(p.cat === 'Bonificaciones' ? RGB.vd : null, { pad:'10px 10px', size:12.5, weight:700, radius:12, align:'left' }), display:'flex', flexDirection:'column', gap:4, minHeight:64 }}>
-              <span style={{ lineHeight:1.2 }}>{p.nombre}</span>
-              <span style={{ color: lpPrecioBase(p) > 0 ? '#FDBA74' : '#6ee7b7', fontWeight:850, fontSize:12 }}>{lpPrecioBase(p) > 0 ? `${lpFmt2(lpPrecioBase(p))}${p.unidad && p.unidad !== 'u' ? ' / ' + p.unidad : ''}` : 'Sin cargo'}{(p.escalas || []).length > 1 ? ' ·escala' : ''}</span>
-            </button>
-          ))}
-          {!vis.length && <div style={{ fontSize:12.5, color:C.tx3, padding:8 }}>{lp ? 'No hay productos con ese filtro.' : 'Cargando lista…'}</div>}
-        </div>
+        {borrar && <div style={{ fontSize:12, color:'#fca5a5', background:'rgba(239,68,68,0.10)', border:'1px solid rgba(239,68,68,0.35)', borderRadius:10, padding:'8px 10px', marginBottom:10 }}>Modo borrar: tocá la ✕ del producto que querés sacar de la lista.</div>}
+        {qn ? (
+          res.length
+            ? <div style={{ ...panel, marginTop:0 }}><div style={{ padding:'8px 12px', fontSize:11, fontWeight:800, letterSpacing:'0.1em', color:C.tx3, borderBottom:`1px solid ${C.ln2}` }}>{res.length} RESULTADO{res.length !== 1 ? 'S' : ''}</div><div style={{ maxHeight:380, overflowY:'auto' }}>{res.map(fila)}</div></div>
+            : <div style={{ fontSize:13, color:C.tx3, padding:12, textAlign:'center', border:`1px dashed ${C.ln}`, borderRadius:12 }}>{lp ? `No hay productos con "${q.trim()}". Podés cargarlo a mano abajo.` : 'Cargando lista…'}</div>
+        ) : (<>
+          <div style={grid3}>{cats.map(c => tile(c, cat === c, () => setCat(cat === c ? null : c), lista.filter(p => p.cat === c).length))}</div>
+          {cat && lista.some(p => p.cat === cat) && (
+            <div style={panel}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 12px', borderBottom:`1px solid ${C.ln2}`, fontSize:11, fontWeight:800, letterSpacing:'0.1em', color:C.tx3, textTransform:'uppercase' }}>
+                {cat}<button onClick={() => setCat(null)} style={{ border:0, background:'transparent', color:C.tx3, fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>Cerrar ✕</button>
+              </div>
+              {lista.filter(p => p.cat === cat).map(fila)}
+            </div>
+          )}
+          {!lp && <div style={{ fontSize:12.5, color:C.tx3, padding:8 }}>Cargando lista…</div>}
+        </>)}
+        {admin && (
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginTop:14 }}>
+            <button onClick={() => { setBorrar(!borrar); setConfBorrar(null); setMsgA(''); }} style={{ padding:'12px 8px', borderRadius:12, border:'1px solid rgba(239,68,68,0.5)', background: borrar ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.10)', color:'#fca5a5', fontWeight:800, fontSize:12.5, cursor:'pointer', fontFamily:'inherit' }}>{borrar ? '✓ LISTO' : '🗑️ BORRAR PRODUCTOS'}</button>
+            <button onClick={() => { setNuevo({ cat: cat || '', nombre:'', planta:'', unidad:'u', precio:'', bulto:'', variantes:'' }); setBorrar(false); setMsgA(''); }} style={{ padding:'12px 8px', borderRadius:12, border:'1px solid rgba(52,211,153,0.5)', background:'rgba(52,211,153,0.10)', color:'#6ee7b7', fontWeight:800, fontSize:12.5, cursor:'pointer', fontFamily:'inherit' }}>➕ AGREGAR PRODUCTO</button>
+          </div>
+        )}
+        {msgA && <div style={{ fontSize:12.5, color: msgA.startsWith('✓') ? '#4ade80' : '#fde68a', marginTop:10 }}>{msgA}</div>}
       </>)}
       {sel && (
         <div>
-          <button onClick={() => setSel(null)} style={{ padding:'6px 12px', background:'rgba(255,255,255,0.06)', color:C.tx2, border:`1px solid ${C.ln}`, borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', marginBottom:10, fontFamily:'inherit' }}>← Lista</button>
-          <div style={{ fontSize:17, fontWeight:850, marginBottom:2 }}>{sel.nombre}</div>
-          <div style={{ fontSize:12, color:C.tx3, marginBottom:12 }}>{hayEsc ? (sel.escalas || []).map(e => `desde ${lpFmtCant(lpNum(e.desde))} ${sel.unidad || 'u'}: ${lpFmt2(lpNum(e.precio))}`).join(' · ') : `${lpFmt2(lpPrecioBase(sel))} por ${sel.unidad || 'u'}`}</div>
-          {(sel.variantes || []).length > 0 && (<>
-            <label style={s.lbl}>{sel.cat === 'Bonificaciones' || /perfumina/i.test(sel.nombre) ? 'Fragancia' : 'Variante'}</label>
-            <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:12 }}>
-              {sel.variantes.map(v => <button key={v} onClick={() => setVari(v)} style={chip(vari === v, RGB.vd)}>{v}</button>)}
+          <button onClick={() => setSel(null)} style={{ ...btnMini, marginBottom:10 }}>← Lista</button>
+          <div style={{ fontSize:11, fontWeight:800, letterSpacing:'0.1em', color:C.tx3, textTransform:'uppercase' }}>{sel.cat}</div>
+          <div style={{ fontSize:17, fontWeight:850, margin:'2px 0 12px', lineHeight:1.25 }}>{sel.nombre}</div>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:12 }}>
+            {(sel.escalas || []).slice().sort((a, b) => lpNum(a.desde) - lpNum(b.desde)).map((e, i, arr) => {
+              const act = cN >= lpNum(e.desde) && (i === arr.length - 1 || cN < lpNum(arr[i + 1].desde));
+              return (
+                <div key={i} style={{ flex:'1 1 120px', border:`1px solid ${act ? 'rgba(34,197,94,0.55)' : C.ln}`, background: act ? 'rgba(34,197,94,0.12)' : 'transparent', borderRadius:12, padding:'8px 10px', fontSize:11.5, color:C.tx3 }}>
+                  {i === 0 ? `Precio por ${sel.unidad || 'u'}` : `Bulto cerrado (${lpFmtCant(lpNum(e.desde))} ${sel.unidad || 'u'})`}
+                  <div style={{ fontSize:17, fontWeight:850, color: act ? '#4ade80' : C.tx }}>{lpNum(e.precio) > 0 ? lpFmt2(lpNum(e.precio)) : 'Sin cargo'}</div>
+                </div>
+              );
+            })}
+          </div>
+          {pedirVariante && (sel.variantes || []).length > 0 && (<>
+            <label style={s.lbl}>Fragancia</label>
+            <div style={{ ...grid3, marginBottom:12 }}>
+              {sel.variantes.map(v => <button key={v} onClick={() => setVari(v)} style={{ padding:'10px 4px', borderRadius:10, border:`1px solid ${vari === v ? 'rgba(139,92,246,0.8)' : C.ln}`, background: vari === v ? 'rgba(139,92,246,0.22)' : 'transparent', color:C.tx, fontWeight:700, fontSize:12.5, cursor:'pointer', fontFamily:'inherit' }}>{v}</button>)}
             </div>
           </>)}
           <label style={s.lbl}>Cantidad ({sel.unidad || 'u'})</label>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:8 }}>
-            {(sel.cantidades || [1, 2, 5, 10]).map(n => <button key={n} onClick={() => setCant(String(n))} style={{ ...chip(cN === lpNum(n), RGB.na), minWidth:48, fontSize:15 }}>{lpFmtCant(lpNum(n))}</button>)}
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+            {(() => { const st = (sel.unidad || 'u') === 'u' || sel.unidad === 'pack' ? 1 : 0.5; const stepB = { width:48, height:48, borderRadius:12, border:`1px solid ${C.ln}`, background:'rgba(255,255,255,0.06)', color:C.tx, fontSize:22, fontWeight:700, cursor:'pointer', fontFamily:'inherit', flex:'0 0 auto' };
+              return (<>
+                <button onClick={() => setCant(lpFmtCant(Math.max(0, Math.round((cN - st) * 100) / 100)))} style={stepB} aria-label="Menos">−</button>
+                <input inputMode="decimal" value={cant} onChange={e => setCant(e.target.value)} placeholder="Otra cantidad" aria-label="Cantidad" style={{ ...s.inp, flex:1, minWidth:0, height:48, textAlign:'center', fontSize:20, fontWeight:800 }} />
+                <button onClick={() => setCant(lpFmtCant(Math.round((cN + st) * 100) / 100))} style={stepB} aria-label="Más">+</button>
+              </>); })()}
           </div>
-          <input inputMode="decimal" value={cant} onChange={e => setCant(e.target.value)} placeholder="Otra cantidad" style={{ ...s.inp, marginBottom:12 }} />
-          <div style={{ textAlign:'center', marginBottom:12 }}>
-            <div style={{ fontSize:12.5, color:C.tx2 }}>{lpFmtCant(cN)} {sel.unidad || 'u'} × {lpFmt2(pu)}</div>
-            <div style={s.tot}>{total > 0 ? fmt(total) : 'Sin cargo'}</div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:10 }}>
+            {(sel.cantidades || [1, 2, 5, 10]).map(n => <button key={n} onClick={() => setCant(lpFmtCant(lpNum(n)))} style={{ padding:'8px 13px', borderRadius:999, border:`1px solid ${cN === lpNum(n) ? 'rgba(249,115,22,0.7)' : C.ln}`, background: cN === lpNum(n) ? 'rgba(249,115,22,0.22)' : 'rgba(255,255,255,0.04)', color: cN === lpNum(n) ? '#fff' : C.tx2, fontWeight:750, fontSize:13.5, cursor:'pointer', fontFamily:'inherit' }}>{lpFmtCant(lpNum(n))}{bulto > 1 && lpNum(n) === bulto ? ' · bulto' : ''}</button>)}
+          </div>
+          {bulto > 1 && cN > 0 && cN < bulto && cN >= bulto * 0.6 && <div style={{ fontSize:12, color:'#fbbf24', marginBottom:10 }}>Faltan {lpFmtCant(bulto - cN)} {sel.unidad || 'u'} para el bulto cerrado: con {lpFmtCant(bulto)} el total baja a {fmt(Math.round(lpPrecioUnit(sel, bulto) * bulto))}.</div>}
+          {!pedirVariante && (sel.variantes || []).length > 0 && <div style={{ fontSize:12, color:C.tx3, background:'rgba(139,92,246,0.10)', border:'1px solid rgba(139,92,246,0.3)', borderRadius:10, padding:'8px 10px', marginBottom:10 }}>Tiene fragancias ({sel.variantes.slice(0, 4).join(', ')}{sel.variantes.length > 4 ? '…' : ''}). Se eligen al pasar a DEF.</div>}
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', borderTop:`1px solid ${C.ln}`, paddingTop:10, marginBottom:12 }}>
+            <span style={{ fontSize:12.5, color:C.tx2 }}>{lpFmtCant(cN)} {sel.unidad || 'u'} × {lpFmt2(pu)}</span>
+            <span style={s.tot}>{total > 0 ? fmt(total) : (cN > 0 ? 'Sin cargo' : '$0')}</span>
           </div>
           <button onClick={agregar} disabled={!(cN > 0)} className="sel-btn" style={{ ...s.bP, opacity: cN > 0 ? 1 : 0.45 }}>✓ Agregar</button>
         </div>

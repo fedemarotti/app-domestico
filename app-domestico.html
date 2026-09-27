@@ -4467,10 +4467,13 @@ const ModuloMarketing = () => {
   // Solapa PRE vs DEF (evolución)
   const [evoVer, setEvoVer] = useState('ambos');   // 'pre' | 'def' | 'ambos'
   const [evoMed, setEvoMed] = useState('plata');   // 'plata' | 'cant'
-  const [evoAgr, setEvoAgr] = useState('auto');    // 'auto' | 'hora' | 'dia' | 'semana' | 'mes'
+  const [evoAgr, setEvoAgr] = useState('dia');    // 'auto' | 'hora' | 'dia' | 'semana' | 'mes'
   const [evoAcum, setEvoAcum] = useState(false);
   const [evoSelB, setEvoSelB] = useState(null);    // barra tocada (inicio del tramo)
   const [evoTabla, setEvoTabla] = useState(false);
+  const [evoFull, setEvoFull] = useState(false);   // gráfico en pantalla completa
+  const [, setVpTick] = useState(0);
+  React.useEffect(() => { const f = () => setVpTick(x => x + 1); window.addEventListener('resize', f); return () => window.removeEventListener('resize', f); }, []);
 
   const cargar = () => { setPedidos(null); listLS().then(arr => { setPedidos(Array.isArray(arr) ? arr : []); setSync(Date.now()); }); };
   React.useEffect(() => { cargar(); }, []);
@@ -4578,7 +4581,6 @@ const ModuloMarketing = () => {
     const dias = Math.max(1, Math.ceil((fin - rango.desde + 1) / D));
     let agr = evoAgr;
     if (agr === 'hora' && dias > 3) agr = 'auto';
-    if (agr === 'dia' && dias > 120) agr = 'auto';
     if (agr === 'auto') agr = dias <= 2 ? 'hora' : dias <= 45 ? 'dia' : dias <= 210 ? 'semana' : 'mes';
     const key = t => {
       if (agr === 'hora') return Math.floor(t / H) * H;
@@ -4813,56 +4815,76 @@ const ModuloMarketing = () => {
         const pctTxt = c => c === null ? '—' : `${c >= 0 ? '▲ +' : '▼ '}${c}%`;
         const pctCol = c => c === null ? 'rgba(255,255,255,0.4)' : c >= 0 ? '#4ade80' : '#f87171';
 
-        // Filas del gráfico (con acumulado opcional)
-        const filas = (serie, conPrev) => {
-          const acc = keys.map(() => 0), accP = keys.map(() => 0);
-          return serie.map(b => {
-            let v = keys.map(k => val(b, k)); let pv = conPrev && b.prev ? keys.map(k => val(b.prev, k)) : null;
-            if (evoAcum) { v = v.map((x, j) => (acc[j] += x)); if (pv) pv = pv.map((x, j) => (accP[j] += x)); }
-            return { t: b.t, v, pv };
-          });
-        };
-        const maxDe = rows => Math.max(0, ...rows.flatMap(r => [...r.v, ...(r.pv || [])]));
+        // Filas del gráfico: un valor por serie (PRE / DEF) en cada tramo
+        const filas = (serie) => serie.map(b => ({ t: b.t, v: keys.map(k => val(b, k)) }));
+        const maxDe = rows => Math.max(0, ...rows.flatMap(r => r.v));
+        // Tendencia (recta de regresión): % que cambia de punta a punta del período sobre el promedio
+        const tendencia = ys => { const n = ys.length; if (n < 2) return null; const mx = (n - 1) / 2, my = ys.reduce((a, b) => a + b, 0) / n; if (!my) return null;
+          let num = 0, den = 0; ys.forEach((yv, i) => { num += (i - mx) * (yv - my); den += (i - mx) * (i - mx); }); return den ? Math.round((num / den) * (n - 1) / my * 100) : 0; };
 
-        const grafico = (rows, { alto = 160, max } = {}) => {
+        const grafico = (rows, { alto = 170, max, px = false, click = true } = {}) => {
           const top = niceMax(max != null ? max : maxDe(rows));
-          const gap = rows.length > 40 ? 1 : rows.length > 20 ? 2 : 4;
-          const conValores = rows.length * keys.length <= 8;
-          const etiquetasTodas = rows.length <= 10;
+          const n = Math.max(1, rows.length), nk = keys.length;
+          const slot = px ? Math.max(nk * 16 + 12, Math.floor((window.innerWidth - 70) / n)) : 10;
+          const W = n * slot, Hc = alto;
+          const y = v => Hc - Math.min(1, v / top) * (Hc - 4);
+          const bw = slot * 0.78 / nk;
+          const bx = (i, j) => i * slot + slot * 0.11 + j * bw;
+          const pasoEt = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(W / 46))));
+          const svgProps = px ? { width: W, height: Hc + 22, style: { display:'block' } } : { viewBox: `0 0 ${W} ${Hc}`, preserveAspectRatio: 'none', style: { width:'100%', height: Hc, display:'block' } };
+          const cuerpo = (
+            <svg {...svgProps}>
+              {[0.5, 1].map(f => <line key={f} x1={0} x2={W} y1={y(top * f)} y2={y(top * f)} stroke="rgba(255,255,255,0.10)" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />)}
+              <line x1={0} x2={W} y1={Hc} y2={Hc} stroke="rgba(255,255,255,0.3)" vectorEffect="non-scaling-stroke" />
+              {rows.map((r, i) => (
+                <g key={r.t} opacity={evoSelB && evoSelB !== r.t ? 0.4 : 1}>
+                  {evoSelB === r.t && <rect x={i * slot} y={0} width={slot} height={Hc} fill="rgba(255,255,255,0.12)" />}
+                  {r.v.map((v, j) => v > 0 ? <rect key={j} x={bx(i, j)} y={y(v)} width={bw} height={Hc - y(v)} fill={COL[keys[j]]} fillOpacity={0.55} /> : null)}
+                </g>
+              ))}
+              {n > 1 && keys.map((k, j) => <polyline key={'l' + k} fill="none" stroke={COL[k]} strokeWidth={px ? 2.5 : 2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"
+                points={rows.map((r, i) => `${bx(i, j) + bw / 2},${y(r.v[j])}`).join(' ')} />)}
+              {px && keys.map((k, j) => rows.map((r, i) => <circle key={k + i} cx={bx(i, j) + bw / 2} cy={y(r.v[j])} r={3.2} fill={COL[k]} stroke="#0b1220" strokeWidth={1.2} />))}
+              {px && rows.map((r, i) => i % pasoEt === 0 ? <text key={'x' + i} x={i * slot + slot / 2} y={Hc + 15} fontSize="10" fill="rgba(255,255,255,0.6)" textAnchor="middle" fontWeight="700">{bLabel(r.t, true)}</text> : null)}
+              {px && rows.map((r, i) => <rect key={'h' + i} x={i * slot} y={0} width={slot} height={Hc + 22} fill="transparent" style={{ cursor:'pointer' }} onClick={() => setEvoSelB(evoSelB === r.t ? null : r.t)} />)}
+            </svg>
+          );
+          const eje = (
+            <div style={{ position:'absolute', left:0, top:0, width:38, height:Hc, pointerEvents:'none' }}>
+              {[1, 0.5, 0].map(f => <span key={f} style={{ position:'absolute', right:3, top:`calc(${(1 - f) * 100}% - 6px)`, fontSize:9, color:'rgba(255,255,255,0.5)', fontWeight:700 }}>{fEje(top * f)}</span>)}
+            </div>
+          );
+          if (px) return (
+            <div style={{ position:'relative', paddingLeft:40 }}>
+              {eje}
+              <div ref={el => { if (el && el.dataset.ini !== String(n)) { el.scrollLeft = el.scrollWidth; el.dataset.ini = String(n); } }} style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }}>{cuerpo}</div>
+            </div>
+          );
           return (
-            <div>
-              <div style={{ position:'relative', height:alto, marginLeft:40, marginTop: conValores ? 16 : 10 }}>
-                {[1, 0.5, 0].map(f => (
-                  <div key={f} style={{ position:'absolute', left:0, right:0, bottom:`${f * 100}%`, borderTop: f === 0 ? '1px solid rgba(255,255,255,0.2)' : '1px dashed rgba(255,255,255,0.09)' }}>
-                    <span style={{ position:'absolute', left:-42, width:37, textAlign:'right', top:-6, fontSize:9, color:'rgba(255,255,255,0.4)', fontWeight:700 }}>{fEje(top * f)}</span>
-                  </div>
-                ))}
-                <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'flex-end', gap }}>
-                  {rows.map(r => (
-                    <div key={r.t} onClick={() => setEvoSelB(evoSelB === r.t ? null : r.t)} title={`${bLabel(r.t)} · ${keys.map((k, j) => `${k.toUpperCase()} ${fVal(r.v[j])}`).join(' · ')}`}
-                      style={{ flex:1, minWidth:0, height:'100%', display:'flex', alignItems:'flex-end', justifyContent:'center', gap:1, position:'relative', cursor:'pointer', borderRadius:4,
-                        background: evoSelB === r.t ? 'rgba(255,255,255,0.10)' : 'transparent' }}>
-                      {r.v.map((v, j) => (
-                        <div key={j} style={{ flex:1, maxWidth:30, height:`${Math.min(100, v / top * 100)}%`, minHeight: v > 0 ? 2 : 0, background: COL[keys[j]], borderRadius:'3px 3px 0 0', position:'relative',
-                          opacity: evoSelB && evoSelB !== r.t ? 0.45 : 0.95 }}>
-                          {conValores && v > 0 && <span style={{ position:'absolute', bottom:'100%', left:'50%', transform:'translateX(-50%)', fontSize:8.5, fontWeight:900, whiteSpace:'nowrap', color: COL[keys[j]], marginBottom:1 }}>{fEje(v)}</span>}
-                        </div>
-                      ))}
-                      {r.pv && r.pv.map((v, j) => v > 0 ? (
-                        <div key={'p' + j} style={{ position:'absolute', left: `${j * 100 / keys.length}%`, width: `${100 / keys.length}%`, bottom:`${Math.min(100, v / top * 100)}%`, borderTop:'2px dotted rgba(255,255,255,0.8)', pointerEvents:'none' }} />
-                      ) : null)}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div style={{ display:'flex', marginLeft:40, gap, marginTop:4 }}>
-                {etiquetasTodas ? rows.map(r => <div key={r.t} style={{ flex:1, minWidth:0, textAlign:'center', fontSize:8.5, fontWeight:700, color:'rgba(255,255,255,0.45)', overflow:'hidden', whiteSpace:'nowrap' }}>{bLabel(r.t, true)}</div>)
-                  : <div style={{ flex:1, display:'flex', justifyContent:'space-between', fontSize:9, color:'rgba(255,255,255,0.45)', fontWeight:700 }}>
-                      <span>{bLabel(rows[0].t, true)}</span><span>{bLabel(rows[Math.floor(rows.length / 2)].t, true)}</span><span>{bLabel(rows[rows.length - 1].t, true)}</span></div>}
+            <div onClick={click ? () => setEvoFull(true) : undefined} style={{ cursor: click ? 'zoom-in' : 'default' }}>
+              <div style={{ position:'relative', paddingLeft:40, marginTop:8 }}>{eje}{cuerpo}</div>
+              <div style={{ display:'flex', justifyContent:'space-between', marginLeft:40, marginTop:4, fontSize:9, color:'rgba(255,255,255,0.5)', fontWeight:700 }}>
+                <span>{bLabel(rows[0].t, true)}</span>{n > 2 && <span>{bLabel(rows[Math.floor(n / 2)].t, true)}</span>}{n > 1 && <span>{bLabel(rows[n - 1].t, true)}</span>}
               </div>
             </div>
           );
         };
+        const tend = keys.map(k => ({ k, p: tendencia(ev.ser.map(b => val(b, k))) }));
+        const tendTxt = (
+          <div style={{ marginTop:10 }}>
+            <div style={{ fontSize:9.5, fontWeight:800, color:'rgba(255,255,255,0.45)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:4 }}>Tendencia del período</div>
+            <div style={{ display:'flex', gap:14, flexWrap:'wrap', fontSize:12, fontWeight:800 }}>
+              {tend.map(({ k, p }) => <span key={k} style={{ color: COL[k] }}>{k.toUpperCase()}: {p === null ? 'sin datos' : p > 5 ? `▲ sube (+${p}%)` : p < -5 ? `▼ baja (${p}%)` : '▬ estable'}</span>)}
+            </div>
+          </div>
+        );
+        const leyenda = (
+          <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginTop:10, fontSize:10.5, fontWeight:800 }}>
+            {keys.map(k => <span key={k} style={{ color: COL[k] }}>▮ {NOM[k]}</span>)}
+            <span style={{ color:'rgba(255,255,255,0.65)' }}>╱ línea = sube o baja {tramo} a {tramo}</span>
+          </div>
+        );
+        const titulo = `${evoVer === 'ambos' ? 'PRE vs DEF' : evoVer === 'pre' ? 'PRE (presupuestado)' : 'DEF (vendido)'} · ${plata ? 'en $' : 'cantidad'} · una barra por ${tramo}`;
 
         // Fluctuación: variación de cada tramo contra el tramo anterior
         const kF = evoVer === 'pre' ? 'pre' : 'def';
@@ -4906,26 +4928,15 @@ const ModuloMarketing = () => {
                 <button onClick={() => setEvoVer('def')} style={{ ...pill(evoVer === 'def', '#059669'), textAlign:'center' }}>DEF</button>
                 <button onClick={() => setEvoVer('ambos')} style={{ ...pill(evoVer === 'ambos', 'linear-gradient(135deg,#d97706,#059669)'), textAlign:'center' }}>PRE vs DEF</button>
               </div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-                <div>
-                  <div style={{ fontSize:9.5, fontWeight:800, color:'rgba(255,255,255,0.45)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:6 }}>Medir en</div>
-                  <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                    <button onClick={() => setEvoMed('plata')} style={pill(plata)}>$ Plata</button>
-                    <button onClick={() => setEvoMed('cant')} style={pill(!plata)}># Cantidad</button>
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize:9.5, fontWeight:800, color:'rgba(255,255,255,0.45)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:6 }}>Mostrar</div>
-                  <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                    <button onClick={() => setEvoAcum(false)} style={pill(!evoAcum)}>Por {tramo}</button>
-                    <button onClick={() => setEvoAcum(true)} style={pill(evoAcum)}>Acumulado</button>
-                  </div>
-                </div>
+              <div style={{ fontSize:9.5, fontWeight:800, color:'rgba(255,255,255,0.45)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:6 }}>Medir en</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:10 }}>
+                <button onClick={() => setEvoMed('plata')} style={{ ...pill(plata), textAlign:'center' }}>$ Plata</button>
+                <button onClick={() => setEvoMed('cant')} style={{ ...pill(!plata), textAlign:'center' }}># Cantidad</button>
               </div>
-              <div style={{ fontSize:9.5, fontWeight:800, color:'rgba(255,255,255,0.45)', textTransform:'uppercase', letterSpacing:'1px', margin:'10px 0 6px' }}>Agrupar por</div>
-              <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                {[['auto', 'Auto'], ...(ev.dias <= 3 ? [['hora', 'Hora']] : []), ...(ev.dias <= 120 ? [['dia', 'Día']] : []), ['semana', 'Semana'], ['mes', 'Mes']].map(([k, l]) => (
-                  <button key={k} onClick={() => { setEvoAgr(k); setEvoSelB(null); }} style={pill(evoAgr === k)}>{l}{k === 'auto' && evoAgr === 'auto' ? ` (${tramo})` : ''}</button>
+              <div style={{ fontSize:9.5, fontWeight:800, color:'rgba(255,255,255,0.45)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:6 }}>Una barra por</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 }}>
+                {[['dia', 'Día'], ['semana', 'Semana'], ['mes', 'Mes']].map(([k, l]) => (
+                  <button key={k} onClick={() => { setEvoAgr(k); setEvoSelB(null); }} style={{ ...pill(ev.agr === k), textAlign:'center' }}>{l}</button>
                 ))}
               </div>
             </div>
@@ -4944,14 +4955,50 @@ const ModuloMarketing = () => {
 
             {/* Gráfico principal */}
             <div style={card}>
-              <div style={cTit}><span>📊 {evoVer === 'ambos' ? 'PRE vs DEF' : evoVer === 'pre' ? 'PRE (presupuestado)' : 'DEF (vendido)'} · {plata ? 'en $' : 'cantidad'} {evoAcum ? 'acumulado' : `por ${tramo}`}</span></div>
+              <div style={cTit}><span>📊 {titulo}</span>{T.preN + T.defN > 0 && <button onClick={() => setEvoFull(true)} style={btnMini}>⛶ Ampliar</button>}</div>
               {T.preN + T.defN === 0 ? vacio('Sin PRE ni DEF en el período.') : grafico(rowsTot)}
-              <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginTop:10, fontSize:10.5, fontWeight:800 }}>
-                {keys.map(k => <span key={k} style={{ color: COL[k] }}>■ {NOM[k]}</span>)}
-                <span style={{ color:'rgba(255,255,255,0.7)' }}>┈ período anterior ({rango.prevEtiqueta.replace(/^vs /, '')})</span>
-              </div>
-              <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:6 }}>Tocá una barra para ver el detalle. PRE se cuenta {elT} en que se creó; DEF {elT} en que se confirmó. Importes sin envío.</div>
+              {leyenda}
+              {T.preN + T.defN > 0 && tendTxt}
+              <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:8 }}>Tocá el gráfico para verlo en pantalla completa y ver {esteT} por {esteT}. PRE se cuenta {elT} en que se creó; DEF {elT} en que se confirmó. Importes sin envío.</div>
             </div>
+
+            {/* Pantalla completa */}
+            {evoFull && (
+              <div style={{ position:'fixed', inset:0, zIndex:10000, background:'#0b1220', color:'#fff', display:'flex', flexDirection:'column', overflowY:'auto',
+                padding:'calc(env(safe-area-inset-top, 0px) + 12px) 12px calc(env(safe-area-inset-bottom, 0px) + 12px)' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:14, fontWeight:900 }}>📊 {titulo}</div>
+                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.55)', fontWeight:700 }}>{rango.etiqueta} · {nB} {nB === 1 ? tramo : tramoPl}</div>
+                  </div>
+                  <button onClick={() => { setEvoFull(false); }} style={{ padding:'9px 14px', borderRadius:10, fontSize:13, fontWeight:900, cursor:'pointer', fontFamily:'inherit', background:'rgba(239,68,68,0.15)', color:'#fca5a5', border:'1px solid rgba(239,68,68,0.45)' }}>✕ Cerrar</button>
+                </div>
+                <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:10 }}>
+                  <button onClick={() => setEvoVer('pre')} style={pill(evoVer === 'pre', '#d97706')}>PRE</button>
+                  <button onClick={() => setEvoVer('def')} style={pill(evoVer === 'def', '#059669')}>DEF</button>
+                  <button onClick={() => setEvoVer('ambos')} style={pill(evoVer === 'ambos', 'linear-gradient(135deg,#d97706,#059669)')}>PRE vs DEF</button>
+                  <button onClick={() => setEvoMed(plata ? 'cant' : 'plata')} style={pill(false)}>{plata ? '$ → #' : '# → $'}</button>
+                </div>
+                {grafico(rowsTot, { px: true, alto: Math.max(200, Math.min(window.innerHeight - 340, 560)) })}
+                {leyenda}
+                {tendTxt}
+                <div style={{ marginTop:12, padding:12, borderRadius:12, background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.12)' }}>
+                  {selB ? (
+                    <div>
+                      <div style={{ fontSize:12.5, fontWeight:900, marginBottom:6 }}>🔎 {bLabel(selB.t)}</div>
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                        {['pre', 'def'].map(k => { const c = selB.ant ? gPct(val(selB, k), val(selB.ant, k)) : null; return (
+                          <div key={k}>
+                            <div style={{ fontSize:10, fontWeight:900, color:COL[k] }}>{k === 'pre' ? 'PRE' : 'DEF'} · {selB[k + 'N']}</div>
+                            <div style={{ fontSize:16, fontWeight:900 }}>{fmt(selB[k + 'F'])}</div>
+                            <div style={{ fontSize:10.5, fontWeight:800, color: pctCol(c) }}>{pctTxt(c)} vs {tramo} anterior</div>
+                          </div>); })}
+                      </div>
+                    </div>
+                  ) : <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.6)' }}>Tocá una barra para ver ese {tramo}. Deslizá el gráfico hacia la derecha para ver {tramoPl} anteriores. Girá el celular para verlo más ancho.</div>}
+                </div>
+              </div>
+            )}
 
             {/* Detalle de la barra tocada */}
             {selB && (() => {
@@ -5000,7 +5047,7 @@ const ModuloMarketing = () => {
                         <UChip k={u.k} />
                         <span style={{ fontSize:11, fontWeight:800 }}><span style={{ color:C_PRE }}>PRE {tU.preN} · {fmt(tU.preF)}</span> · <span style={{ color:C_DEF }}>DEF {tU.defN} · {fmt(tU.defF)}</span>{tU.preF ? <span style={{ color:'rgba(255,255,255,0.55)' }}> · {Math.round(tU.defF / tU.preF * 100)}%</span> : ''}</span>
                       </div>
-                      {tU.preN + tU.defN === 0 ? vacio('Sin movimiento en el período.') : grafico(filas(u.ser, false), { alto: 100, max: maxUsers })}
+                      {tU.preN + tU.defN === 0 ? vacio('Sin movimiento en el período.') : grafico(filas(u.ser), { alto: 100, max: maxUsers, click: false })}
                     </div>
                   );
                 })}

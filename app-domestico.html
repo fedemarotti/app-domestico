@@ -374,13 +374,25 @@ function AvisoSync({ nonce }) {
     <div style={{ background:'#fef3c7', border:'2px solid #f59e0b', color:'#92400e', padding:'10px 14px', borderRadius:10, fontSize:13, fontWeight:700, margin:'10px 0' }}>{msg}</div>
   );
 }
+// Supabase devuelve como máximo 1000 filas por consulta (límite del servidor).
+// Sin paginar, al pasar las 1000 filas se perdían los pedidos más viejos
+// (30/09/2026: Liquidaciones de julio/agosto aparecían vacías). Trae TODO en tandas.
+const supaTraerTodo = async (armarQuery, porPagina = 1000, timeoutMs = 8000) => {
+  const out = [];
+  for (let desde = 0; ; desde += porPagina) {
+    const timeout = new Promise((_, r) => setTimeout(() => r(new Error('timeout')), timeoutMs));
+    const { data, error } = await Promise.race([armarQuery().range(desde, desde + porPagina - 1), timeout]);
+    if (error) throw error;
+    const filas = data || [];
+    out.push(...filas);
+    if (filas.length < porPagina) break;
+  }
+  return out;
+};
 const listLS = async () => {
   if (supaClient) {
     try {
-      const timeout = new Promise((_, r) => setTimeout(() => r(new Error('timeout')), 4000));
-      const query = supaClient.from('pedidos').select('data').order('ts', { ascending: false });
-      const { data, error } = await Promise.race([query, timeout]);
-      if (error) throw error;
+      const data = await supaTraerTodo(() => supaClient.from('pedidos').select('data').order('ts', { ascending: false }).order('codigo', { ascending: true }));
       if (data && data.length > 0) {
         const all = {};
         data.forEach(r => { if (r.data?.codigo) all[r.data.codigo] = r.data; });
@@ -434,9 +446,7 @@ const saveCliente = async (cli) => {
 const listClientes = async () => {
   if (supaClient) {
     try {
-      const timeout = new Promise((_, r) => setTimeout(() => r(new Error('timeout')), 4000));
-      const query = supaClient.from('clientes').select('data').order('updated_at', { ascending: false });
-      const { data } = await Promise.race([query, timeout]);
+      const data = await supaTraerTodo(() => supaClient.from('clientes').select('data').order('updated_at', { ascending: false }).order('id', { ascending: true }));
       if (data && data.length > 0) {
         const all = {};
         data.forEach(r => { if (r.data?.id) all[r.data.id] = r.data; });
@@ -6088,8 +6098,9 @@ const vgCostoVigente = (lista, ts) => {
 };
 const vgCargarAdmin = async () => {
   if (!supaClient) return { error: 'sin conexión' };
-  const { data, error } = await supaClient.from('ventas_admin').select('codigo,leido,leido_ts,costos_manuales');
-  if (error) return { error: error.message || 'error' };
+  let data;
+  try { data = await supaTraerTodo(() => supaClient.from('ventas_admin').select('codigo,leido,leido_ts,costos_manuales').order('codigo', { ascending: true })); }
+  catch (error) { return { error: (error && error.message) || 'error' }; }
   const m = {}; (data || []).forEach(r => { m[r.codigo] = r; }); return { mapa: m };
 };
 const vgGuardarAdmin = async (codigo, cambios) => {
@@ -6859,7 +6870,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
                           <span style={{ marginLeft:'auto', fontSize:10, fontWeight:800, color:'#fb923c', background:'rgba(249,115,22,0.15)', border:'1px solid rgba(249,115,22,0.4)', borderRadius:20, padding:'2px 8px', letterSpacing:0.3 }}>PRE</span>
                         )}
                         {res.tipo==='DEF' && (() => {
-                          const pasosT = TRK_PASOS[trkModalidad(res)]; const iT = trkIdx(res); const finT = iT === pasosT.length - 1;
+                          const pasosT = trkPasosDe(res); const iT = Math.min(trkIdx(res), pasosT.length - 1); const finT = iT === pasosT.length - 1;
                           return (
                             <span style={{ marginLeft:'auto', fontSize:10, fontWeight:800, color: finT ? '#38bdf8' : iT === 0 ? '#4ade80' : '#fdba74', background: finT ? 'rgba(56,189,248,0.15)' : iT === 0 ? 'rgba(34,197,94,0.15)' : 'rgba(249,115,22,0.15)', border: finT ? '1px solid rgba(56,189,248,0.4)' : iT === 0 ? '1px solid rgba(34,197,94,0.4)' : '1px solid rgba(249,115,22,0.4)', borderRadius:20, padding:'2px 8px', letterSpacing:0.3 }}>{pasosT[iT].ico} {pasosT[iT].tit.toUpperCase()}</span>
                           );
@@ -6872,7 +6883,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 
                       <div style={{ fontSize:15, fontWeight:800, color:'#fff', marginBottom:10 }}>{fmt(res.totales?.total || res.total || 0)}</div>
                       {res.tipo==='DEF' && (() => {
-                        const pasosT = TRK_PASOS[trkModalidad(res)]; const iT = trkIdx(res); const finT = iT === pasosT.length - 1;
+                        const pasosT = trkPasosDe(res); const iT = Math.min(trkIdx(res), pasosT.length - 1); const finT = iT === pasosT.length - 1;
                         return (
                           <div style={{ display:'flex', alignItems:'center', marginBottom:10 }}>
                             {pasosT.map((_, j) => (

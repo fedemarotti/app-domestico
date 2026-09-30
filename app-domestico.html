@@ -4587,7 +4587,7 @@ const ModuloMarketing = ({ esAdmin = false }) => {
   const op = React.useMemo(() => {
     if (!pedidos) return null;
     const now = sync || Date.now(); const selSet = new Set(sel);
-    const pend = pedidos.filter(p => p.tipo === 'DEF' && p.estado !== 'entregado' && typeof p.ts === 'number' && p.ts >= ENTREGAS_DESDE && selSet.has(mkUser(p)))
+    const pend = pedidos.filter(p => p.tipo === 'DEF' && typeof p.ts === 'number' && p.ts >= ENTREGAS_DESDE && selSet.has(mkUser(p)))
       .map(p => ({ p, e: entEstado(p, now) })).filter(x => x.e)
       .sort((a, b) => b.e.atraso - a.e.atraso || a.p.ts - b.p.ts);
     const n = k => pend.filter(x => x.e.nivel === k).length;
@@ -6697,9 +6697,17 @@ const ENT_DIA = 86400000;
 const entDow = (ts) => new Date(ts - AR_OFFSET_MS).getUTCDay(); // 0 = domingo
 const entISO = (ts) => { const { y, m, day } = arParts(ts); return `${y}-${pad2(m + 1)}-${pad2(day)}`; };
 const entVence = (ts) => { let t = arInicioDeDia(ts), k = 0; while (k < 2) { t += ENT_DIA; if (entDow(t) !== 0) k++; } return t; };
+// Cuándo un pedido deja de avisarse (Fede 30/09/2026):
+//  · Retiro: "Entregado en planta" · Interior: "Despachado al transporte" (ambos = estado 'entregado')
+//  · Flex: alcanza con "En reparto (15 a 21 hs)": desde ahí ya se considera entregado.
+const entCerrado = (p) => {
+  if (p.estado === 'entregado') return true;
+  if (trkModalidad(p) !== 'flex') return false;
+  try { const pasos = trkPasosDe(p); const iR = pasos.findIndex(x => x.k === 'reparto'); return iR >= 0 && trkIdx(p) >= iR; } catch { return false; }
+};
 // Estado de entrega de un DEF pendiente (sin importar la fecha de arranque): null si no aplica.
 const entEstado = (p, now) => {
-  if (!p || p.tipo !== 'DEF' || p.estado === 'entregado' || typeof p.ts !== 'number') return null;
+  if (!p || p.tipo !== 'DEF' || typeof p.ts !== 'number' || entCerrado(p)) return null;
   const vence = entVence(p.ts), hoy = arInicioDeDia(now);
   if (hoy < vence) return { vence, atraso: -1, horas: 0, nivel: 'plazo' };
   let atraso = 0;
@@ -6927,7 +6935,7 @@ const ModuloEntregas = ({ usuarioActual, onVolver, onAbrirTracking, onCambioNoLe
 
           <div style={{ fontSize:11, color:'rgba(255,255,255,0.42)', lineHeight:1.5, marginTop:4 }}>
             {enPlazo > 0 ? `${enPlazo} pedido${enPlazo !== 1 ? 's' : ''} más en plazo (todavía no vence${enPlazo !== 1 ? 'n' : ''}). ` : ''}
-            Plazo de entrega: 48 hs = 2 días hábiles después de la venta (lunes a sábado; el domingo no cuenta). Un pedido sale de esta lista cuando el seguimiento llega al último paso. Solo cuentan los DEF desde el 28/09/2026.
+            Plazo de entrega: 48 hs = 2 días hábiles después de la venta (lunes a sábado; el domingo no cuenta). Un pedido sale de esta lista cuando se entrega: retiro = entregado en planta · flex = en reparto · interior = despachado al transporte. Solo cuentan los DEF desde el 28/09/2026.
           </div>
         </>
       )}

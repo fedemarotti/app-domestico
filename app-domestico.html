@@ -812,7 +812,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
   const [extras, setExtras]   = useState(() => {
     const d = desgloseEnvases(preloaded?.envases || 0, preloaded?.extras);
     return preloaded?.extras
-      ? { ...preloaded.extras, cajas: d.cajas, precioCaja: PRECIO_CAJA, precioBalde: PRECIO_ENVASE }
+      ? { agregados: [], bultos: Math.max(1, d.baldes + d.cajas), ...preloaded.extras, cajas: d.cajas, precioCaja: PRECIO_CAJA, precioBalde: PRECIO_ENVASE }
       : { agregados:[], envio:null, bultos: Math.max(1, d.baldes + d.cajas), esInterior:false, retiraLocal:false, localidad:'', cajas:0, precioCaja: PRECIO_CAJA, precioBalde: PRECIO_ENVASE };
   });
   const [paso, setPaso]       = useState('inicio');
@@ -828,7 +828,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
     }
   }, []);
 
-  const zona = detectarZona(extras.localidad) || extras.envio;
+  const zona = detectarZona(extras.localidad) || (extras.envio && typeof extras.envio === 'object' ? extras.envio : null);
 
   // Listener postMessage para recibir datos del mapa-flex iframe
   React.useEffect(() => {
@@ -852,12 +852,12 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
     return () => window.removeEventListener('message', handler);
   }, [envases, extras.cajas]);
 
-  const totalProd    = items.reduce((s,i)=>s+i.precio,0);
+  const totalProd    = items.reduce((s,i)=>s+(Number(i.precio)||0),0);
   const totalEnvases = envases * PRECIO_ENVASE + (extras.cajas || 0) * PRECIO_CAJA; // baldes + cajas (ambos con cargo)
-  const totalAgr     = extras.agregados.reduce((s,a)=>s+(parseFloat(a.precio)||0),0);
+  const totalAgr     = (extras.agregados || []).reduce((s,a)=>s+(parseFloat(a.precio)||0),0);
   const totalEnvio   = (extras.retiraLocal||extras.esInterior) ? 0
     : typeof extras.envio === 'number' ? extras.envio
-    : (zona ? zona.precio*extras.bultos : 0);
+    : (zona ? zona.precio*(extras.bultos || 1) : 0);
   const total        = totalProd + totalEnvases + totalAgr + totalEnvio;
 
   const snap = useCallback(() => {
@@ -1354,7 +1354,7 @@ const DetalleDEF = ({ itemPRE, onConfirm }) => {
   }
 
   // COMBO
-  if (tipoItem==='combo') {
+  if (tipoItem==='combo' || itemPRE?.tipo==='combo') {
     return <DetalleDEFCombo itemPRE={itemPRE} onConfirm={onConfirm} />;
   }
 
@@ -1750,7 +1750,13 @@ const ResumenItemDEF = ({ det, itemPRE }) => {
 function imprimirPedido(pedido, solo=null) {
   if (!pedido) return;
   try {
-    const { codigo, fecha, cliente, items, envases:env, extras:ex, totales:tot, zonaEnvio } = pedido;
+    const { codigo, envases:env, zonaEnvio } = pedido;
+    const fecha = String(pedido.fecha || '');
+    const items = Array.isArray(pedido.items) ? pedido.items : [];
+    const ex = pedido.extras || {};
+    const tot = pedido.totales || { total: Number(pedido.total) || 0, envio: 0 };
+    // Datos del cliente escapados: un nombre como "Kiosco <Juan> & Cía" rompía el HTML impreso
+    const cliente = Object.fromEntries(Object.entries(pedido.cliente || {}).map(([k, v]) => [k, typeof v === 'string' ? lpEsc(v) : v]));
     const { baldes: dBaldes, cajas: dCajas } = desgloseEnvases(env, ex); // conviven baldes (con cargo) y cajas (sin cargo)
     const esR = ex.retiraLocal; const esI = ex.esInterior;
     const bultos = ex.bultos || 1;
@@ -2143,7 +2149,7 @@ function imprimirPedido(pedido, solo=null) {
           <div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
             <div style="width:18px;height:18px;border:2px solid #0d5c3a;border-radius:3px;flex-shrink:0;margin-top:1px;"></div>
             <div>
-              <div style="font-weight:700;">${item.nombre.toUpperCase()} — Bolsa ${i+1}/4 (50 lts)</div>
+              <div style="font-weight:700;">${String(item.nombre || '').toUpperCase()} — Bolsa ${i+1}/4 (50 lts)</div>
               <span style="background:${colHex(d.color)};color:${colTc(d.color)};border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;">● ${d.color}</span>
             </div>
           </div>`).join('');
@@ -2941,7 +2947,10 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
 // VISTA DE SOLO LECTURA — PEDIDO DEF YA FINALIZADO
 // ═══════════════════════════════════════════════════════════════════════════════
 const VistaDetallePedidoDEF = ({ pedido, onVolver, onNuevoPedido, onPedidoActualizado, onVerTracking }) => {
-  const { codigo, fecha, items, envases:env, totales:tot, zonaEnvio } = pedido;
+  const { codigo, fecha, envases:env, zonaEnvio } = pedido;
+  const items = Array.isArray(pedido.items) ? pedido.items : [];
+  const tot = pedido.totales || { total: Number(pedido.total) || 0 };
+  const zonaNom = zonaEnvio && typeof zonaEnvio === 'object' ? zonaEnvio.zona : zonaEnvio;
   const fmt = v => '$'+Math.round(v||0).toLocaleString('es-AR');
 
   // Estado editable local
@@ -2974,7 +2983,7 @@ const VistaDetallePedidoDEF = ({ pedido, onVolver, onNuevoPedido, onPedidoActual
   };
 
   const modalidadEntrega = ex.retiraLocal ? 'retiro' : ex.esInterior ? 'interior' : 'flex';
-  const nombreCliente = cl.nombre ? cl.nombre.split(' ')[0] : 'cliente';
+  const nombreCliente = cl.nombre ? String(cl.nombre).split(' ')[0] : 'cliente';
   const empresaTransporte = ex.esInterior ? (ex.transporte || 'Vía Cargo / Andreani') : 'Flex';
 
   const mensajeEntregado = {
@@ -3079,9 +3088,9 @@ _Doméstico · Moreno, Bs. As._`
   const textoWA = [
     `🧹 *DOMÉSTICO · Pedido Confirmado*`,`📋 *${codigo}*`,`📅 ${fecha}`,``,
     `━━━━━━━━━━━━━━━━`,`👤 *DATOS DEL CLIENTE*`,`━━━━━━━━━━━━━━━━`,
-    `👤 *${cl.nombre}*`,
+    `👤 *${cl.nombre || 'Sin nombre'}*`,
     cl.dni?`🪪 DNI: ${cl.dni}`:null,
-    `📱 ${cl.telefono}`,
+    cl.telefono?`📱 ${cl.telefono}`:null,
     cl.email?`📧 ${cl.email}`:null,
     cl.direccion?`📍 ${cl.direccion}`:null,
     cl.localidad?`🏘️ Localidad: ${cl.localidad}`:null,
@@ -3097,7 +3106,7 @@ _Doméstico · Moreno, Bs. As._`
     ``,`━━━━━━━━━━━━━━━━`,`📦 *MODALIDAD DE ENTREGA*`,
     ex.retiraLocal?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:
       ex.esInterior?`🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`:
-      zonaEnvio?`🚚 *ENVÍO FLEX AMBA* — ${zonaEnvio.zona} · ${ex.bultos} bulto${ex.bultos!==1?'s':''} — *${fmt(tot.envio)}*`:
+      zonaEnvio?`🚚 *ENVÍO FLEX AMBA* — ${zonaNom} · ${ex.bultos||1} bulto${(ex.bultos||1)!==1?'s':''} — *${fmt(tot.envio)}*`:
       (cl.localidad||ex.localidad||tot.envio>0)?`🚚 *ENVÍO FLEX AMBA*${cl.localidad||ex.localidad ? ` — ${cl.localidad||ex.localidad}` : ''} · ${ex.bultos||1} bulto${(ex.bultos||1)!==1?'s':''}${tot.envio>0 ? ` — *${fmt(tot.envio)}*` : ''}`:null,
     ``,`━━━━━━━━━━━━━━━━`,`💰 *TOTAL: ${fmt(tot.total)}*`,`━━━━━━━━━━━━━━━━`,``,
     `_Por favor confirmá que todos los datos son correctos antes de que procesemos el pedido._`,``,
@@ -3193,7 +3202,7 @@ _Doméstico · Moreno, Bs. As._`
         {!editandoEntrega ? (
           <>
             <div style={{ fontSize:13, fontWeight:700 }}>
-              {ex.retiraLocal ? '🏪 RETIRA EN PLANTA' : ex.esInterior ? '🚚 INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI' : zonaEnvio ? `🚚 ENVÍO FLEX AMBA — ${zonaEnvio.zona} · ${ex.bultos} bulto${ex.bultos!==1?'s':''}` : cl.localidad||ex.localidad ? `🚚 ENVÍO FLEX AMBA — ${cl.localidad||ex.localidad}` : '—'}
+              {ex.retiraLocal ? '🏪 RETIRA EN PLANTA' : ex.esInterior ? '🚚 INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI' : zonaEnvio ? `🚚 ENVÍO FLEX AMBA — ${zonaNom} · ${ex.bultos||1} bulto${(ex.bultos||1)!==1?'s':''}` : cl.localidad||ex.localidad ? `🚚 ENVÍO FLEX AMBA — ${cl.localidad||ex.localidad}` : '—'}
             </div>
             {!ex.retiraLocal && tot.envio>0 && <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginTop:3 }}>Costo envío: {fmt(tot.envio)}</div>}
           </>
@@ -3338,7 +3347,7 @@ const ModuloClientes = ({ onNuevoPedido, onVolver, onAbrirPedido }) => {
   useEffect(() => { reload(); }, []);
 
   const pedidosCliente = (cli) => {
-    const tel = cli.telefono?.replace(/\D/g,'');
+    const tel = String(cli.telefono ?? '').replace(/\D/g,'');
     return pedidos.filter(p => {
       const pt = (p.cliente?.telefono||'').replace(/\D/g,'');
       return pt && tel && pt === tel;
@@ -3349,7 +3358,7 @@ const ModuloClientes = ({ onNuevoPedido, onVolver, onAbrirPedido }) => {
     pedidosCliente(cli).filter(p=>p.tipo==='DEF').reduce((s,p)=>s+(p.totales?.total||0),0);
 
   const filtrados = busq.length >= 2
-    ? clientes.filter(c => (c.nombre||'').toLowerCase().includes(busq.toLowerCase()) || (c.telefono||'').includes(busq))
+    ? clientes.filter(c => String(c.nombre||'').toLowerCase().includes(busq.toLowerCase()) || String(c.telefono||'').includes(busq))
     : clientes;
 
   const guardarNuevo = async () => {
@@ -3534,7 +3543,7 @@ const gNum = v => (typeof v === 'number' && isFinite(v)) ? v : 0;
 const gTotal = p => gNum(p?.totales?.total ?? p?.total);
 const gEnvio = p => gNum(p?.totales?.envio);
 const gModalidad = p => p?.extras?.retiraLocal ? 'RETIRO' : p?.extras?.esInterior ? 'INTERIOR' : 'FLEX';
-const gClaveCliente = c => { const tel = (c?.telefono || '').replace(/\D/g, ''); if (tel) return 'T' + tel; const n = (c?.nombre || '').trim().toLowerCase(); return n ? 'N' + n : null; };
+const gClaveCliente = c => { const tel = String(c?.telefono ?? '').replace(/\D/g, ''); if (tel) return 'T' + tel; const n = String(c?.nombre ?? '').trim().toLowerCase(); return n ? 'N' + n : null; };
 const gVendedor = p => {
   const em = (p?.creadoPor || '').trim().toLowerCase();
   const r = ROLES_LIQ.find(x => x.email && x.email.toLowerCase() === em);
@@ -4092,7 +4101,7 @@ const trkPasosDe = (p) => {
   return medio === 'Andreani' ? TRK_PASOS_INTERIOR_ANDREANI : TRK_PASOS_INTERIOR_STD;
 };
 const trkNombreCliente = (p) => {
-  const n = ((p.cliente && p.cliente.nombre) || '').trim().split(' ')[0] || '';
+  const n = String((p.cliente && p.cliente.nombre) || '').trim().split(' ')[0] || '';
   return n ? n.charAt(0).toUpperCase() + n.slice(1).toLowerCase() : 'cliente';
 };
 const trkEstado = (p) => {
@@ -4430,7 +4439,7 @@ const mkDur = (ms) => {
   return `${(h / 24).toFixed(1).replace('.', ',')} días`;
 };
 const mkMediana = arr => { if (!arr.length) return null; const a = [...arr].sort((x, y) => x - y); const n = a.length; return n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2; };
-const mkTel = c => (c?.telefono || '').replace(/\D/g, '');
+const mkTel = c => String(c?.telefono ?? '').replace(/\D/g, '');
 const mkWaLink = c => { let t = mkTel(c); if (!t) return null; if (t.startsWith('0')) t = t.slice(1); if (!t.startsWith('54')) t = '549' + t; return `https://wa.me/${t}`; };
 // Sin localidad cargada = en general clientes que retiran en planta (no se les pide dirección)
 const mkLocalidad = p => ((p?.cliente?.localidad || p?.extras?.localidad || '').trim().toUpperCase()) || 'SIN DEFINIR';
@@ -6089,7 +6098,7 @@ const VG_COSTOS_BASE = {
 const VG_TIPOS = [['jabon','Jabón'],['suavizante','Suavizante'],['detergente','Detergente']];
 const VG_CALS = ['Inicial','Intermedia','Premium'];
 const VG_BOLSAS = { jabon: { 50: 1, 200: 4 }, suavizante: { 50: 2, 200: 8 }, detergente: { 50: 1, 200: 4 } };
-const vgN = v => { const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')); return isFinite(n) ? n : 0; };
+const vgN = v => lpNum(v); // acepta 1500 · 1.500 · 1500,50 · 1.500,50
 const vgLitros = arr => (arr || []).reduce((a, f) => a + vgN(f?.cantidad), 0);
 const vgFmt = n => (n < 0 ? '− ' : '') + '$' + Math.round(Math.abs(n)).toLocaleString('es-AR');
 
@@ -6283,7 +6292,7 @@ const VgInforme = ({ defs, R, onVerVenta }) => {
   const now = Date.now(); const D = 86400000;
   const rango = React.useMemo(() => {
     const h0 = arInicioDeDia(now);
-    if (per === 'hoy') return { desde: h0, hasta: now, pd: h0 - D, ph: now - D, et: `Hoy · ${fmtFechaDDMMAAAA(now)}`, pet: 'ayer a esta hora' };
+    if (per === 'hoy') return { desde: h0, hasta: h0 + D - 1, pd: h0 - D, ph: now - D, et: `Hoy · ${fmtFechaDDMMAAAA(now)}`, pet: 'ayer a esta hora' };
     if (per === 'ayer') return { desde: h0 - D, hasta: h0 - 1, pd: h0 - 2 * D, ph: h0 - D - 1, et: `Ayer · ${fmtFechaDDMMAAAA(h0 - D)}`, pet: 'anteayer' };
     if (per === 'semana') { const dow = (new Date(now - AR_OFFSET_MS).getUTCDay() + 6) % 7; const d = h0 - dow * D; return { desde: d, hasta: now, pd: d - 7 * D, ph: now - 7 * D, et: `Semana (desde el lunes ${fmtFechaDDMMAAAA(d).slice(0, 5)})`, pet: 'la semana pasada' }; }
     if (per === 'mes') { const { y, m } = arParts(now); const d = arInicioDeMes(y, m); const pm = m === 0 ? 11 : m - 1, py = m === 0 ? y - 1 : y; const pd = arInicioDeMes(py, pm);
@@ -7047,7 +7056,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
     const qLow = raw.toLowerCase();
 
     // Caso especial: "ultimos" → últimos 10 pedidos
-    if (/ULTI/.test(q)) {
+    if (/^[ÚU]LTIMOS?$/.test(q)) {
       const ultimos = [];
       pedidos.slice(0, 10).forEach(p => {
         const x = p.tipo === 'PRE' ? (defDePRE(p.codigo) || p) : p;
@@ -7096,14 +7105,14 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 
     // 6. Texto en el campo fecha (ej: "julio", "01/07/2026")
     if (raw.length >= 3) {
-      todos.forEach(p => { if (p.fecha && p.fecha.toLowerCase().includes(qLow)) add(p); });
+      todos.forEach(p => { if (p.fecha && String(p.fecha).toLowerCase().includes(qLow)) add(p); });
     }
 
     // 7. Nombre del cliente (palabras parciales)
     const palabras = raw.toLowerCase().split(/\s+/).filter(w => w.length >= 2);
     if (palabras.length > 0) {
       todos.forEach(p => {
-        const nombre = (p.cliente?.nombre || '').toLowerCase();
+        const nombre = String(p.cliente?.nombre ?? '').toLowerCase();
         if (nombre && palabras.some(pal => nombre.includes(pal))) add(p);
       });
     }
@@ -7451,7 +7460,7 @@ function ModuloLiquidaciones({ onVolver }) {
   const rango = React.useMemo(() => {
     if (tipo === 'hoy') {
       const ahora = Date.now();
-      return { desde: arInicioDeDia(ahora), hasta: ahora, etiqueta: `Ventas de hoy · ${fmtFechaDDMMAAAA(ahora)}` };
+      return { desde: arInicioDeDia(ahora), hasta: arInicioDeDia(ahora) + 86400000 - 1, etiqueta: `Ventas de hoy · ${fmtFechaDDMMAAAA(ahora)}` };
     }
     if (tipo === 'periodo' && desdeISO && hastaISO) {
       const { desde, hasta } = arRangoDesdeISO(desdeISO, hastaISO);
@@ -7508,7 +7517,7 @@ function ModuloLiquidaciones({ onVolver }) {
   // ── Resumen con métricas (solo para cierre mensual) ──
   const resumen = React.useMemo(() => {
     if (tipo !== 'cierre' || !pedidosData || !rango || !rolInfo || filas.length === 0) return null;
-    const claveCliente = c => { const tel = (c?.telefono || '').replace(/\D/g, ''); if (tel) return 'T' + tel; const n = (c?.nombre || '').trim().toLowerCase(); return n ? 'N' + n : null; };
+    const claveCliente = c => { const tel = String(c?.telefono ?? '').replace(/\D/g, ''); if (tel) return 'T' + tel; const n = String(c?.nombre ?? '').trim().toLowerCase(); return n ? 'N' + n : null; };
     const pasaRol = p => { const email = (p.creadoPor || '').trim().toLowerCase(); return esTotal ? emailsRolesConocidos.includes(email) : email === rolInfo.email.toLowerCase(); };
     const defsTodos = pedidosData.filter(p => p.tipo === 'DEF' && typeof p.ts === 'number' && !borrados.has(p.codigo) && pasaRol(p));
     // Clientes nuevos: su PRIMERA compra DEF de la historia cae dentro del período
@@ -8694,6 +8703,29 @@ function LoginScreen({ onLogin }) {
 }
 
 // ── WRAPPER CON AUTENTICACIÓN ─────────────────────────────────────────────────
+// Si una pantalla falla al dibujarse, en vez de dejar la app en negro muestra un aviso con
+// el detalle y un botón para volver al inicio (recarga la app; no se pierde nada guardado).
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err, info) { console.error('Pantalla con error:', err, info && info.componentStack); }
+  render() {
+    if (!this.state.err) return this.props.children;
+    const msg = String((this.state.err && this.state.err.message) || this.state.err).slice(0, 200);
+    return (
+      <div style={{ minHeight:'100vh', background:'#0A0F16', color:'#EEF2F7', display:'flex', alignItems:'center', justifyContent:'center', padding:20, fontFamily:'system-ui, sans-serif' }}>
+        <div style={{ maxWidth:420, width:'100%', background:'rgba(239,68,68,0.10)', border:'1px solid rgba(239,68,68,0.45)', borderRadius:16, padding:20, textAlign:'center' }}>
+          <div style={{ fontSize:40, marginBottom:8 }}>⚠️</div>
+          <div style={{ fontSize:17, fontWeight:900, marginBottom:6 }}>Esta pantalla tuvo un error</div>
+          <div style={{ fontSize:13, color:'#9AA7B8', marginBottom:14 }}>Lo guardado no se perdió. Volvé al inicio y seguí trabajando. Si se repite, mandale una captura de este mensaje a Fede.</div>
+          <div style={{ fontSize:11, color:'#fca5a5', background:'rgba(0,0,0,0.3)', borderRadius:8, padding:'8px 10px', marginBottom:16, wordBreak:'break-word', fontFamily:'monospace' }}>{msg}</div>
+          <button onClick={() => { try { window.location.reload(); } catch {} }} style={{ width:'100%', padding:14, border:'none', borderRadius:12, background:'linear-gradient(135deg,#f97316,#ea580c)', color:'#fff', fontWeight:900, fontSize:15, cursor:'pointer' }}>🏠 Volver al inicio</button>
+        </div>
+      </div>
+    );
+  }
+}
+
 function AppConAuth() {
   const [usuario, setUsuario] = React.useState(null);
   const [verificando, setVerificando] = React.useState(true);
@@ -8747,7 +8779,7 @@ function AppConAuth() {
   return <App usuarioActual={usuario} onCerrarSesion={() => supaClient.auth.signOut()} />;
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<AppConAuth />);
+ReactDOM.createRoot(document.getElementById('root')).render(<ErrorBoundary><AppConAuth /></ErrorBoundary>);
 
   </script>
 </body>

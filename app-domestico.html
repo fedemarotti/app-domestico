@@ -4583,7 +4583,7 @@ const ModuloMarketing = ({ esAdmin = false }) => {
       tasaRecompra: todos.length ? Math.round(conRecompra / todos.length * 100) : null, inactivos, heat, heatMax, porDiaSem, porMod, usuariosConDatos, preByCod };
   }, [pedidos, rango, sync, sel, diasInactivo]);
 
-  // ── Operación (antes en GESTIÓN): pendientes de entrega de los usuarios elegidos, DEF desde el 30/09/2026 ──
+  // ── Operación (antes en GESTIÓN): pendientes de entrega de los usuarios elegidos, DEF desde el 28/09/2026 ──
   const op = React.useMemo(() => {
     if (!pedidos) return null;
     const now = sync || Date.now(); const selSet = new Set(sel);
@@ -4761,7 +4761,7 @@ const ModuloMarketing = ({ esAdmin = false }) => {
         productos:'Qué productos, calidades y formatos se venden.',
         clientes:'Clientes nuevos, recompra e inactivos para recontactar.',
         cuando:'Qué días y en qué horarios se vende más.',
-        operacion:'Pedidos pendientes de entrega y atrasos (DEF desde el 30/09/2026). Antes estaba en Gestión.',
+        operacion:'Pedidos pendientes de entrega y atrasos (DEF desde el 28/09/2026). Antes estaba en Gestión.',
         interno:'Solo administrador: cobrado con envío, envíos y comisiones por usuario (el equipo de marketing no ve esta solapa).',
       })[tab]}</div>
 
@@ -4842,7 +4842,7 @@ const ModuloMarketing = ({ esAdmin = false }) => {
               `${x.p.codigo}${x.p.cliente?.nombre ? ' · ' + x.p.cliente.nombre : ''}`,
               `${x.e.nivel === 'plazo' ? 'En plazo · vence ' + fmtFechaDDMMAAAA(x.e.vence) : x.e.nivel === 'hoy' ? '🕑 VENCE HOY (48 hs)' : x.e.nivel === 'critico' ? `🚨 ATRASO CRÍTICO · ${x.e.horas} hs` : `⚠️ ATRASADO · ${x.e.horas} hs`} · ${gModalidad(x.p)} · venta ${fmtFechaDDMMAAAA(x.p.ts)}`,
               fmt(mkNeto(x.p)), mkUser(x.p)))}
-            <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:6 }}>Plazo: 48 hs = 2 días hábiles después de la venta (lunes a sábado; el domingo no cuenta). Solo DEF desde el 30/09/2026. Filtra por “Quién vendió”, no por período. Entregados en el período: {op.entregadosR}.</div>
+            <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:6 }}>Plazo: 48 hs = 2 días hábiles después de la venta (lunes a sábado; el domingo no cuenta). Solo DEF desde el 28/09/2026. Filtra por “Quién vendió”, no por período. Entregados en el período: {op.entregadosR}.</div>
           </div>
         </div>
       )}
@@ -6688,11 +6688,11 @@ const ModuloVentasGanancia = ({ onVolver, onCambioNoLeidas }) => {
 //  · Día del vencimiento: "HOY DEBE ENTREGARSE" (48 hs). Cada día hábil siguiente sin
 //    entregar suma 24 hs: 72 hs y 96 hs = ATRASADO; más de 96 hs = ATRASO CRÍTICO.
 //  · Sigue apareciendo hasta que el seguimiento llega al último paso (estado 'entregado').
-//  · Solo DEF creados desde el 30/09/2026: los anteriores no cuentan.
+//  · Solo DEF creados desde el lunes 28/09/2026: los anteriores no cuentan.
 //  · Lectura por usuario y por día (pedido.lecturasEntrega[email] = 'AAAA-MM-DD'), se marca
 //    manteniendo 3 s la barra inferior. Si al otro día sigue sin entregar, vuelve como aviso nuevo.
 // ════════════════════════════════════════════════════════════════════════════════
-const ENTREGAS_DESDE = Date.UTC(2026, 8, 30) + AR_OFFSET_MS; // 30/09/2026 00:00 AR
+const ENTREGAS_DESDE = Date.UTC(2026, 8, 28) + AR_OFFSET_MS; // 28/09/2026 00:00 AR (lunes; pedido por Fede el 30/09)
 const ENT_DIA = 86400000;
 const entDow = (ts) => new Date(ts - AR_OFFSET_MS).getUTCDay(); // 0 = domingo
 const entISO = (ts) => { const { y, m, day } = arParts(ts); return `${y}-${pad2(m + 1)}-${pad2(day)}`; };
@@ -6927,7 +6927,7 @@ const ModuloEntregas = ({ usuarioActual, onVolver, onAbrirTracking, onCambioNoLe
 
           <div style={{ fontSize:11, color:'rgba(255,255,255,0.42)', lineHeight:1.5, marginTop:4 }}>
             {enPlazo > 0 ? `${enPlazo} pedido${enPlazo !== 1 ? 's' : ''} más en plazo (todavía no vence${enPlazo !== 1 ? 'n' : ''}). ` : ''}
-            Plazo de entrega: 48 hs = 2 días hábiles después de la venta (lunes a sábado; el domingo no cuenta). Un pedido sale de esta lista cuando el seguimiento llega al último paso. Solo cuentan los DEF desde el 30/09/2026.
+            Plazo de entrega: 48 hs = 2 días hábiles después de la venta (lunes a sábado; el domingo no cuenta). Un pedido sale de esta lista cuando el seguimiento llega al último paso. Solo cuentan los DEF desde el 28/09/2026.
           </div>
         </>
       )}

@@ -4459,7 +4459,7 @@ const mkStats = (defs, presR, defDePre, preByCod) => {
     directas: defs.filter(d => !(d.codigoPRE && preByCod[d.codigoPRE])).length };
 };
 
-const ModuloMarketing = () => {
+const ModuloMarketing = ({ esAdmin = false }) => {
   const ROSA = '#f472b6';
   const [tab, setTab] = useState('resumen');
   const [periodo, setPeriodo] = useState('mes');
@@ -4582,6 +4582,18 @@ const ModuloMarketing = () => {
       topProd, porCal, porFmt, fCombo, fIndiv, fManual, litros, nuevos, recurrentes: clavesR.size - nuevos, clientesTot: todos.length, conRecompra,
       tasaRecompra: todos.length ? Math.round(conRecompra / todos.length * 100) : null, inactivos, heat, heatMax, porDiaSem, porMod, usuariosConDatos, preByCod };
   }, [pedidos, rango, sync, sel, diasInactivo]);
+
+  // ── Operación (antes en GESTIÓN): pendientes de entrega de los usuarios elegidos, DEF desde el 30/09/2026 ──
+  const op = React.useMemo(() => {
+    if (!pedidos) return null;
+    const now = sync || Date.now(); const selSet = new Set(sel);
+    const pend = pedidos.filter(p => p.tipo === 'DEF' && p.estado !== 'entregado' && typeof p.ts === 'number' && p.ts >= ENTREGAS_DESDE && selSet.has(mkUser(p)))
+      .map(p => ({ p, e: entEstado(p, now) })).filter(x => x.e)
+      .sort((a, b) => b.e.atraso - a.e.atraso || a.p.ts - b.p.ts);
+    const n = k => pend.filter(x => x.e.nivel === k).length;
+    const entregadosR = rango ? pedidos.filter(p => p.tipo === 'DEF' && p.estado === 'entregado' && selSet.has(mkUser(p)) && typeof p.tsEntrega === 'number' && p.tsEntrega >= rango.desde && p.tsEntrega <= rango.hasta).length : 0;
+    return { pend, plazo: n('plazo'), hoy: n('hoy'), atrasado: n('atrasado'), critico: n('critico'), entregadosR };
+  }, [pedidos, sync, sel, rango]);
 
   // ── Evolución PRE vs DEF: series por tramo (hora/día/semana/mes) + período anterior alineado ──
   const ev = React.useMemo(() => {
@@ -4739,8 +4751,19 @@ const ModuloMarketing = () => {
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, marginBottom:14 }}>
-        {tabBtn('resumen','Resumen')}{tabBtn('evolucion','PRE vs DEF')}{tabBtn('ventas','Ventas')}{tabBtn('mapa','Mapa')}{tabBtn('productos','Productos')}{tabBtn('clientes','Clientes')}{tabBtn('cuando','Cuándo')}
+        {tabBtn('resumen','Resumen')}{tabBtn('evolucion','PRE vs DEF')}{tabBtn('ventas','Ventas')}{tabBtn('mapa','Mapa')}{tabBtn('productos','Productos')}{tabBtn('clientes','Clientes')}{tabBtn('cuando','Cuándo')}{tabBtn('operacion','Entregas')}{esAdmin && tabBtn('interno','🔒 Interno')}
       </div>
+      <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.55)', margin:'-6px 2px 12px', lineHeight:1.4 }}>{({
+        resumen:'Números clave del período: presupuestos, ventas, conversión, participación por usuario y PRE sin convertir.',
+        evolucion:'Presupuestado vs vendido por hora, día, semana o mes: sirve para medir la pauta.',
+        ventas:'Cada venta DEF del período, con su detalle.',
+        mapa:'De qué provincias vienen las ventas.',
+        productos:'Qué productos, calidades y formatos se venden.',
+        clientes:'Clientes nuevos, recompra e inactivos para recontactar.',
+        cuando:'Qué días y en qué horarios se vende más.',
+        operacion:'Pedidos pendientes de entrega y atrasos (DEF desde el 30/09/2026). Antes estaba en Gestión.',
+        interno:'Solo administrador: cobrado con envío, envíos y comisiones por usuario (el equipo de marketing no ve esta solapa).',
+      })[tab]}</div>
 
       {cargando && <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'40vh', flexDirection:'column', gap:14, color:'rgba(255,255,255,0.6)' }}>
         <div style={{ width:38, height:38, border:'3px solid rgba(255,255,255,0.15)', borderTop:`3px solid ${ROSA}`, borderRadius:'50%', animation:'spin 0.8s linear infinite' }}></div>Cargando datos…</div>}
@@ -4801,6 +4824,62 @@ const ModuloMarketing = () => {
           </div>
         </div>
       )}
+
+      {/* ═══ ENTREGAS (operación, antes en Gestión) ═══ */}
+      {!cargando && rango && tab === 'operacion' && op && (
+        <div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, marginBottom:12 }}>
+            {[[op.plazo,'En plazo','#4ade80'],[op.hoy,'Vencen hoy','#fcd34d'],[op.atrasado,'Atrasados',op.atrasado ? '#f87171' : '#4ade80'],[op.critico,'+96 hs',op.critico ? '#ef4444' : '#4ade80']].map(([v, l, c]) => (
+              <div key={l} style={{ background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:12, padding:'10px 4px', textAlign:'center' }}>
+                <div style={{ fontSize:20, fontWeight:900, color:c }}>{v}</div>
+                <div style={{ fontSize:9.5, fontWeight:800, color:'rgba(255,255,255,0.55)', textTransform:'uppercase', marginTop:2 }}>{l}</div>
+              </div>
+            ))}
+          </div>
+          <div style={card}>
+            <div style={cTit}><span>🚚 Pendientes de entrega · más atrasados arriba</span><span>{op.pend.length}</span></div>
+            {op.pend.length === 0 ? vacio('Nada pendiente de entrega. 👏') : op.pend.slice(0, 200).map(x => filaContacto(x.p.codigo, x.p.cliente,
+              `${x.p.codigo}${x.p.cliente?.nombre ? ' · ' + x.p.cliente.nombre : ''}`,
+              `${x.e.nivel === 'plazo' ? 'En plazo · vence ' + fmtFechaDDMMAAAA(x.e.vence) : x.e.nivel === 'hoy' ? '🕑 VENCE HOY (48 hs)' : x.e.nivel === 'critico' ? `🚨 ATRASO CRÍTICO · ${x.e.horas} hs` : `⚠️ ATRASADO · ${x.e.horas} hs`} · ${gModalidad(x.p)} · venta ${fmtFechaDDMMAAAA(x.p.ts)}`,
+              fmt(mkNeto(x.p)), mkUser(x.p)))}
+            <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:6 }}>Plazo: 48 hs = 2 días hábiles después de la venta (lunes a sábado; el domingo no cuenta). Solo DEF desde el 30/09/2026. Filtra por “Quién vendió”, no por período. Entregados en el período: {op.entregadosR}.</div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ INTERNO (solo admin): lo que en Gestión era sensible ═══ */}
+      {!cargando && rango && tab === 'interno' && esAdmin && (() => {
+        const bruto = m.defs.reduce((a, p) => a + gTotal(p), 0);
+        const envio = m.defs.reduce((a, p) => a + gEnvio(p), 0);
+        const porV = {};
+        m.defs.forEach(p => { const u = mkUser(p); if (!porV[u]) porV[u] = { n: 0, f: 0, com: 0 }; porV[u].n += 1; porV[u].f += gTotal(p); porV[u].com += Math.round((gTotal(p) - gEnvio(p)) * 0.05); });
+        const filas = Object.entries(porV).sort((a, b) => b[1].f - a[1].f);
+        const comTot = filas.reduce((a, [, v]) => a + v.com, 0);
+        return (
+          <div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
+              <Kpi lbl="Cobrado (con envío)" val={fmt(bruto)} sub={`${m.defs.length} ventas DEF`} />
+              <Kpi lbl="Envíos cobrados" val={fmt(envio)} />
+              <Kpi lbl="Neto sin envío" val={fmt(bruto - envio)} />
+              <Kpi lbl="Comisiones" val={fmt(comTot)} sub="5% del neto sin envío" />
+            </div>
+            <div style={card}>
+              <div style={cTit}><span>💼 Comisiones por usuario · {rango.etiqueta}</span></div>
+              {filas.length === 0 ? vacio('Sin ventas en el período.') : filas.map(([u, v]) => (
+                <div key={u} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 0', borderBottom:'1px solid rgba(255,255,255,0.08)' }}>
+                  <UChip k={u} />
+                  <div style={{ flex:1, fontSize:11.5, color:'rgba(255,255,255,0.55)' }}>{v.n} DEF · ticket {fmt(v.f / v.n)}</div>
+                  <div style={{ textAlign:'right' }}>
+                    <div style={{ fontSize:14, fontWeight:900 }}>{fmt(v.f)}</div>
+                    <div style={{ fontSize:10.5, fontWeight:800, color:'#c4b5fd' }}>com. {fmt(v.com)}</div>
+                  </div>
+                </div>
+              ))}
+              <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:8 }}>Misma cuenta que Liquidaciones: 5% del neto sin envío. Respeta el filtro “Quién vendió”.</div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══ PRE vs DEF — evolución de presupuestos y ventas (para medir pauta) ═══ */}
       {!cargando && rango && tab === 'evolucion' && ev && (() => {
@@ -6120,12 +6199,12 @@ const vgContarNoLeidas = async () => {
 };
 
 // Botón "mantené apretado" (1 s) para marcar leída — evita toques accidentales
-const VgHold = ({ onDone, label = '✓ Mantené para marcar leída' }) => {
+const VgHold = ({ onDone, label = '✓ Mantené para marcar leída', ms = 1000 }) => {
   const [prog, setProg] = useState(0);
   const ref = React.useRef(null);
   const start = (e) => { e.preventDefault(); e.stopPropagation(); const t0 = Date.now();
     clearInterval(ref.current);
-    ref.current = setInterval(() => { const p = Math.min(1, (Date.now() - t0) / 1000); setProg(p);
+    ref.current = setInterval(() => { const p = Math.min(1, (Date.now() - t0) / ms); setProg(p);
       if (p >= 1) { clearInterval(ref.current); try { navigator.vibrate && navigator.vibrate(40); } catch {} setTimeout(() => setProg(0), 250); onDone(); } }, 30); };
   const stop = (e) => { e && e.stopPropagation(); clearInterval(ref.current); setProg(p => p >= 1 ? p : 0); };
   React.useEffect(() => () => clearInterval(ref.current), []);
@@ -6599,6 +6678,263 @@ const ModuloVentasGanancia = ({ onVolver, onCambioNoLeidas }) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 // PANEL DE INICIO — botones cuadrados (rediseño 22/09/2026)
 // ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
+// ENTREGAS DE PEDIDOS — aviso diario de DEF que vencen hoy o están atrasados.
+// Lo ven NEGOCIO y ADMIN (vendedoras y marketing no).
+// Reglas (30/09/2026, pedidas por Fede):
+//  · Se trabaja de lunes a sábado: el DOMINGO NO CUENTA.
+//  · Vence = día de la venta + 2 días hábiles (48 hs). DEF jue 01/10 → sáb 03/10;
+//    vie 02/10 → lun 05/10; sáb 03/10 → mar 06/10.
+//  · Día del vencimiento: "HOY DEBE ENTREGARSE" (48 hs). Cada día hábil siguiente sin
+//    entregar suma 24 hs: 72 hs y 96 hs = ATRASADO; más de 96 hs = ATRASO CRÍTICO.
+//  · Sigue apareciendo hasta que el seguimiento llega al último paso (estado 'entregado').
+//  · Solo DEF creados desde el 30/09/2026: los anteriores no cuentan.
+//  · Lectura por usuario y por día (pedido.lecturasEntrega[email] = 'AAAA-MM-DD'), se marca
+//    manteniendo 3 s la barra inferior. Si al otro día sigue sin entregar, vuelve como aviso nuevo.
+// ════════════════════════════════════════════════════════════════════════════════
+const ENTREGAS_DESDE = Date.UTC(2026, 8, 30) + AR_OFFSET_MS; // 30/09/2026 00:00 AR
+const ENT_DIA = 86400000;
+const entDow = (ts) => new Date(ts - AR_OFFSET_MS).getUTCDay(); // 0 = domingo
+const entISO = (ts) => { const { y, m, day } = arParts(ts); return `${y}-${pad2(m + 1)}-${pad2(day)}`; };
+const entVence = (ts) => { let t = arInicioDeDia(ts), k = 0; while (k < 2) { t += ENT_DIA; if (entDow(t) !== 0) k++; } return t; };
+// Estado de entrega de un DEF pendiente (sin importar la fecha de arranque): null si no aplica.
+const entEstado = (p, now) => {
+  if (!p || p.tipo !== 'DEF' || p.estado === 'entregado' || typeof p.ts !== 'number') return null;
+  const vence = entVence(p.ts), hoy = arInicioDeDia(now);
+  if (hoy < vence) return { vence, atraso: -1, horas: 0, nivel: 'plazo' };
+  let atraso = 0;
+  if (hoy > vence) { for (let t = vence + ENT_DIA; t <= hoy; t += ENT_DIA) if (entDow(t) !== 0) atraso++; atraso = Math.max(1, atraso); }
+  return { vence, atraso, horas: 48 + 24 * atraso, nivel: atraso === 0 ? 'hoy' : atraso >= 3 ? 'critico' : 'atrasado' };
+};
+// Aviso del flujo Entregas: solo DEF desde el arranque y ya vencidos (48 hs o más).
+const entInfo = (p, now) => {
+  if (!p || typeof p.ts !== 'number' || p.ts < ENTREGAS_DESDE) return null;
+  const e = entEstado(p, now);
+  return e && e.nivel !== 'plazo' ? e : null;
+};
+const entLeido = (p, email, now) => !!email && ((p.lecturasEntrega || {})[email] === entISO(now));
+const entAvisos = (defs, email, now) => (defs || [])
+  .map(p => { const i = entInfo(p, now); return i ? { p, ...i, leido: entLeido(p, email, now) } : null; })
+  .filter(Boolean)
+  .sort((a, b) => b.atraso - a.atraso || a.p.ts - b.p.ts);
+// Trae solo los DEF desde el arranque (consulta liviana: sirve para el globito cada minuto).
+const entCargarDefs = async () => {
+  if (supaClient) {
+    try {
+      const data = await supaTraerTodo(() => supaClient.from('pedidos').select('data').gte('ts', ENTREGAS_DESDE).like('codigo', 'DEF%').order('ts', { ascending: true }).order('codigo', { ascending: true }));
+      return { ok: true, defs: data.map(r => r.data).filter(p => p && p.tipo === 'DEF') };
+    } catch (e) { console.warn('entregas: sin nube, uso datos locales', e); }
+  }
+  let arr = [];
+  try { arr = Object.values(JSON.parse(localStorage.getItem('dom9_pedidos') || '{}')); } catch {}
+  return { ok: false, defs: arr.filter(p => p && p.tipo === 'DEF' && typeof p.ts === 'number' && p.ts >= ENTREGAS_DESDE) };
+};
+const entContarNoLeidos = async (email) => {
+  try { const r = await entCargarDefs(); return entAvisos(r.defs, email, Date.now()).filter(a => !a.leido).length; } catch { return 0; }
+};
+// Marca leído releyendo el pedido fresco de la nube para no pisar cambios de seguimiento.
+const entMarcarLeido = async (codigo, email) => {
+  const fresco = await loadLS(codigo);
+  if (!fresco || !email) return null;
+  const nuevo = { ...fresco, lecturasEntrega: { ...(fresco.lecturasEntrega || {}), [email]: entISO(Date.now()) } };
+  await saveLS(nuevo);
+  return nuevo;
+};
+// Resumen de cómo se entrega el pedido
+const entResumen = (p) => {
+  const ex = p.extras || {}, cl = p.cliente || {}, d = p.trackingDatos || {};
+  const mod = trkModalidad(p);
+  const filas = [];
+  let icono, titulo;
+  const loc = ex.localidad || cl.localidad || cl.ciudad || '';
+  if (mod === 'retiro') {
+    icono = '🏪'; titulo = 'RETIRA EN PLANTA (Moreno, Bs. As.)';
+    filas.push(['Retiro', d.fechaRetiro ? `Retirable desde ${d.fechaRetiro}` : 'Todavía no se le avisó al cliente desde cuándo puede retirar']);
+  } else if (mod === 'flex') {
+    icono = '🛵'; titulo = 'ENVÍO FLEX AMBA';
+    filas.push(['Dirección', [cl.direccion, loc].filter(Boolean).join(' · ') || 'Sin dirección cargada']);
+    const z = p.zonaEnvio; const zTxt = z && typeof z === 'object' ? z.zona : (typeof z === 'string' ? z : '');
+    if (zTxt) filas.push(['Zona', zTxt]);
+    filas.push(['Reparto', 'La logística retira de planta después del mediodía · entrega de 15 a 21 hs']);
+  } else {
+    icono = '🚛'; titulo = 'INTERIOR DEL PAÍS';
+    const medio = d.medioDespacho || ex.transporte || '';
+    const esExpreso = medio && medio !== 'Andreani' && medio !== 'Vía Cargo';
+    filas.push(['Transporte', medio ? (esExpreso ? `EXPRESO · ${medio}` : medio.toUpperCase()) : 'A DEFINIR (Vía Cargo, Andreani o expreso)']);
+    if (medio === 'Andreani') filas.push(['Pago Andreani', d.montoAndreani ? `Cobrado $${d.montoAndreani}${d.comprobanteAndreani ? ' · comprobante ' + d.comprobanteAndreani : ''}` : 'PENDIENTE: el cliente paga el envío antes del despacho']);
+    else if (medio) filas.push(['Flete', 'Lo paga el cliente al retirar en el transporte']);
+    if (d.diaDespacho) filas.push(['Entrega al transporte', d.diaDespacho]);
+    if (d.nroSeguimiento) filas.push(['N° de seguimiento', d.nroSeguimiento]);
+    filas.push(['Destino', [cl.direccion, loc, cl.provincia, cl.cp && 'CP ' + cl.cp].filter(Boolean).join(' · ') || 'Sin datos de destino']);
+    if (cl.dni) filas.push(['DNI', cl.dni]);
+  }
+  let bultos = ex.bultos;
+  if (!bultos) { try { bultos = minBultosDe(p.envases, ex); } catch { bultos = null; } }
+  if (bultos) filas.push(['Bultos', String(bultos)]);
+  return { mod, icono, titulo, filas };
+};
+const ENT_ESTILO = {
+  hoy:      { bg:'rgba(251,191,36,0.10)', bd:'1.5px solid rgba(251,191,36,0.6)', tx:'#fcd34d', tagBg:'rgba(251,191,36,0.2)' },
+  atrasado: { bg:'rgba(239,68,68,0.16)', bd:'2px solid rgba(239,68,68,0.8)', tx:'#fca5a5', tagBg:'rgba(239,68,68,0.28)' },
+  critico:  { bg:'linear-gradient(135deg,rgba(220,38,38,0.42),rgba(127,29,29,0.55))', bd:'3px solid #ef4444', tx:'#fff', tagBg:'#dc2626' },
+};
+// "AYER" solo si el vencimiento fue literalmente ayer; si no, se nombra el día (ej: vencía el sábado y hoy es lunes)
+const entTitular = (a, now) => {
+  if (a.atraso === 0) return `HOY DEBE ENTREGARSE EL PEDIDO ${a.p.codigo}`;
+  if (arInicioDeDia(now) - a.vence === ENT_DIA) return `AYER SE DEBERÍA HABER ENTREGADO EL PEDIDO ${a.p.codigo}`;
+  const { m, day } = arParts(a.vence);
+  return `EL ${DIAS_SEMANA_NOMBRE[entDow(a.vence)]} ${pad2(day)}/${pad2(m + 1)} SE DEBERÍA HABER ENTREGADO EL PEDIDO ${a.p.codigo}`;
+};
+const entTag = (a) => a.nivel === 'hoy' ? '🕑 48 HS · VENCE HOY' : a.nivel === 'critico' ? `🚨 ${a.horas} HS · ATRASO CRÍTICO` : `⚠️ ${a.horas} HS · ATRASADO`;
+
+const ModuloEntregas = ({ usuarioActual, onVolver, onAbrirTracking, onCambioNoLeidos }) => {
+  const email = (usuarioActual?.email || '').trim().toLowerCase();
+  const [defs, setDefs] = useState(null);
+  const [nube, setNube] = useState(true);
+  const [sync, setSync] = useState(null);
+  const [abierto, setAbierto] = useState(null);
+  const [marcando, setMarcando] = useState(null);
+  const [filtro, setFiltro] = useState('todos'); // 'todos' | 'sinleer'
+  const cargar = () => entCargarDefs().then(r => { setDefs(r.defs); setNube(r.ok); setSync(Date.now()); });
+  React.useEffect(() => {
+    cargar();
+    const t = setInterval(cargar, 60000); // al pasar las 23:59 el listado se recalcula solo
+    const alVolver = () => { if (!document.hidden) cargar(); };
+    document.addEventListener('visibilitychange', alVolver); window.addEventListener('focus', alVolver);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', alVolver); window.removeEventListener('focus', alVolver); };
+  }, []);
+  const now = sync || Date.now();
+  const avisos = React.useMemo(() => defs ? entAvisos(defs, email, now) : [], [defs, email, now]);
+  const noLeidos = avisos.filter(a => !a.leido).length;
+  React.useEffect(() => { if (defs && onCambioNoLeidos) onCambioNoLeidos(noLeidos); }, [noLeidos, defs]);
+  const enPlazo = defs ? defs.filter(p => { const e = entEstado(p, now); return e && e.nivel === 'plazo'; }).length : 0;
+  const cnt = k => avisos.filter(a => a.nivel === k).length;
+  const marcar = async (codigo) => {
+    setMarcando(codigo);
+    const nuevo = await entMarcarLeido(codigo, email);
+    if (nuevo) setDefs(prev => (prev || []).map(p => p.codigo === codigo ? nuevo : p));
+    setMarcando(null); setAbierto(null);
+  };
+  const lista = filtro === 'sinleer' ? avisos.filter(a => !a.leido) : avisos;
+  const btn = { padding:'8px 14px', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' };
+  const mini = (v, l, color) => (
+    <div style={{ background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:12, padding:'10px 4px', textAlign:'center' }}>
+      <div style={{ fontSize:22, fontWeight:900, color }}>{v}</div>
+      <div style={{ fontSize:9.5, fontWeight:800, color:'rgba(255,255,255,0.55)', textTransform:'uppercase', marginTop:2 }}>{l}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <style>{`@keyframes entPulso { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.55); } 50% { box-shadow: 0 0 0 7px rgba(239,68,68,0); } }`}</style>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
+        <button onClick={onVolver} style={{ ...btn, background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)' }}>🏠 Salir</button>
+        <div style={{ flex:1 }} />
+        <button onClick={cargar} style={{ ...btn, background:'rgba(74,222,128,0.12)', color:'#4ade80', border:'1px solid rgba(74,222,128,0.4)' }}>🔄 Actualizar{sync ? ` · ${arHora(sync)}` : ''}</button>
+      </div>
+      <div style={{ fontSize:22, fontWeight:900, letterSpacing:'-0.4px', marginBottom:2 }}>🚚 <span style={{ color:'#fbbf24' }}>ENTREGAS DE PEDIDOS</span></div>
+      <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginBottom:12 }}>{fmtDiaLargo(now)}</div>
+      {!nube && <div style={{ background:'#fef3c7', border:'2px solid #f59e0b', color:'#92400e', padding:'10px 14px', borderRadius:10, fontSize:13, fontWeight:700, marginBottom:10 }}>⚠️ Sin conexión con la nube: pueden faltar pedidos. Revisá internet y tocá Actualizar.</div>}
+
+      {!defs ? (
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'40vh', flexDirection:'column', gap:14, color:'rgba(255,255,255,0.6)' }}>
+          <div style={{ width:38, height:38, border:'3px solid rgba(255,255,255,0.15)', borderTop:'3px solid #fbbf24', borderRadius:'50%', animation:'spin 0.8s linear infinite' }}></div>Cargando pedidos…
+        </div>
+      ) : (
+        <>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, marginBottom:10 }}>
+            {mini(cnt('hoy'), 'Vencen hoy', '#fcd34d')}
+            {mini(cnt('atrasado'), 'Atrasados', cnt('atrasado') ? '#f87171' : '#4ade80')}
+            {mini(cnt('critico'), '+96 hs', cnt('critico') ? '#ef4444' : '#4ade80')}
+            {mini(noLeidos, 'Sin leer', noLeidos ? '#fff' : '#4ade80')}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:12 }}>
+            {[['todos', `Todos (${avisos.length})`], ['sinleer', `Sin leer (${noLeidos})`]].map(([k, l]) => (
+              <button key={k} onClick={() => setFiltro(k)} style={{ ...btn, background: filtro === k ? 'rgba(251,191,36,0.22)' : 'rgba(255,255,255,0.06)', color: filtro === k ? '#fde68a' : 'rgba(255,255,255,0.6)', border: filtro === k ? '1px solid rgba(251,191,36,0.6)' : '1px solid rgba(255,255,255,0.12)' }}>{l}</button>
+            ))}
+          </div>
+
+          {lista.length === 0 && (
+            <div style={{ padding:'26px 14px', textAlign:'center', fontSize:13.5, color:'rgba(255,255,255,0.55)', background:'rgba(255,255,255,0.05)', borderRadius:14, marginBottom:12 }}>
+              {avisos.length === 0 ? '✅ No hay pedidos para entregar hoy ni atrasados.' : '✅ Leíste todos los avisos de hoy.'}
+            </div>
+          )}
+
+          {lista.map(a => {
+            const st = ENT_ESTILO[a.nivel];
+            const r = entResumen(a.p);
+            const cl = a.p.cliente || {};
+            const abiertoEste = abierto === a.p.codigo;
+            const wa = mkWaLink(cl);
+            let pasoTxt = '';
+            try { const pasos = trkPasosDe(a.p); pasoTxt = pasos[Math.min(trkIdx(a.p), pasos.length - 1)].tit; } catch {}
+            const items = (a.p.items || []).map(it => (it.listaId && it.nombreBase) ? it.nombreBase : it.nombre).filter(Boolean);
+            return (
+              <div key={a.p.codigo} style={{ background: st.bg, border: st.bd, borderRadius:16, marginBottom:12, overflow:'hidden', opacity: a.leido ? 0.72 : 1, animation: a.nivel === 'critico' && !a.leido ? 'entPulso 1.6s ease-in-out infinite' : 'none' }}>
+                <div onClick={() => setAbierto(abiertoEste ? null : a.p.codigo)} style={{ padding:'13px 14px', cursor:'pointer' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap', marginBottom:8 }}>
+                    <span style={{ fontSize:10.5, fontWeight:900, padding:'3px 9px', borderRadius:20, background: st.tagBg, color:'#fff', letterSpacing:0.3 }}>{entTag(a)}</span>
+                    {!a.leido && <span style={{ fontSize:9.5, fontWeight:900, padding:'3px 8px', borderRadius:20, background:'#ef4444', color:'#fff' }}>NUEVO</span>}
+                    {a.leido && <span style={{ fontSize:9.5, fontWeight:900, padding:'3px 8px', borderRadius:20, background:'rgba(74,222,128,0.2)', color:'#86efac' }}>✓ LEÍDO HOY</span>}
+                    <span style={{ marginLeft:'auto', fontSize:11, color:'rgba(255,255,255,0.6)', fontWeight:700 }}>{abiertoEste ? '▲' : '▼ ver'}</span>
+                  </div>
+                  <div style={{ fontSize:16, fontWeight:900, lineHeight:1.25, color: st.tx, letterSpacing:'-0.2px' }}>{entTitular(a, now)}</div>
+                  {a.atraso > 0 && (
+                    <div style={{ fontSize:12.5, fontWeight:800, color:'#fff', marginTop:6 }}>
+                      {a.nivel === 'critico' ? '🚨 Más de 96 hs sin entregar. ' : 'Está con atraso. '}Revisar en producción qué pasó y contactar al cliente.
+                    </div>
+                  )}
+                  <div style={{ fontSize:12, color:'rgba(255,255,255,0.75)', marginTop:7 }}>
+                    {r.icono} {r.titulo} · {cl.nombre || 'Sin nombre'}{a.atraso > 0 ? ` · vencía ${fmtFechaDDMMAAAA(a.vence)}` : ''}
+                  </div>
+                </div>
+
+                {abiertoEste && (
+                  <div style={{ padding:'0 14px 14px' }}>
+                    <div style={{ background:'rgba(0,0,0,0.25)', borderRadius:12, padding:'10px 12px', marginBottom:10 }}>
+                      <div style={{ fontSize:10, fontWeight:900, color:'rgba(255,255,255,0.5)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:6 }}>Cómo se entrega</div>
+                      <div style={{ fontSize:14, fontWeight:900, marginBottom:6 }}>{r.icono} {r.titulo}</div>
+                      {r.filas.map(([l, v]) => (
+                        <div key={l} style={{ display:'flex', gap:8, fontSize:12.5, padding:'4px 0', borderTop:'1px solid rgba(255,255,255,0.07)' }}>
+                          <div style={{ width:112, flexShrink:0, color:'rgba(255,255,255,0.5)', fontWeight:700 }}>{l}</div>
+                          <div style={{ fontWeight:800, overflowWrap:'anywhere' }}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ background:'rgba(0,0,0,0.25)', borderRadius:12, padding:'10px 12px', marginBottom:10, fontSize:12.5 }}>
+                      <div style={{ fontSize:10, fontWeight:900, color:'rgba(255,255,255,0.5)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:6 }}>Pedido</div>
+                      <div style={{ padding:'3px 0' }}><span style={{ color:'rgba(255,255,255,0.5)', fontWeight:700 }}>Cliente: </span><strong>{cl.nombre || 'Sin nombre'}</strong>{cl.telefono ? ` · ${cl.telefono}` : ''}</div>
+                      <div style={{ padding:'3px 0' }}><span style={{ color:'rgba(255,255,255,0.5)', fontWeight:700 }}>Venta: </span>{a.p.fecha || fmtFechaDDMMAAAA(a.p.ts)} · {gVendedor(a.p)}</div>
+                      <div style={{ padding:'3px 0' }}><span style={{ color:'rgba(255,255,255,0.5)', fontWeight:700 }}>Vencimiento: </span>{fmtDiaLargo(a.vence)}</div>
+                      {pasoTxt && <div style={{ padding:'3px 0' }}><span style={{ color:'rgba(255,255,255,0.5)', fontWeight:700 }}>Estado: </span><strong>{pasoTxt}</strong></div>}
+                      {items.length > 0 && <div style={{ padding:'3px 0' }}><span style={{ color:'rgba(255,255,255,0.5)', fontWeight:700 }}>Productos: </span>{items.join(' · ')}</div>}
+                      {cl.observaciones && <div style={{ fontSize:12, fontWeight:900, color:'#fbbf24', marginTop:6, textTransform:'uppercase' }}>⚠️ {cl.observaciones}</div>}
+                    </div>
+                    <div style={{ display:'grid', gridTemplateColumns: wa ? '1fr 1fr' : '1fr', gap:8, marginBottom:10 }}>
+                      <button onClick={() => onAbrirTracking && onAbrirTracking(a.p)} style={{ padding:'11px 8px', background:'linear-gradient(135deg,#0284c7,#38bdf8)', color:'#fff', border:'none', borderRadius:10, fontWeight:800, fontSize:12.5, cursor:'pointer', fontFamily:'inherit' }}>📍 Seguimiento / entregado</button>
+                      {wa && <a href={wa} target="_blank" rel="noopener noreferrer" style={{ padding:'11px 8px', background:'rgba(34,197,94,0.18)', color:'#86efac', border:'1px solid rgba(34,197,94,0.5)', borderRadius:10, fontWeight:800, fontSize:12.5, textAlign:'center', textDecoration:'none' }}>💬 WhatsApp cliente</a>}
+                    </div>
+                    {a.leido
+                      ? <div style={{ textAlign:'center', fontSize:12, fontWeight:800, color:'#86efac', padding:'8px 0' }}>✓ Leído hoy · mañana vuelve a aparecer si sigue sin entregarse</div>
+                      : marcando === a.p.codigo
+                        ? <div style={{ textAlign:'center', fontSize:12.5, fontWeight:800, color:'#6ee7b7', padding:'12px 0' }}>Guardando…</div>
+                        : <VgHold ms={3000} onDone={() => marcar(a.p.codigo)} label="✓ Mantené 3 segundos para marcar leído" />}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <div style={{ fontSize:11, color:'rgba(255,255,255,0.42)', lineHeight:1.5, marginTop:4 }}>
+            {enPlazo > 0 ? `${enPlazo} pedido${enPlazo !== 1 ? 's' : ''} más en plazo (todavía no vence${enPlazo !== 1 ? 'n' : ''}). ` : ''}
+            Plazo de entrega: 48 hs = 2 días hábiles después de la venta (lunes a sábado; el domingo no cuenta). Un pedido sale de esta lista cuando el seguimiento llega al último paso. Solo cuentan los DEF desde el 30/09/2026.
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 const Tile = ({ icon, label, rgb, solid, onClick, badge, tag }) => (
   <button onClick={onClick} className="sel-btn" style={{
     aspectRatio:'1 / 1', width:'100%', minWidth:0, borderRadius:18, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
@@ -6662,12 +6998,25 @@ const CambiarPassword = ({ onCerrar }) => {
 const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   const [verCambioPass, setVerCambioPass] = useState(false);
   const [noLeidasVG, setNoLeidasVG] = useState(0);
+  const [noLeidasEnt, setNoLeidasEnt] = useState(0); // avisos de Entregas sin leer (NEGOCIO y ADMIN)
+  const [trackDesde, setTrackDesde] = useState('inicio');
   React.useEffect(() => {
     if (!esAdmin(usuarioActual)) return;
     let vivo = true;
     const tick = () => vgContarNoLeidas().then(n => { if (vivo) setNoLeidasVG(n); });
     tick(); const t = setInterval(tick, 60000);
     return () => { vivo = false; clearInterval(t); };
+  }, [usuarioActual]);
+  React.useEffect(() => {
+    if (!esAdmin(usuarioActual) && !esNegocio(usuarioActual)) return;
+    const email = (usuarioActual?.email || '').trim().toLowerCase();
+    let vivo = true;
+    // Cada minuto: al pasar las 23:59 el globito se recalcula solo con los avisos del día nuevo
+    const tick = () => entContarNoLeidos(email).then(n => { if (vivo) setNoLeidasEnt(n); });
+    tick(); const t = setInterval(tick, 60000);
+    const alVolver = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', alVolver);
+    return () => { vivo = false; clearInterval(t); document.removeEventListener('visibilitychange', alVolver); };
   }, [usuarioActual]);
   const [etapa, setEtapa]         = useState('inicio');
   const [busqueda, setBusqueda]   = useState('');
@@ -6783,7 +7132,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
     else { setPedidoVer(p); setPedidoVerOrigen('search'); setEtapa('ver_pedido'); }
   };
 
-  const abrirTracking = (p) => { setBusError(''); setPedidoTrack(p); setEtapa('tracking'); };
+  const abrirTracking = (p, desde = 'inicio') => { setBusError(''); setTrackDesde(desde); setPedidoTrack(p); setEtapa('tracking'); };
 
   const irPreNuevo = () => { setCodigoPRE(null); setEtapa('pre'); };
   const irDefNuevo = () => { setCodigoPRE(null); setClientePreload(null); setModalidadPreload(null); setEtapa('pre'); };
@@ -6915,12 +7264,19 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
               {esNegocio(usuarioActual) && <Tile icon="🧪" label={<>FÓRMULAS<br/>PRODUCCIÓN</>} rgb={RGB.vd} onClick={()=>{ window.location.href = 'formulas-produccion.html'; }} />}
             </G>
 
+            {esNegocio(usuarioActual) && (<>
+              <TileLbl>Entregas</TileLbl>
+              <G cols={3} gap={10} style={{ marginBottom:14 }}>
+                <Tile icon="🚚" label={<>ENTREGAS DE<br/>PEDIDOS</>} rgb="251,191,36" badge={noLeidasEnt} onClick={()=>setEtapa('entregas')} />
+              </G>
+            </>)}
+
             {esAdmin(usuarioActual) && (<>
               <TileLbl>Administración</TileLbl>
               <G cols={3} gap={10} style={{ marginBottom:14 }}>
                 <Tile icon="📊" label={<>LIQUIDA-<br/>CIONES</>} rgb={RGB.az} onClick={()=>setEtapa('liquidaciones')} />
                 <Tile icon="🛵" label={<>LIQUIDACIÓN<br/>FLEX</>} rgb={RGB.na} onClick={()=>setEtapa('liquidacion_flex')} />
-                <Tile icon="📈" label="GESTIÓN" rgb={RGB.vi} onClick={()=>setEtapa('gestion')} />
+                <Tile icon="🚚" label={<>ENTREGAS DE<br/>PEDIDOS</>} rgb="251,191,36" badge={noLeidasEnt} onClick={()=>setEtapa('entregas')} />
                 <Tile icon="📣" label="MARKETING" rgb="244,114,182" onClick={()=>setEtapa('marketing')} />
                 <Tile icon="🏷️" label={<>LISTA DE<br/>PRECIOS</>} rgb="250,204,21" onClick={()=>setEtapa('lista_precios')} />
                 <Tile icon="🧪" label={<>FÓRMULAS<br/>PRODUCCIÓN</>} rgb={RGB.vd} onClick={()=>{ window.location.href = 'formulas-produccion.html'; }} />
@@ -6951,7 +7307,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
         {etapa==='ver_pedido' && pedidoVer && <VistaDetallePedidoDEF pedido={pedidoVer} onVolver={()=>{ setPedidoVer(null); setEtapa(pedidoVerOrigen==='search'?'inicio':'clientes'); }} onNuevoPedido={(cli)=>{ setPedidoVer(null); nuevoPedidoDesdeCli(cli); }} onPedidoActualizado={(p)=>{ setPedidoVer(p); setPedidos(prev=>prev.map(x=>x.codigo===p.codigo?p:x)); }} onVerTracking={()=>{ setPedidoTrack(pedidoVer); setEtapa('tracking'); }} />}
 
         {/* ── TRACKING DE PEDIDO ── */}
-        {etapa==='tracking' && pedidoTrack && <ModuloTracking pedido={pedidoTrack} usuarioActual={usuarioActual} onVolver={()=>{ setPedidoTrack(null); setEtapa('inicio'); }} onPedidoActualizado={(p)=>{ setPedidoTrack(p); setPedidos(prev=>prev.map(x=>x.codigo===p.codigo?p:x)); if (pedidoVer && pedidoVer.codigo===p.codigo) setPedidoVer(p); }} />}
+        {etapa==='tracking' && pedidoTrack && <ModuloTracking pedido={pedidoTrack} usuarioActual={usuarioActual} onVolver={()=>{ setPedidoTrack(null); setEtapa(trackDesde === 'entregas' ? 'entregas' : 'inicio'); setTrackDesde('inicio'); }} onPedidoActualizado={(p)=>{ setPedidoTrack(p); setPedidos(prev=>prev.map(x=>x.codigo===p.codigo?p:x)); if (pedidoVer && pedidoVer.codigo===p.codigo) setPedidoVer(p); }} />}
 
         {/* ── LIQUIDACIONES (solo admin) ── */}
         {etapa==='liquidaciones' && esAdmin(usuarioActual) && <ModuloLiquidaciones onVolver={irInicio} />}
@@ -6960,12 +7316,13 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
         {etapa==='liquidacion_flex' && esAdmin(usuarioActual) && <ModuloLiquidacionFlex onVolver={irInicio} />}
 
         {/* ── GESTIÓN (solo admin) ── */}
-        {etapa==='gestion' && esAdmin(usuarioActual) && <ModuloGestion onVolver={irInicio} />}
+        {/* ── ENTREGAS DE PEDIDOS (NEGOCIO y ADMIN) ── */}
+        {etapa==='entregas' && (esAdmin(usuarioActual) || esNegocio(usuarioActual)) && <ModuloEntregas usuarioActual={usuarioActual} onVolver={irInicio} onAbrirTracking={(p)=>abrirTracking(p, 'entregas')} onCambioNoLeidos={setNoLeidasEnt} />}
         {etapa==='marketing' && esAdmin(usuarioActual) && (
           <div>
             <button onClick={irInicio} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', marginBottom:12, fontFamily:'inherit' }}>🏠 Inicio</button>
-            <div style={{ fontSize:11.5, color:C.tx3, marginBottom:8 }}>Vista idéntica a la del usuario de marketing (sin costos ni comisiones).</div>
-            <ModuloMarketing />
+            <div style={{ fontSize:11.5, color:C.tx3, marginBottom:8 }}>Mismo panel que ve el equipo de marketing (incluye lo que antes estaba en Gestión). La solapa 🔒 Interno —cobrado con envío y comisiones— solo la ves vos.</div>
+            <ModuloMarketing esAdmin />
           </div>
         )}
         {etapa==='lista_precios' && esAdmin(usuarioActual) && <ModuloListaPrecios onVolver={irInicio} />}

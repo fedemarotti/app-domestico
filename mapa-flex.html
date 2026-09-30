@@ -774,6 +774,17 @@ const LOCS = [
 {id:"ensenada",            n:"Ensenada",                p:"Ensenada",            z:"c3"},
 {id:"berisso",             n:"Berisso",                 p:"Berisso",             z:"c3"},
 {id:"capilla_del_senor",   n:"Capilla del Señor",       p:"Exaltación de la Cruz",z:"c3"},
+// 30/09/2026: estaban en la lista interna de la app pero no en el mapa (Fede confirmó agregarlas)
+{id:"exaltacion_cruz",     n:"Exaltación de la Cruz",   p:"Exaltación de la Cruz",z:"c3"},
+{id:"lobos",               n:"Lobos",                   p:"Lobos",               z:"c3"},
+{id:"mercedes",            n:"Mercedes",                p:"Mercedes",            z:"c3"},
+{id:"navarro",             n:"Navarro",                 p:"Navarro",             z:"c3"},
+{id:"monte",               n:"San Miguel del Monte",    p:"Monte",               z:"c3"},
+{id:"suipacha",            n:"Suipacha",                p:"Suipacha",            z:"c3"},
+{id:"magdalena",           n:"Magdalena",               p:"Magdalena",           z:"c3"},
+{id:"brandsen",            n:"Coronel Brandsen",        p:"Brandsen",            z:"c3"},
+{id:"gral_las_heras",      n:"Gral. Las Heras",         p:"Gral. Las Heras",     z:"c3"},
+{id:"bordenave",           n:"Bordenave",               p:"Moreno",              z:"local"},
 ];
 
 // ================================================================
@@ -789,6 +800,8 @@ let precioActual = 0;
 let locActualNombre = '';
 let zonaActual = '';
 let modoManualZona = null;
+let zonaKeyActual = null;   // local | c1 | c2 | c3 (viaja a la app: la zona NO se adivina por el nombre)
+let esManual = false;       // true = localidad cargada a mano con su cordón
 
 // ── STORAGE ──
 // 24/09/2026: tarifas nuevas. Se conservan las localidades ya usadas (dom_flex2) pero con el precio
@@ -827,6 +840,7 @@ function ocultarTodosPaneles() {
 // ── SELECCIÓN ──
 function seleccionar(L) {
   sel = L;
+  zonaKeyActual = L.z; esManual = false;
   const precio = PRECIO_ZONA[L.z];
   precios[L.id] = precio;
   save();
@@ -881,6 +895,8 @@ function aceptarFinal() {
     type: 'domestico_flex_confirmado',
     localidad: locActualNombre,
     zona: zonaActual,
+    zona_key: zonaKeyActual,
+    manual: esManual,
     precio_unitario: precioActual,
     cantidad: cant,
     total: total
@@ -911,6 +927,7 @@ function confirmarManual() {
   const nombre = document.getElementById('mp-nombre').value.trim();
   if (!nombre || !modoManualZona) return;
   const precio = PRECIO_ZONA[modoManualZona];
+  zonaKeyActual = modoManualZona; esManual = true;
   abrirConfirmacion(nombre, ZONA_LBL[modoManualZona], ZONA_COLOR[modoManualZona], precio);
 }
 

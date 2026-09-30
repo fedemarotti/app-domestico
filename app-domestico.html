@@ -182,12 +182,36 @@ const FLEX_CAMBIO_TARIFA_TS = 1790211889602; // 23/09/2026 22:04 AR — momento 
 const precioAgrTxt = a => (a && a.listaId && !(parseFloat(a.precio) > 0)) ? 'SIN CARGO' : fmt(parseFloat(a?.precio) || 0);
 const ZONAS_ENVIO = [
   { zona:'Moreno', previo:4500, color:'#ef4444', precio:5200, localidades:['MORENO','PASO DEL REY','CUARTEL V','FRANCISCO ALVAREZ','LA REJA','TRUJUI','BORDENAVE'] },
-  { zona:'Cordón 1', previo:5500, color:'#fb923c', precio:6500, localidades:['JOSE C PAZ','JOSE C. PAZ','SAN MIGUEL','ITUZAINGO','ITUZAINGÓ','MERLO','MALVINAS ARGENTINAS'] },
-  { zona:'Cordón 2', previo:6500, color:'#3b82f6', precio:7500, localidades:['LA MATANZA','MORON','MORÓN','HURLINGHAM','3 DE FEBRERO','TRES DE FEBRERO','SAN MARTIN','SAN MARTÍN','VICENTE LOPEZ','VICENTE LÓPEZ','SAN FERNANDO','TIGRE','SAN ISIDRO','AVELLANEDA','LANUS','LANÚS','LOMAS DE ZAMORA','BERAZATEGUI','FLORENCIO VARELA','ALMIRANTE BROWN','QUILMES','EZEIZA','ESTEBAN ECHEVERRIA','ESTEBAN ECHEVERRÍA','CABA','CAPITAL FEDERAL','BUENOS AIRES','CIUDAD DE BUENOS AIRES','PALERMO','BELGRANO','CABALLITO','FLORES','RAMOS MEJIA','RAMOS MEJÍA','SAN JUSTO','TAPIALES','CIUDADELA','EL PALOMAR','HAEDO','CASTELAR','VILLA LUZURIAGA'] },
+  { zona:'Cordón 1', previo:5500, color:'#fb923c', precio:6500, localidades:['JOSE C PAZ','JOSE C. PAZ','SAN MIGUEL','ITUZAINGO','ITUZAINGÓ','MERLO'] },
+  { zona:'Cordón 2', previo:6500, color:'#3b82f6', precio:7500, localidades:['MALVINAS ARGENTINAS','LA MATANZA','MORON','MORÓN','HURLINGHAM','3 DE FEBRERO','TRES DE FEBRERO','SAN MARTIN','SAN MARTÍN','VICENTE LOPEZ','VICENTE LÓPEZ','SAN FERNANDO','TIGRE','SAN ISIDRO','AVELLANEDA','LANUS','LANÚS','LOMAS DE ZAMORA','BERAZATEGUI','FLORENCIO VARELA','ALMIRANTE BROWN','QUILMES','EZEIZA','ESTEBAN ECHEVERRIA','ESTEBAN ECHEVERRÍA','CABA','CAPITAL FEDERAL','BUENOS AIRES','CIUDAD DE BUENOS AIRES','PALERMO','BELGRANO','CABALLITO','FLORES','RAMOS MEJIA','RAMOS MEJÍA','SAN JUSTO','TAPIALES','CIUDADELA','EL PALOMAR','HAEDO','CASTELAR','VILLA LUZURIAGA'] },
   { zona:'Cordón 3', previo:9500, color:'#22c55e', precio:10500, localidades:['ESCOBAR','INGENIERO MASCHWITZ','ING MASCHWITZ','PILAR','ZARATE','ZÁRATE','CAMPANA','LUJAN','LUJÁN','GENERAL RODRIGUEZ','GENERAL RODRÍGUEZ','MARCOS PAZ','CAÑUELAS','GUERNICA','SAN VICENTE','VILLA ELISA','BERISSO','LA PLATA','ENSENADA','DERQUI','VILLA ROSA','NORDELTA','EXALTACION DE LA CRUZ','EXALTACIÓN DE LA CRUZ','GENERAL LAS HERAS','CORONEL BRANDSEN','BRANDSEN','DEL VISO','MAGDALENA','LOBOS','MONTE','NAVARRO','SUIPACHA','MERCEDES'] },
 ];
 
+// ── ZONA FLEX: una sola fuente de verdad = localidades del mapa Flex (mapa-flex.html) ──
+// 30/09/2026 (Fede): "no puede haber margen de error". La zona sale SOLO de:
+//   1) lo que el vendedor eligió en el mapa (extras.zonaFlex, incluido el cordón cargado a mano), o
+//   2) el nombre EXACTO de una localidad de la lista (sin importar acentos, puntos ni mayúsculas).
+// Antes se adivinaba por texto parecido ("SAN" o "LA" tomaban la primera zona que las contenía).
+// Si se agrega una localidad al mapa, agregarla también acá: [nombre, partido, zona].
+const FLEX_LOCS = [["Moreno", "Moreno", "local"], ["Paso del Rey", "Moreno", "local"], ["Francisco Álvarez", "Moreno", "local"], ["La Reja", "Moreno", "local"], ["Trujui", "Moreno", "local"], ["Cuartel V", "Moreno", "local"], ["San Antonio Oeste", "Moreno", "local"], ["Merlo", "Merlo", "c1"], ["Padua", "Merlo", "c1"], ["San Antonio de Padua", "Merlo", "c1"], ["Libertad", "Merlo", "c1"], ["Pontevedra", "Merlo", "c1"], ["Parque Mariano Moreno", "Merlo", "c1"], ["Los Eucaliptos", "Merlo", "c1"], ["Golfer", "Merlo", "c1"], ["Villa Sarmiento (Merlo)", "Merlo", "c1"], ["Marinos de la Descubierta", "Merlo", "c1"], ["La Unión (Merlo)", "Merlo", "c1"], ["Ituzaingó", "Ituzaingó", "c1"], ["Villa Udaondo", "Ituzaingó", "c1"], ["Ituzaingó Norte", "Ituzaingó", "c1"], ["Las Victorias", "Ituzaingó", "c1"], ["San Miguel", "San Miguel", "c1"], ["Bella Vista", "San Miguel", "c1"], ["Muñiz", "San Miguel", "c1"], ["Santa María", "San Miguel", "c1"], ["José C. Paz", "José C. Paz", "c1"], ["J.C.Paz Centro", "José C. Paz", "c1"], ["Morón", "Morón", "c2"], ["Haedo", "Morón", "c2"], ["El Palomar", "Morón", "c2"], ["Villa Sarmiento (Morón)", "Morón", "c2"], ["Castelar", "Morón", "c2"], ["Hurlingham", "Hurlingham", "c2"], ["Villa Tesei", "Hurlingham", "c2"], ["William Morris", "Hurlingham", "c2"], ["Tres de Febrero", "Tres de Febrero", "c2"], ["Caseros", "Tres de Febrero", "c2"], ["Ciudadela", "Tres de Febrero", "c2"], ["Santos Lugares", "Tres de Febrero", "c2"], ["Lomas del Mirador", "Tres de Febrero", "c2"], ["El Libertador", "Tres de Febrero", "c2"], ["Churruca", "Tres de Febrero", "c2"], ["Gral. San Martín", "Gral. San Martín", "c2"], ["Villa Lynch", "Gral. San Martín", "c2"], ["Villa Maipú", "Gral. San Martín", "c2"], ["José León Suárez", "Gral. San Martín", "c2"], ["Villa Ballester", "Gral. San Martín", "c2"], ["Billinghurst", "Gral. San Martín", "c2"], ["Chilavert", "Gral. San Martín", "c2"], ["Villa Libertad", "Gral. San Martín", "c2"], ["Malvinas Argentinas", "Malvinas Argentinas", "c2"], ["Los Polvorines", "Malvinas Argentinas", "c2"], ["Pablo Nogués", "Malvinas Argentinas", "c2"], ["Tortuguitas", "Malvinas Argentinas", "c2"], ["Grand Bourg", "Malvinas Argentinas", "c2"], ["Ing. Adolfo Sourdeaux", "Malvinas Argentinas", "c2"], ["Vicente López", "Vicente López", "c2"], ["Olivos", "Vicente López", "c2"], ["Florida", "Vicente López", "c2"], ["Florida Oeste", "Vicente López", "c2"], ["Munro", "Vicente López", "c2"], ["Villa Martelli", "Vicente López", "c2"], ["Carapachay", "Vicente López", "c2"], ["La Lucila", "Vicente López", "c2"], ["San Isidro", "San Isidro", "c2"], ["Martínez", "San Isidro", "c2"], ["Beccar", "San Isidro", "c2"], ["Boulogne", "San Isidro", "c2"], ["Villa Adelina", "San Isidro", "c2"], ["Acassuso", "San Isidro", "c2"], ["San Fernando", "San Fernando", "c2"], ["Victoria", "San Fernando", "c2"], ["Virreyes", "San Fernando", "c2"], ["Tigre", "Tigre", "c2"], ["General Pacheco", "Tigre", "c2"], ["Don Torcuato", "Tigre", "c2"], ["El Talar", "Tigre", "c2"], ["Rincón de Milberg", "Tigre", "c2"], ["Benavídez", "Tigre", "c2"], ["Los Troncos del Talar", "Tigre", "c2"], ["Ricardo Rojas", "Tigre", "c2"], ["San Justo", "La Matanza", "c2"], ["Ramos Mejía", "La Matanza", "c2"], ["Villa Luzuriaga", "La Matanza", "c2"], ["Ciudad Madero", "La Matanza", "c2"], ["Tapiales", "La Matanza", "c2"], ["Isidro Casanova", "La Matanza", "c2"], ["Rafael Castillo", "La Matanza", "c2"], ["Virrey del Pino", "La Matanza", "c2"], ["González Catán", "La Matanza", "c2"], ["Gregorio de Laferrère", "La Matanza", "c2"], ["20 de Junio", "La Matanza", "c2"], ["La Tablada", "La Matanza", "c2"], ["Aldo Bonzi", "La Matanza", "c2"], ["Avellaneda", "Avellaneda", "c2"], ["Dock Sud", "Avellaneda", "c2"], ["Villa Dominico", "Avellaneda", "c2"], ["Wilde", "Avellaneda", "c2"], ["Sarandí", "Avellaneda", "c2"], ["Gerli", "Avellaneda", "c2"], ["Lanús", "Lanús", "c2"], ["Lanús Este", "Lanús", "c2"], ["Lanús Oeste", "Lanús", "c2"], ["Remedios de Escalada", "Lanús", "c2"], ["Monte Chingolo", "Lanús", "c2"], ["Valentín Alsina", "Lanús", "c2"], ["Lomas de Zamora", "Lomas de Zamora", "c2"], ["Banfield", "Lomas de Zamora", "c2"], ["Temperley", "Lomas de Zamora", "c2"], ["Turdera", "Lomas de Zamora", "c2"], ["Ingeniero Budge", "Lomas de Zamora", "c2"], ["Villa Centenario", "Lomas de Zamora", "c2"], ["Fiorito", "Lomas de Zamora", "c2"], ["Lomas del Mirador", "Lomas de Zamora", "c2"], ["Almirante Brown", "Alte. Brown", "c2"], ["Adrogué", "Alte. Brown", "c2"], ["Burzaco", "Alte. Brown", "c2"], ["Claypole", "Alte. Brown", "c2"], ["Don Orione", "Alte. Brown", "c2"], ["Glew", "Alte. Brown", "c2"], ["José Mármol", "Alte. Brown", "c2"], ["Longchamps", "Alte. Brown", "c2"], ["Ministro Rivadavia", "Alte. Brown", "c2"], ["Quilmes", "Quilmes", "c2"], ["Bernal", "Quilmes", "c2"], ["Bernal Oeste", "Quilmes", "c2"], ["Don Bosco", "Quilmes", "c2"], ["Ezpeleta", "Quilmes", "c2"], ["Quilmes Oeste", "Quilmes", "c2"], ["San Francisco Solano", "Quilmes", "c2"], ["Berazategui", "Berazategui", "c2"], ["Hudson", "Berazategui", "c2"], ["Pereyra", "Berazategui", "c2"], ["Ranelagh", "Berazategui", "c2"], ["Florencio Varela", "Florencio Varela", "c2"], ["Bosques", "Florencio Varela", "c2"], ["Villa Brown", "Florencio Varela", "c2"], ["Villa Hudson", "Florencio Varela", "c2"], ["Ezeiza", "Ezeiza", "c2"], ["Tristán Suárez", "Ezeiza", "c2"], ["Canning", "Ezeiza", "c2"], ["El Jagüel", "Ezeiza", "c2"], ["Monte Grande", "Est. Echeverría", "c2"], ["9 de Abril", "Est. Echeverría", "c2"], ["Palermo", "CABA", "c2"], ["Belgrano", "CABA", "c2"], ["Núñez", "CABA", "c2"], ["Coghlan", "CABA", "c2"], ["Villa Urquiza", "CABA", "c2"], ["Villa Devoto", "CABA", "c2"], ["Agronomía", "CABA", "c2"], ["Chacarita", "CABA", "c2"], ["La Paternal", "CABA", "c2"], ["Villa del Parque", "CABA", "c2"], ["Monte Castro", "CABA", "c2"], ["Versalles", "CABA", "c2"], ["Flores", "CABA", "c2"], ["Caballito", "CABA", "c2"], ["Almagro", "CABA", "c2"], ["Boedo", "CABA", "c2"], ["San Cristóbal", "CABA", "c2"], ["Constitución", "CABA", "c2"], ["Monserrat", "CABA", "c2"], ["San Nicolás / Centro", "CABA", "c2"], ["Retiro", "CABA", "c2"], ["Recoleta", "CABA", "c2"], ["La Boca", "CABA", "c2"], ["Barracas", "CABA", "c2"], ["Nueva Pompeya", "CABA", "c2"], ["Mataderos", "CABA", "c2"], ["Villa Lugano", "CABA", "c2"], ["Villa Soldati", "CABA", "c2"], ["Floresta", "CABA", "c2"], ["Liniers", "CABA", "c2"], ["Villa Luro", "CABA", "c2"], ["Puerto Madero", "CABA", "c2"], ["San Telmo", "CABA", "c2"], ["Balvanera", "CABA", "c2"], ["Villa Crespo", "CABA", "c2"], ["Palermo Chico", "CABA", "c2"], ["Vélez Sársfield", "CABA", "c2"], ["Escobar", "Escobar", "c3"], ["Belén de Escobar", "Escobar", "c3"], ["Ing. Maschwitz", "Escobar", "c3"], ["Garín", "Escobar", "c3"], ["Matheu", "Escobar", "c3"], ["Pilar", "Pilar", "c3"], ["Del Viso", "Pilar", "c3"], ["Derqui / Pte. Derqui", "Pilar", "c3"], ["Villa Rosa", "Pilar", "c3"], ["Fátima", "Pilar", "c3"], ["Nordelta", "Tigre", "c3"], ["Zárate", "Zárate", "c3"], ["Campana", "Campana", "c3"], ["Luján", "Luján", "c3"], ["Torres", "Luján", "c3"], ["Open Door", "Luján", "c3"], ["Gral. Rodríguez", "Gral. Rodríguez", "c3"], ["Marcos Paz", "Marcos Paz", "c3"], ["Cañuelas", "Cañuelas", "c3"], ["Guernica", "Pte. Perón", "c3"], ["San Vicente", "San Vicente", "c3"], ["La Plata", "La Plata", "c3"], ["Villa Elisa", "La Plata", "c3"], ["City Bell", "La Plata", "c3"], ["Gonnet", "La Plata", "c3"], ["Los Hornos", "La Plata", "c3"], ["Tolosa", "La Plata", "c3"], ["Gorina", "La Plata", "c3"], ["Ensenada", "Ensenada", "c3"], ["Berisso", "Berisso", "c3"], ["Capilla del Señor", "Exaltación de la Cruz", "c3"], ["Exaltación de la Cruz", "Exaltación de la Cruz", "c3"], ["Lobos", "Lobos", "c3"], ["Mercedes", "Mercedes", "c3"], ["Navarro", "Navarro", "c3"], ["San Miguel del Monte", "Monte", "c3"], ["Suipacha", "Suipacha", "c3"], ["Magdalena", "Magdalena", "c3"], ["Coronel Brandsen", "Brandsen", "c3"], ["Gral. Las Heras", "Gral. Las Heras", "c3"], ["Bordenave", "Moreno", "local"]];
+const FLEX_ZONA_KEY = { local: 'Moreno', c1: 'Cordón 1', c2: 'Cordón 2', c3: 'Cordón 3' };
+const normLoc = (s) => ' ' + String(s || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]+/g, ' ').trim() + ' ';
+const normLocFull = (s) => normLoc(s).replace(/ GRAL /g, ' GENERAL ').replace(/ ING /g, ' INGENIERO ').replace(/ PTE /g, ' PRESIDENTE ').replace(/ ALTE /g, ' ALMIRANTE ').replace(/ CNEL /g, ' CORONEL ').replace(/ STA /g, ' SANTA ').replace(/ TTE /g, ' TENIENTE ').replace(/ DR /g, ' DOCTOR ').trim();
+const zonaPorClave = (k) => ZONAS_ENVIO.find(z => z.zona === FLEX_ZONA_KEY[k]) || null;
+const FLEX_INDICE = (() => {
+  const idx = {};
+  const add = (nombre, zona) => { const k = normLocFull(nombre); if (k && !(k in idx)) idx[k] = zona; };
+  FLEX_LOCS.forEach(([n, , z]) => { const zona = zonaPorClave(z); add(n, zona); n.split('/').forEach(a => add(a, zona)); });
+  ZONAS_ENVIO.forEach(z => z.localidades.forEach(l => add(l, z))); // partidos y nombres viejos de la lista interna
+  return idx;
+})();
+const zonaDeExtras = (ex) => (ex && ex.zonaFlex) ? (ZONAS_ENVIO.find(z => z.zona === ex.zonaFlex) || null) : null;
 function detectarZona(loc) {
+  const k = normLocFull(loc);
+  return k ? (FLEX_INDICE[k] || null) : null;
+}
+// Coincidencia aproximada de antes: SOLO para reconocer pedidos viejos en Liquidación Flex.
+function detectarZonaHistorica(loc) {
   if (!loc) return null;
   const n = loc.toUpperCase().trim();
   for (const z of ZONAS_ENVIO) {
@@ -720,7 +744,7 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
             ) : (
               <div style={{ padding:'10px 14px', borderRadius:10, fontSize:13, background:'rgba(249,115,22,0.13)', border:'1px solid rgba(249,115,22,0.3)' }}>
                 📦 <strong>{extras.localidad}</strong> — {fmt(extras.envio)}
-                <button onClick={()=>setExtras(e=>({...e,envio:null,localidad:''}))} style={{ marginLeft:12, fontSize:11, color:'rgba(255,255,255,0.5)', background:'none', border:'none', cursor:'pointer' }}>cambiar</button>
+                <button onClick={()=>setExtras(e=>({...e,envio:null,localidad:'',zonaFlex:null,localidadManual:false}))} style={{ marginLeft:12, fontSize:11, color:'rgba(255,255,255,0.5)', background:'none', border:'none', cursor:'pointer' }}>cambiar</button>
               </div>
             )}
           </>
@@ -828,13 +852,13 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
     }
   }, []);
 
-  const zona = detectarZona(extras.localidad) || (extras.envio && typeof extras.envio === 'object' ? extras.envio : null);
+  const zona = zonaDeExtras(extras) || detectarZona(extras.localidad) || (extras.envio && typeof extras.envio === 'object' ? extras.envio : null);
 
   // Listener postMessage para recibir datos del mapa-flex iframe
   React.useEffect(() => {
     const handler = (event) => {
       if (event.data && event.data.type === 'domestico_flex_confirmado') {
-        const { total, localidad, precio_unitario, cantidad } = event.data;
+        const { total, localidad, precio_unitario, cantidad, zona_key, manual } = event.data;
         // El mapa no conoce los envases del pedido: acá se valida que los bultos
         // elegidos en el mapa no sean menos que baldes + cajas.
         const minB = Math.max(1, envases + (extras.cajas || 0));
@@ -842,7 +866,8 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
         const unit = (typeof precio_unitario === 'number' && precio_unitario > 0) ? precio_unitario : (cantMapa > 0 ? total / cantMapa : total);
         const cantFinal = Math.max(cantMapa, minB);
         const totalFinal = cantFinal === cantMapa ? total : Math.round(unit * cantFinal);
-        setExtras(e => ({ ...e, envio: totalFinal, envioUnit: unit, localidad: localidad, bultos: cantFinal }));
+        const zf = zonaPorClave(zona_key);
+        setExtras(e => ({ ...e, envio: totalFinal, envioUnit: unit, localidad: localidad, bultos: cantFinal, zonaFlex: zf ? zf.zona : null, localidadManual: !!manual }));
         if (cantFinal > cantMapa) {
           alert(`⚠️ Este pedido lleva mínimo ${minB} bulto${minB>1?'s':''} (baldes + cajas) y en el mapa se eligieron ${cantMapa}. El envío se ajustó automáticamente a ${cantFinal} bultos: $${totalFinal.toLocaleString('es-AR')}.`);
         }
@@ -2467,7 +2492,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
     confirmandoRef.current = true;
     setConfirmando(true);
     try {
-      const zona = detectarZona(extrasUsados.localidad || cliente.localidad);
+      const zona = zonaDeExtras(extrasUsados) || zonaDeExtras(preData && preData.extras) || detectarZona(extrasUsados.localidad || cliente.localidad);
       const pre = preData || {};
       const dEnv = desgloseEnvases(pre.envases ?? 0, pre.extras); // {baldes, cajas} heredados de la PRE
       const agregadosHeredados = (extras.agregados && extras.agregados.length > 0)
@@ -2731,7 +2756,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
 
       {/* LOGÍSTICA DEF — solo operativo, sin precios */}
       {paso==='extras' && (() => {
-        const zona = detectarZona(extras.localidad || cliente.localidad);
+        const zona = zonaDeExtras(extras) || zonaDeExtras(preData && preData.extras) || detectarZona(extras.localidad || cliente.localidad);
         return (
           <div>
             <button onClick={()=>setPaso('cliente')} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.75)', border:'1px solid rgba(255,255,255,0.14)', borderRadius:8, fontWeight:600, fontSize:12, cursor:'pointer', marginBottom:18 }}>← Atrás</button>
@@ -8033,7 +8058,7 @@ const FLEX_NA = '#fb923c';
 
 // Zona de un pedido flex: 1) override manual  2) por localidad  3) inferida por $/bulto
 function zonaDePedidoFlex(localidad, unit, ts) {
-  const porLoc = detectarZona(localidad);
+  const porLoc = detectarZona(localidad) || detectarZonaHistorica(localidad);
   if (porLoc) return { zona: porLoc.zona, color: porLoc.color, precio: porLoc.precio, origen: 'localidad' };
   const u = Math.round(Number(unit) || 0);
   if (u > 0) {

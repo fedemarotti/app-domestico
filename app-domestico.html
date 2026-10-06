@@ -7415,11 +7415,13 @@ const ROLES_LIQ = [
 // liq_asignaciones: codigo (pk) · data { estado:'asignada'|'descartada', a, de, por, ts, origen, motivo }
 // ═══════════════════════════════════════════════════════════════════════════════
 const VENDEDORES_DUENOS = [VENTAS_EMAIL, VENTAS2_EMAIL];
+// Decisión de Fede (06/10/2026): solo se asignan DEF desde el 18/09/2026 00:00 AR. Los anteriores quedan como están.
+const LIQ_ASIG_DESDE = Date.UTC(2026, 8, 18, 3, 0, 0, 0);
 const liqEmail = p => (p?.creadoPor || '').trim().toLowerCase();
 const liqLabel = email => (ROLES_LIQ.find(r => r.email && r.email.toLowerCase() === (email || '').toLowerCase()) || {}).label || 'Sin datos';
 const liqTel = c => { const t = String(c?.telefono ?? '').replace(/\D/g, ''); return t.length >= 6 ? t.slice(-10) : null; };
 // Vendedor que cobra la venta: el asignado por el admin, o quien cargó el DEF.
-const liqVendedorEfectivo = (p, asig) => { const a = asig && asig[p.codigo]; return (a && a.estado === 'asignada' && a.a) ? a.a.toLowerCase() : liqEmail(p); };
+const liqVendedorEfectivo = (p, asig) => { const a = asig && (p.ts >= LIQ_ASIG_DESDE) && asig[p.codigo]; return (a && a.estado === 'asignada' && a.a) ? a.a.toLowerCase() : liqEmail(p); };
 const liqCargarAsignaciones = async () => {
   if (!supaClient) return {};
   try {
@@ -7449,7 +7451,7 @@ const liqDetectarCandidatos = (pedidos, asig) => {
     if (tel && hist[tel]) hist[tel].forEach(em => add(em, 'HISTORIAL'));
     const duenos = Object.keys(motivos);
     const decidido = asig && asig[p.codigo] && (asig[p.codigo].estado === 'asignada' || asig[p.codigo].estado === 'descartada');
-    if (duenos.length && !decidido) out.push({ pedido: p, duenos, motivos, preCodigo: pres[p.codigoPRE] ? p.codigoPRE : null });
+    if (duenos.length && !decidido && p.ts >= LIQ_ASIG_DESDE) out.push({ pedido: p, duenos, motivos, preCodigo: pres[p.codigoPRE] ? p.codigoPRE : null });
     // El historial cuenta al vendedor que efectivamente cobra la venta
     const ef = liqVendedorEfectivo(p, asig);
     if (tel && VENDEDORES_DUENOS.includes(ef)) { (hist[tel] = hist[tel] || new Set()).add(ef); }
@@ -7491,7 +7493,7 @@ function ModuloAsignarVentas({ onVolver, onCambio }) {
     <div>
       <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', marginBottom:12, fontFamily:'inherit' }}>🏠 Inicio</button>
       <div style={{ fontSize:22, fontWeight:900, marginBottom:4 }}>🔁 Asignar ventas</div>
-      <div style={{ fontSize:12.5, color:C.tx2, marginBottom:14, lineHeight:1.45 }}>Ventas cuyo cliente es de otro vendedor (hizo la PRE o ya le compró antes) pero el DEF lo confirmó otra persona. Si la asignás, pasa a la liquidación de ese vendedor y suma a su comisión del 5%. El pedido original no se modifica.</div>
+      <div style={{ fontSize:12.5, color:C.tx2, marginBottom:14, lineHeight:1.45 }}>Ventas desde el 18/09/2026 cuyo cliente es de otro vendedor (hizo la PRE o ya le compró antes) pero el DEF lo confirmó otra persona. Si la asignás, pasa a la liquidación de ese vendedor y suma a su comisión del 5%. El pedido original no se modifica.</div>
       {error && <div style={{ ...card, border:'1px solid rgba(239,68,68,0.5)', color:'#fca5a5', fontWeight:700, fontSize:13 }}>⚠️ {error}</div>}
       {!pedidos && <div style={{ color:C.tx3, padding:'30px 0', textAlign:'center' }}>⏳ Buscando ventas…</div>}
       {pedidos && pendientes.length === 0 && <div style={{ ...card, textAlign:'center', color:'#86efac', fontWeight:800 }}>✓ No hay ventas pendientes de asignar.</div>}
@@ -7983,14 +7985,14 @@ function ModuloLiquidaciones({ onVolver }) {
                             <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', fontWeight:700, textTransform:'uppercase', marginBottom:4 }}>Comisión 5%</div>
                             <div style={{ fontSize:13, fontWeight:700, color:'#a78bfa' }}>{fmtM(f.comision)}</div>
                           </div>
-                          <div className="no-print" onClick={e => e.stopPropagation()}>
+                          {f.ts >= LIQ_ASIG_DESDE && <div className="no-print" onClick={e => e.stopPropagation()}>
                             <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', fontWeight:700, textTransform:'uppercase', marginBottom:4 }}>Liquida para</div>
                             <select value={f.emailEf} disabled={asignando === f.codigo} onChange={e => asignarManual(f, e.target.value)}
                               style={{ padding:'5px 8px', background:'#0E141C', color:'#fde68a', border:'1px solid rgba(250,204,21,0.4)', borderRadius:8, fontSize:12, fontWeight:700, fontFamily:'inherit' }}>
                               {ROLES_LIQ.filter(r => r.email).map(r => <option key={r.key} value={r.email.toLowerCase()}>{r.label}{r.email.toLowerCase() === f.emailCreador ? ' (la cargó)' : ''}</option>)}
                             </select>
                             {asignando === f.codigo && <span style={{ marginLeft:6 }}>⏳</span>}
-                          </div>
+                          </div>}
                         </div>
                       )}
                     </div>

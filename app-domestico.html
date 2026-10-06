@@ -5958,14 +5958,16 @@ const ListaPreciosPicker = ({ onAgregar, titulo = '📋 LISTA DE PRECIOS', soloU
 };
 
 // ADMIN — editar la lista: precios, escalas, cantidades rápidas, variantes, activo y COSTO.
-const ModuloListaPrecios = ({ onVolver }) => {
+const ModuloListaPrecios = ({ onVolver, verCostos = true }) => {
+  // verCostos=false (NEGOCIO, 06/10/2026): edita precios/productos pero NO ve ni toca costos ni margen
+  // (costos_historial es solo admin por RLS).
   const [lp, setLp] = useState(null);
   const [costos, setCostos] = useState(null);     // lista de versiones de costos_historial
   const [edit, setEdit] = useState(null);          // producto en edición (copia)
   const [costoEd, setCostoEd] = useState('');
   const [msg, setMsg] = useState('');
   const [cat, setCat] = useState(null);
-  const recargar = async () => { const [a, b] = await Promise.all([lpCargar(true), vgCargarCostos()]); setLp(a); setCostos(b.error ? [] : b.lista); };
+  const recargar = async () => { const [a, b] = await Promise.all([lpCargar(true), verCostos ? vgCargarCostos() : Promise.resolve({ lista: [] })]); setLp(a); setCostos(b.error ? [] : b.lista); };
   useEffect(() => { recargar(); }, []);
   const ultimo = costos && costos.length ? costos[costos.length - 1] : null;
   const costoDe = id => { const v = ultimo?.data?.lista?.[id]; return v == null || v === '' ? null : lpNum(v); };
@@ -5996,7 +5998,7 @@ const ModuloListaPrecios = ({ onVolver }) => {
     if (err) { setMsg('No se pudo guardar: ' + err); return; }
     // Costo: nueva versión en costos_historial solo si cambió (las ventas viejas conservan su costo)
     const nuevoC = costoEd.trim() === '' ? null : lpNum(costoEd);
-    if (nuevoC !== costoDe(limpio.id)) {
+    if (verCostos && nuevoC !== costoDe(limpio.id)) {
       const base = ultimo?.data || {};
       const data = { ...base, lista: { ...(base.lista || {}), [limpio.id]: nuevoC } };
       const { error } = await supaClient.from('costos_historial').insert({ vigente_desde: Date.now(), data });
@@ -6037,13 +6039,13 @@ const ModuloListaPrecios = ({ onVolver }) => {
           ))}
           <button onClick={() => setE('escalas', [...(edit.escalas || []), { desde: '', precio: '' }])} style={s.bS}>+ Agregar escala (ej: desde 50 u, precio menor)</button>
         </div>
-        <div style={s.card}>
+        {verCostos && <div style={s.card}>
           <div style={s.cTit}>🔒 Costo (solo vos lo ves)</div>
           <label style={s.lbl}>Costo unitario por {edit.unidad}</label>
           <input inputMode="decimal" value={costoEd} onChange={e => setCostoEd(e.target.value)} style={s.inp} placeholder="Vacío = se estima 50% del precio" />
           {cN != null && pb > 0 && <div style={{ fontSize:12.5, marginTop:8, color: pb - cN >= 0 ? '#4ade80' : '#f87171', fontWeight:750 }}>Margen: {lpFmt2(pb - cN)} por {edit.unidad} ({Math.round((pb - cN) / pb * 100)}%)</div>}
           <div style={{ fontSize:11, color:C.tx3, marginTop:6 }}>Al cambiarlo se crea una versión nueva de costos desde este momento; las ventas anteriores mantienen su costo.</div>
-        </div>
+        </div>}
         <div style={s.card}>
           <div style={s.cTit}>Botones para el vendedor</div>
           <label style={s.lbl}>Cantidades rápidas (separadas por espacio)</label>
@@ -6065,13 +6067,13 @@ const ModuloListaPrecios = ({ onVolver }) => {
     <div>
       <button onClick={onVolver} style={back}>🏠 Inicio</button>
       <div style={{ fontSize:22, fontWeight:900, marginBottom:4 }}>🏷️ Lista de precios</div>
-      <div style={{ fontSize:12, color:C.tx2, marginBottom:14 }}>Lo que cargues acá aparece en "Agregar productos / extras" y en "Producto manual" para que el vendedor solo toque producto y cantidad. El costo lo ves solo vos y se usa en Ventas y Ganancia.</div>
+      <div style={{ fontSize:12, color:C.tx2, marginBottom:14 }}>Lo que cargues acá aparece en "Agregar productos / extras" y en "Producto manual" para que el vendedor solo toque producto y cantidad.{verCostos ? ' El costo lo ves solo vos y se usa en Ventas y Ganancia.' : ''}</div>
       {!lp && <div style={{ color:C.tx3 }}>Cargando…</div>}
       {lp?.origen === 'seed' && (
         <div style={{ ...s.card, border:'1px solid rgba(250,204,21,0.4)' }}>
           <div style={{ fontSize:13.5, fontWeight:800, color:'#fde68a', marginBottom:6 }}>{lp.error ? '⚠️ Falta crear la tabla lista_precios en Supabase' : 'La lista editable está vacía'}</div>
           <div style={{ fontSize:12, color:C.tx2, marginBottom:10 }}>Mientras tanto los vendedores ya ven la lista precargada ({LP_SEED.filter(p => p.activo !== false).length} productos). Precargala para poder editarla.</div>
-          <button onClick={precargar} style={s.bP}>⬇️ Precargar {LP_SEED.length} productos</button>
+          {verCostos && <button onClick={precargar} style={s.bP}>⬇️ Precargar {LP_SEED.length} productos</button>}
         </div>
       )}
       {msg && <div style={{ fontSize:13, color: msg.startsWith('✓') ? '#4ade80' : '#fde68a', marginBottom:10, fontWeight:700 }}>{msg}</div>}
@@ -6089,11 +6091,11 @@ const ModuloListaPrecios = ({ onVolver }) => {
               <button key={p.id} onClick={() => lp.origen === 'supabase' ? abrir(p) : setMsg('Primero tocá "Precargar" para poder editar.')} style={{ ...s.bO, marginBottom:6, opacity: p.activo === false ? 0.5 : 1 }}>
                 <span style={{ minWidth:0 }}>
                   <span style={{ display:'block', fontWeight:800 }}>{p.revisar ? '⚠️ ' : ''}{p.nombre}{p.activo === false ? ' · oculto' : ''}</span>
-                  <span style={{ display:'block', fontSize:11.5, color:C.tx3 }}>{(p.escalas || []).length > 1 ? (p.escalas || []).map(e => `≥${lpFmtCant(lpNum(e.desde))}: ${lpFmt2(lpNum(e.precio))}`).join(' · ') : `por ${p.unidad || 'u'}`}{co != null ? ` · costo ${lpFmt2(co)}` : ' · sin costo'}</span>
+                  <span style={{ display:'block', fontSize:11.5, color:C.tx3 }}>{(p.escalas || []).length > 1 ? (p.escalas || []).map(e => `≥${lpFmtCant(lpNum(e.desde))}: ${lpFmt2(lpNum(e.precio))}`).join(' · ') : `por ${p.unidad || 'u'}`}{verCostos ? (co != null ? ` · costo ${lpFmt2(co)}` : ' · sin costo') : ''}</span>
                 </span>
                 <span style={{ textAlign:'right', flexShrink:0 }}>
                   <span style={{ display:'block', color: pb > 0 ? '#FDBA74' : '#6ee7b7', fontWeight:900 }}>{pb > 0 ? lpFmt2(pb) : (p.cat === 'Bonificaciones' ? 'Sin cargo' : 'Sin precio')}</span>
-                  {co != null && pb > 0 && <span style={{ display:'block', fontSize:11, color: pb - co >= 0 ? '#4ade80' : '#f87171', fontWeight:800 }}>{Math.round((pb - co) / pb * 100)}% margen</span>}
+                  {verCostos && co != null && pb > 0 && <span style={{ display:'block', fontSize:11, color: pb - co >= 0 ? '#4ade80' : '#f87171', fontWeight:800 }}>{Math.round((pb - co) / pb * 100)}% margen</span>}
                 </span>
               </button>
             );
@@ -7311,6 +7313,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
               <G cols={3} gap={10} style={{ marginBottom:14 }}>
                 <Tile icon="🚚" label={<>ENTREGAS DE<br/>PEDIDOS</>} rgb="251,191,36" badge={noLeidasEnt} onClick={()=>setEtapa('entregas')} />
                 <Tile icon="🛵" label={<>LIQUIDACIÓN<br/>FLEX</>} rgb={RGB.na} onClick={()=>setEtapa('liquidacion_flex')} />
+                <Tile icon="🏷️" label={<>LISTA DE<br/>PRECIOS</>} rgb="250,204,21" onClick={()=>setEtapa('lista_precios')} />
               </G>
             </>)}
 
@@ -7368,7 +7371,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
             <ModuloMarketing esAdmin />
           </div>
         )}
-        {etapa==='lista_precios' && esAdmin(usuarioActual) && <ModuloListaPrecios onVolver={irInicio} />}
+        {etapa==='lista_precios' && (esAdmin(usuarioActual) || esNegocio(usuarioActual)) && <ModuloListaPrecios onVolver={irInicio} verCostos={esAdmin(usuarioActual)} />}
         {etapa==='ventas_ganancia' && esAdmin(usuarioActual) && <ModuloVentasGanancia onVolver={irInicio} onCambioNoLeidas={setNoLeidasVG} />}
 
       </div>

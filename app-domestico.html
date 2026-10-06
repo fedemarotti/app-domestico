@@ -6979,6 +6979,18 @@ const ModuloEntregas = ({ usuarioActual, onVolver, onAbrirTracking, onCambioNoLe
   );
 };
 
+// Botón ancho (06/10/2026): ocupa el ancho de 3 tiles y la mitad de alto. Mismo estilo que Tile.
+const TileAncho = ({ icon, label, rgb, onClick }) => (
+  <button onClick={onClick} className="sel-btn" style={{
+    width:'100%', aspectRatio:'6.2 / 1', minHeight:56, borderRadius:18, display:'flex', flexDirection:'row', alignItems:'center', justifyContent:'center',
+    gap:12, cursor:'pointer', fontFamily:'inherit', fontSize:13, fontWeight:800, letterSpacing:'-0.01em', color: C.tx, marginBottom:14,
+    background:`linear-gradient(180deg,rgba(${rgb},0.18) 0%,rgba(${rgb},0.06) 100%)`, border:`1px solid rgba(${rgb},0.38)`,
+    boxShadow:`inset 0 1px 0 rgba(255,255,255,0.16), 0 10px 24px rgba(0,0,0,0.4), 0 8px 22px rgba(${rgb},0.14)`,
+    transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), filter 0.15s ease' }}>
+    <span style={{ fontSize:26, lineHeight:1 }}>{icon}</span>
+    <span>{label}</span>
+  </button>
+);
 const Tile = ({ icon, label, rgb, solid, onClick, badge, tag }) => (
   <button onClick={onClick} className="sel-btn" style={{
     aspectRatio:'1 / 1', width:'100%', minWidth:0, borderRadius:18, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
@@ -7335,12 +7347,13 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
               <G cols={3} gap={10} style={{ marginBottom:14 }}>
                 <Tile icon="📊" label={<>LIQUIDA-<br/>CIONES</>} rgb={RGB.az} onClick={()=>setEtapa('liquidaciones')} />
                 <Tile icon="🛵" label={<>LIQUIDACIÓN<br/>FLEX</>} rgb={RGB.na} onClick={()=>setEtapa('liquidacion_flex')} />
-                <Tile icon="🔁" label={<>ASIGNAR<br/>VENTAS</>} rgb="167,139,250" badge={pendAsig} onClick={()=>setEtapa('asignar_ventas')} />
                 <Tile icon="🚚" label={<>ENTREGAS DE<br/>PEDIDOS</>} rgb="251,191,36" badge={noLeidasEnt} onClick={()=>setEtapa('entregas')} />
                 <Tile icon="📣" label="MARKETING" rgb="244,114,182" onClick={()=>setEtapa('marketing')} />
                 <Tile icon="🏷️" label={<>LISTA DE<br/>PRECIOS</>} rgb="250,204,21" onClick={()=>setEtapa('lista_precios')} />
-                <Tile icon="🧪" label={<>FÓRMULAS<br/>PRODUCCIÓN</>} rgb={RGB.vd} onClick={()=>{ window.location.href = 'formulas-produccion.html'; }} />
+                <Tile icon="🔁" label={<>ASIGNAR<br/>VENTAS</>} rgb="167,139,250" badge={pendAsig} onClick={()=>setEtapa('asignar_ventas')} />
               </G>
+              {/* Fórmulas producción: barra a lo ancho (3 botones) y media altura */}
+              <TileAncho icon="🧪" label="FÓRMULAS PRODUCCIÓN" rgb={RGB.vd} onClick={()=>{ window.location.href = 'formulas-produccion.html'; }} />
             </>)}
           </div>
         )}

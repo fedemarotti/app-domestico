@@ -7310,6 +7310,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
               <TileLbl>Entregas</TileLbl>
               <G cols={3} gap={10} style={{ marginBottom:14 }}>
                 <Tile icon="🚚" label={<>ENTREGAS DE<br/>PEDIDOS</>} rgb="251,191,36" badge={noLeidasEnt} onClick={()=>setEtapa('entregas')} />
+                <Tile icon="🛵" label={<>LIQUIDACIÓN<br/>FLEX</>} rgb={RGB.na} onClick={()=>setEtapa('liquidacion_flex')} />
               </G>
             </>)}
 
@@ -7354,8 +7355,8 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
         {/* ── LIQUIDACIONES (solo admin) ── */}
         {etapa==='liquidaciones' && esAdmin(usuarioActual) && <ModuloLiquidaciones onVolver={irInicio} />}
 
-        {/* ── LIQUIDACIÓN FLEX (solo admin) ── */}
-        {etapa==='liquidacion_flex' && esAdmin(usuarioActual) && <ModuloLiquidacionFlex onVolver={irInicio} />}
+        {/* ── LIQUIDACIÓN FLEX (admin y NEGOCIO, mismo flujo completo) ── */}
+        {etapa==='liquidacion_flex' && (esAdmin(usuarioActual) || esNegocio(usuarioActual)) && <ModuloLiquidacionFlex onVolver={irInicio} />}
 
         {/* ── GESTIÓN (solo admin) ── */}
         {/* ── ENTREGAS DE PEDIDOS (NEGOCIO y ADMIN) ── */}
@@ -8047,7 +8048,7 @@ function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrar
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MÓDULO LIQUIDACIÓN FLEX — solo admin. Liquida a la empresa de logística Flex.
+// MÓDULO LIQUIDACIÓN FLEX — admin y NEGOCIO (06/10/2026). Liquida a la empresa de logística Flex.
 // Universo: DEF con modalidad FLEX (ni retiro en planta ni interior) del período.
 // El importe a pagar a Flex es el mismo que se le cobró al cliente por el envío,
 // tal como quedó guardado en el pedido (histórico correcto aunque cambien tarifas).

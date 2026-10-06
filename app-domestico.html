@@ -7043,6 +7043,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   const [verCambioPass, setVerCambioPass] = useState(false);
   const [noLeidasVG, setNoLeidasVG] = useState(0);
   const [noLeidasEnt, setNoLeidasEnt] = useState(0); // avisos de Entregas sin leer (NEGOCIO y ADMIN)
+  const [pendAsig, setPendAsig] = useState(0);        // ventas a asignar (solo ADMIN)
   const [trackDesde, setTrackDesde] = useState('inicio');
   React.useEffect(() => {
     if (!esAdmin(usuarioActual)) return;
@@ -7063,6 +7064,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
     return () => { vivo = false; clearInterval(t); document.removeEventListener('visibilitychange', alVolver); };
   }, [usuarioActual]);
   const [etapa, setEtapa]         = useState('inicio');
+  const etapaRef = React.useRef('inicio'); etapaRef.current = etapa;
   const [busqueda, setBusqueda]   = useState('');
   const [busError, setBusError]   = useState('');
   const [busResults, setBusResults] = useState([]);
@@ -7075,6 +7077,17 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   const [pedidoTrack, setPedidoTrack] = useState(null); // pedido DEF en pantalla de tracking
 
   useEffect(() => { listLS().then(arr => setPedidos(Array.isArray(arr) ? arr : [])); }, []);
+  // Ventas a asignar: se recalcula con cada carga de pedidos y cada 2 min mientras está en el inicio
+  const [asigMapa, setAsigMapa] = useState(null);
+  useEffect(() => {
+    if (!esAdmin(usuarioActual)) return;
+    let vivo = true;
+    const tick = () => { if (document.hidden) return; Promise.all([listLS(), liqCargarAsignaciones()]).then(([arr, m]) => { if (!vivo) return; if (Array.isArray(arr)) setPedidos(arr); setAsigMapa(m || {}); }); };
+    liqCargarAsignaciones().then(m => { if (vivo) setAsigMapa(m || {}); });
+    const t = setInterval(() => { if (etapaRef.current === 'inicio') tick(); }, 120000);
+    return () => { vivo = false; clearInterval(t); };
+  }, [usuarioActual]);
+  useEffect(() => { if (esAdmin(usuarioActual) && asigMapa) setPendAsig(liqDetectarCandidatos(pedidos, asigMapa).length); }, [pedidos, asigMapa, usuarioActual]);
 
   const buscar = (rawOverride) => {
     const raw = (typeof rawOverride === 'string' ? rawOverride : busqueda).trim();
@@ -7188,7 +7201,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
     setCodigoPRE(cod); if (cli) setClientePreload(cli); if (mod) setModalidadPreload(mod); setEtapa('def');
   };
   const irDefDesdePRE = (cod, mod) => irDEFSeguro(cod, null, mod);
-  const irInicio = () => { setEtapa('inicio'); setBusResults([]); setBusqueda(''); setBusError(''); setClientePreload(null); setModalidadPreload(null); listLS().then(arr => setPedidos(Array.isArray(arr) ? arr : [])); };
+  const irInicio = () => { setEtapa('inicio'); setBusResults([]); setBusqueda(''); setBusError(''); setClientePreload(null); setModalidadPreload(null); listLS().then(arr => setPedidos(Array.isArray(arr) ? arr : [])); if (esAdmin(usuarioActual)) liqCargarAsignaciones().then(m => setAsigMapa(m || {})); };
   const irClientes = () => { setEtapa('clientes'); setBusResults([]); setBusqueda(''); setBusError(''); };
   const nuevoPedidoDesdeCli = (cli) => { setClientePreload(cli); setCodigoPRE(null); setEtapa('pre'); };
 
@@ -7322,6 +7335,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
               <G cols={3} gap={10} style={{ marginBottom:14 }}>
                 <Tile icon="📊" label={<>LIQUIDA-<br/>CIONES</>} rgb={RGB.az} onClick={()=>setEtapa('liquidaciones')} />
                 <Tile icon="🛵" label={<>LIQUIDACIÓN<br/>FLEX</>} rgb={RGB.na} onClick={()=>setEtapa('liquidacion_flex')} />
+                <Tile icon="🔁" label={<>ASIGNAR<br/>VENTAS</>} rgb="167,139,250" badge={pendAsig} onClick={()=>setEtapa('asignar_ventas')} />
                 <Tile icon="🚚" label={<>ENTREGAS DE<br/>PEDIDOS</>} rgb="251,191,36" badge={noLeidasEnt} onClick={()=>setEtapa('entregas')} />
                 <Tile icon="📣" label="MARKETING" rgb="244,114,182" onClick={()=>setEtapa('marketing')} />
                 <Tile icon="🏷️" label={<>LISTA DE<br/>PRECIOS</>} rgb="250,204,21" onClick={()=>setEtapa('lista_precios')} />
@@ -7358,6 +7372,9 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
         {/* ── LIQUIDACIONES (solo admin) ── */}
         {etapa==='liquidaciones' && esAdmin(usuarioActual) && <ModuloLiquidaciones onVolver={irInicio} />}
 
+        {/* ── ASIGNAR VENTAS (solo admin) ── */}
+        {etapa==='asignar_ventas' && esAdmin(usuarioActual) && <ModuloAsignarVentas onVolver={irInicio} onCambio={setPendAsig} />}
+
         {/* ── LIQUIDACIÓN FLEX (admin y NEGOCIO, mismo flujo completo) ── */}
         {etapa==='liquidacion_flex' && (esAdmin(usuarioActual) || esNegocio(usuarioActual)) && <ModuloLiquidacionFlex onVolver={irInicio} />}
 
@@ -7389,6 +7406,134 @@ const ROLES_LIQ = [
   { key:'admin',      label:'ADMINISTRADOR',  email:ADMIN_EMAIL,      icon:'👔',   color:'linear-gradient(145deg,#7c3aed,#6d28d9)', glow:'rgba(124,58,237,0.55)' },
   { key:'total',      label:'VENTAS TOTALES', email:null,             icon:'📊',   color:'linear-gradient(145deg,#d97706,#b45309)', glow:'rgba(217,119,6,0.55)' },
 ];
+// ═══════════════════════════════════════════════════════════════════════════════
+// ASIGNACIÓN DE VENTAS (06/10/2026) — "el cliente es de quien lo trajo".
+// Si un DEF lo confirma alguien distinto del vendedor dueño del cliente (la PRE la hizo
+// otro vendedor, o el cliente ya le compró antes a otro vendedor), aparece en la bandeja
+// del ADMIN para que decida. Solo el admin asigna (tabla liq_asignaciones, RLS solo admin).
+// El pedido NO se modifica: Liquidaciones usa el vendedor asignado en lugar de creadoPor.
+// liq_asignaciones: codigo (pk) · data { estado:'asignada'|'descartada', a, de, por, ts, origen, motivo }
+// ═══════════════════════════════════════════════════════════════════════════════
+const VENDEDORES_DUENOS = [VENTAS_EMAIL, VENTAS2_EMAIL];
+const liqEmail = p => (p?.creadoPor || '').trim().toLowerCase();
+const liqLabel = email => (ROLES_LIQ.find(r => r.email && r.email.toLowerCase() === (email || '').toLowerCase()) || {}).label || 'Sin datos';
+const liqTel = c => { const t = String(c?.telefono ?? '').replace(/\D/g, ''); return t.length >= 6 ? t.slice(-10) : null; };
+// Vendedor que cobra la venta: el asignado por el admin, o quien cargó el DEF.
+const liqVendedorEfectivo = (p, asig) => { const a = asig && asig[p.codigo]; return (a && a.estado === 'asignada' && a.a) ? a.a.toLowerCase() : liqEmail(p); };
+const liqCargarAsignaciones = async () => {
+  if (!supaClient) return {};
+  try {
+    const data = await supaTraerTodo(() => supaClient.from('liq_asignaciones').select('codigo,data').order('codigo', { ascending: true }));
+    const m = {}; (data || []).forEach(r => { if (r.codigo) m[r.codigo] = r.data || {}; }); return m;
+  } catch (e) { console.warn('liq_asignaciones:', e); return {}; }
+};
+const liqGuardarAsignacion = async (codigo, data) => {
+  try {
+    const { error } = await supaClient.from('liq_asignaciones').upsert({ codigo, data, actualizado: new Date().toISOString() }, { onConflict: 'codigo' });
+    return error ? (error.message || 'error') : null;
+  } catch (e) { return e.message || 'error'; }
+};
+// DEF pendientes de decisión: devuelve [{ pedido, duenos:[email], motivos:{ email:['PRE'|'HISTORIAL'] }, preCodigo }]
+const liqDetectarCandidatos = (pedidos, asig) => {
+  if (!Array.isArray(pedidos)) return [];
+  const pres = {}; pedidos.forEach(p => { if (p && p.tipo === 'PRE' && p.codigo) pres[p.codigo] = p; });
+  const defs = pedidos.filter(p => p && p.tipo === 'DEF' && typeof p.ts === 'number').sort((a, b) => a.ts - b.ts);
+  const hist = {}; const out = [];
+  defs.forEach(p => {
+    const quien = liqEmail(p);
+    const tel = liqTel(p.cliente);
+    const motivos = {};
+    const add = (em, m) => { if (!em || em === quien) return; (motivos[em] = motivos[em] || []).includes(m) || motivos[em].push(m); };
+    const pc = liqEmail(pres[p.codigoPRE]);
+    if (VENDEDORES_DUENOS.includes(pc)) add(pc, 'PRE');
+    if (tel && hist[tel]) hist[tel].forEach(em => add(em, 'HISTORIAL'));
+    const duenos = Object.keys(motivos);
+    const decidido = asig && asig[p.codigo] && (asig[p.codigo].estado === 'asignada' || asig[p.codigo].estado === 'descartada');
+    if (duenos.length && !decidido) out.push({ pedido: p, duenos, motivos, preCodigo: pres[p.codigoPRE] ? p.codigoPRE : null });
+    // El historial cuenta al vendedor que efectivamente cobra la venta
+    const ef = liqVendedorEfectivo(p, asig);
+    if (tel && VENDEDORES_DUENOS.includes(ef)) { (hist[tel] = hist[tel] || new Set()).add(ef); }
+  });
+  return out.sort((a, b) => b.pedido.ts - a.pedido.ts);
+};
+
+// Bandeja del admin: ventas a asignar + historial de decisiones (con deshacer)
+function ModuloAsignarVentas({ onVolver, onCambio }) {
+  const [pedidos, setPedidos] = React.useState(null);
+  const [asig, setAsig] = React.useState({});
+  const [trabajando, setTrabajando] = React.useState(null);
+  const [error, setError] = React.useState('');
+  const [verHist, setVerHist] = React.useState(false);
+  const [yo, setYo] = React.useState('');
+  const cargar = React.useCallback(async () => {
+    const [arr, m] = await Promise.all([listLS(), liqCargarAsignaciones()]);
+    setPedidos(Array.isArray(arr) ? arr : []); setAsig(m);
+    if (onCambio) onCambio(liqDetectarCandidatos(arr, m).length);
+  }, [onCambio]);
+  React.useEffect(() => { cargar(); try { supaClient?.auth.getSession().then(({ data }) => setYo((data?.session?.user?.email || '').toLowerCase())); } catch (_) {} }, []);
+  const pendientes = React.useMemo(() => pedidos ? liqDetectarCandidatos(pedidos, asig) : [], [pedidos, asig]);
+  const porCodigo = React.useMemo(() => { const m = {}; (pedidos || []).forEach(p => { if (p?.codigo) m[p.codigo] = p; }); return m; }, [pedidos]);
+  const historial = React.useMemo(() => Object.entries(asig).filter(([c, a]) => a && (a.estado === 'asignada' || a.estado === 'descartada') && porCodigo[c])
+    .map(([c, a]) => ({ codigo: c, a, p: porCodigo[c] })).sort((x, y) => (y.a.ts || 0) - (x.a.ts || 0)), [asig, porCodigo]);
+  const decidir = async (p, data) => {
+    setTrabajando(p.codigo); setError('');
+    const err = await liqGuardarAsignacion(p.codigo, { ...data, de: liqEmail(p), por: yo, ts: Date.now() });
+    setTrabajando(null);
+    if (err) { setError(`No se pudo guardar ${p.codigo}: ${err}`); return; }
+    const m = { ...asig, [p.codigo]: { ...data, de: liqEmail(p), por: yo, ts: Date.now() } };
+    setAsig(m); if (onCambio) onCambio(liqDetectarCandidatos(pedidos, m).length);
+  };
+  const fmtM = v => '$' + Math.round(v || 0).toLocaleString('es-AR');
+  const motivoTxt = (m) => m.map(x => x === 'PRE' ? 'hizo la PRE' : 'el cliente ya le compró antes').join(' y ');
+  const card = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:14, padding:'12px 14px', marginBottom:10 };
+  const btn = (bg, col, bd) => ({ padding:'10px 12px', background:bg, color:col, border:`1px solid ${bd}`, borderRadius:10, fontWeight:800, fontSize:12.5, cursor:'pointer', fontFamily:'inherit' });
+  return (
+    <div>
+      <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', marginBottom:12, fontFamily:'inherit' }}>🏠 Inicio</button>
+      <div style={{ fontSize:22, fontWeight:900, marginBottom:4 }}>🔁 Asignar ventas</div>
+      <div style={{ fontSize:12.5, color:C.tx2, marginBottom:14, lineHeight:1.45 }}>Ventas cuyo cliente es de otro vendedor (hizo la PRE o ya le compró antes) pero el DEF lo confirmó otra persona. Si la asignás, pasa a la liquidación de ese vendedor y suma a su comisión del 5%. El pedido original no se modifica.</div>
+      {error && <div style={{ ...card, border:'1px solid rgba(239,68,68,0.5)', color:'#fca5a5', fontWeight:700, fontSize:13 }}>⚠️ {error}</div>}
+      {!pedidos && <div style={{ color:C.tx3, padding:'30px 0', textAlign:'center' }}>⏳ Buscando ventas…</div>}
+      {pedidos && pendientes.length === 0 && <div style={{ ...card, textAlign:'center', color:'#86efac', fontWeight:800 }}>✓ No hay ventas pendientes de asignar.</div>}
+      {pendientes.map(({ pedido: p, duenos, motivos }) => (
+        <div key={p.codigo} style={card}>
+          <div style={{ display:'flex', justifyContent:'space-between', gap:8, marginBottom:6 }}>
+            <div style={{ minWidth:0 }}>
+              <div style={{ fontSize:10.5, color:C.tx3, fontFamily:'monospace' }}>{p.codigo} · {fmtFechaDDMMAAAA(p.ts)} {arHora(p.ts)}</div>
+              <div style={{ fontSize:15, fontWeight:800, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.cliente?.nombre || p.cliente?.telefono || 'Sin datos'}</div>
+            </div>
+            <div style={{ fontSize:16, fontWeight:900, color:'#4ade80', whiteSpace:'nowrap' }}>{fmtM(p.totales?.total ?? p.total)}</div>
+          </div>
+          <div style={{ fontSize:12.5, color:C.tx2, marginBottom:4 }}>Confirmó el DEF: <b style={{ color:'#fff' }}>{liqLabel(liqEmail(p))}</b></div>
+          {duenos.map(em => <div key={em} style={{ fontSize:12.5, color:'#fde68a', marginBottom:2 }}>Cliente de <b>{liqLabel(em)}</b>: {motivoTxt(motivos[em])}</div>)}
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:10 }}>
+            {duenos.map(em => <button key={em} disabled={trabajando === p.codigo} onClick={() => decidir(p, { estado:'asignada', a: em, origen:'bandeja', motivo: motivos[em].join('+') })} style={btn('rgba(34,197,94,0.15)', '#86efac', 'rgba(34,197,94,0.45)')}>✅ Asignar a {liqLabel(em)}</button>)}
+            <button disabled={trabajando === p.codigo} onClick={() => decidir(p, { estado:'descartada', a: null, origen:'bandeja' })} style={btn('rgba(255,255,255,0.06)', '#cbd5e1', 'rgba(255,255,255,0.2)')}>❌ Dejar para {liqLabel(liqEmail(p))}</button>
+            {trabajando === p.codigo && <span style={{ alignSelf:'center' }}>⏳</span>}
+          </div>
+        </div>
+      ))}
+      {pedidos && historial.length > 0 && (
+        <div style={{ marginTop:18 }}>
+          <button onClick={() => setVerHist(v => !v)} style={{ ...btn('transparent', C.tx2, 'rgba(255,255,255,0.15)'), width:'100%' }}>{verHist ? '▲' : '▼'} Decisiones tomadas ({historial.length})</button>
+          {verHist && historial.map(({ codigo, a, p }) => (
+            <div key={codigo} style={{ ...card, marginTop:8, opacity:0.9 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}>
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontSize:10.5, color:C.tx3, fontFamily:'monospace' }}>{codigo} · {fmtFechaDDMMAAAA(p.ts)}</div>
+                  <div style={{ fontSize:14, fontWeight:800 }}>{p.cliente?.nombre || p.cliente?.telefono || 'Sin datos'} · {fmtM(p.totales?.total ?? p.total)}</div>
+                  <div style={{ fontSize:12, color: a.estado === 'asignada' ? '#86efac' : '#cbd5e1', marginTop:2 }}>{a.estado === 'asignada' ? `Asignada a ${liqLabel(a.a)}` : `Quedó para ${liqLabel(liqEmail(p))}`}{a.origen === 'manual' ? ' (desde Liquidaciones)' : ''}{a.ts ? ` · ${fmtFechaDDMMAAAA(a.ts)}` : ''}</div>
+                </div>
+                <button disabled={trabajando === codigo} onClick={() => decidir(p, { estado:'pendiente', a: null, origen: a.origen })} style={{ ...btn('rgba(250,204,21,0.1)', '#fde68a', 'rgba(250,204,21,0.4)'), alignSelf:'center', whiteSpace:'nowrap' }}>↩ Deshacer</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const MESES_NOMBRE = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const DIAS_SEMANA_NOMBRE = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
 const fmtDiaLargo = (ts) => { const { y, m, day } = arParts(ts); const dw = new Date(Date.UTC(y, m, day)).getUTCDay(); return `${DIAS_SEMANA_NOMBRE[dw]} ${day} DE ${MESES_NOMBRE[m].toUpperCase()} DE ${y}`; };
@@ -7464,6 +7609,9 @@ function ModuloLiquidaciones({ onVolver }) {
   // refreshKey: fuerza recarga de datos y recálculo del rango "hoy" sin salir de la pantalla
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [ultimaSync, setUltimaSync] = React.useState(null);
+  const [asig, setAsig] = React.useState({});           // asignaciones de ventas (admin)
+  const [asignando, setAsignando] = React.useState(null);
+  const [errorAsig, setErrorAsig] = React.useState('');
   React.useEffect(() => {
     if (step === 'lista') {
       setCargando(true);
@@ -7471,7 +7619,7 @@ function ModuloLiquidaciones({ onVolver }) {
       setExpandidos(new Set());
       setConfirmarBorrar(null);
       setErrorBorrado(null);
-      listLS().then(arr => { setPedidosData(Array.isArray(arr) ? arr : []); setCargando(false); setUltimaSync(Date.now()); });
+      Promise.all([listLS(), liqCargarAsignaciones()]).then(([arr, m]) => { setAsig(m || {}); setPedidosData(Array.isArray(arr) ? arr : []); setCargando(false); setUltimaSync(Date.now()); });
     }
   }, [step, refreshKey]);
 
@@ -7514,7 +7662,7 @@ function ModuloLiquidaciones({ onVolver }) {
         if (borrados.has(p.codigo)) return false;
         if (p.tipo !== 'DEF') return false;
         if (typeof p.ts !== 'number' || p.ts < rango.desde || p.ts > rango.hasta) return false;
-        const email = (p.creadoPor || '').trim().toLowerCase();
+        const email = liqVendedorEfectivo(p, asig); // asignada por el admin o quien cargó el DEF
         if (esTotal) return true; // VENTAS TOTALES: cuentan TODOS los DEF, incluso los históricos sin creadoPor
         return email === rolInfo.email.toLowerCase();
       })
@@ -7526,13 +7674,29 @@ function ModuloLiquidaciones({ onVolver }) {
         const neto = transferido - envioFlex;
         const comision = Math.round(neto * 0.05);
         const comprador = p.cliente?.nombre || p.cliente?.telefono || p.cliente?.email || p.cliente?.dni || p.cliente?.localidad || 'Sin datos';
-        const emailCreador = (p.creadoPor || '').trim().toLowerCase();
-        const vendedorInfo = ROLES_LIQ.find(r => r.email && r.email.toLowerCase() === emailCreador);
+        const emailCreador = liqEmail(p);
+        const emailEf = liqVendedorEfectivo(p, asig);
+        const vendedorInfo = ROLES_LIQ.find(r => r.email && r.email.toLowerCase() === emailEf);
         const vendedor = vendedorInfo ? vendedorInfo.label : 'Sin datos';
+        const asignada = emailEf !== emailCreador;
+        const cargoLabel = asignada ? liqLabel(emailCreador) : null;
         const hora = p.ts ? arHora(p.ts) : '--:--';
-        return { codigo: p.codigo, comprador, modalidad, transferido, neto, envioFlex, comision, vendedor, hora, fecha: fmtFechaDDMMAAAA(p.ts), ts: p.ts };
+        return { codigo: p.codigo, comprador, modalidad, transferido, neto, envioFlex, comision, vendedor, asignada, cargoLabel, emailEf, emailCreador, pedido: p, hora, fecha: fmtFechaDDMMAAAA(p.ts), ts: p.ts };
       });
-  }, [pedidosData, rango, rolInfo, esTotal, emailsRolesConocidos, borrados]);
+  }, [pedidosData, rango, rolInfo, esTotal, emailsRolesConocidos, borrados, asig]);
+
+  // Asignación manual (solo admin): pasar la venta a otro vendedor. Elegir a quien la cargó = vuelve a su dueño original.
+  const asignarManual = async (f, emailDestino) => {
+    setAsignando(f.codigo); setErrorAsig('');
+    let yo = ''; try { const { data } = await supaClient.auth.getSession(); yo = (data?.session?.user?.email || '').toLowerCase(); } catch (_) {}
+    const data = emailDestino === f.emailCreador
+      ? { estado:'descartada', a: null, de: f.emailCreador, por: yo, ts: Date.now(), origen:'manual' }
+      : { estado:'asignada', a: emailDestino, de: f.emailCreador, por: yo, ts: Date.now(), origen:'manual' };
+    const err = await liqGuardarAsignacion(f.codigo, data);
+    setAsignando(null);
+    if (err) { setErrorAsig(`No se pudo asignar ${f.codigo}: ${err}`); return; }
+    setAsig(prev => ({ ...prev, [f.codigo]: data }));
+  };
 
   const totales = React.useMemo(() => filas.reduce((acc, f) => ({
     transferido: acc.transferido + f.transferido,
@@ -7547,7 +7711,7 @@ function ModuloLiquidaciones({ onVolver }) {
   const resumen = React.useMemo(() => {
     if (tipo !== 'cierre' || !pedidosData || !rango || !rolInfo || filas.length === 0) return null;
     const claveCliente = c => { const tel = String(c?.telefono ?? '').replace(/\D/g, ''); if (tel) return 'T' + tel; const n = String(c?.nombre ?? '').trim().toLowerCase(); return n ? 'N' + n : null; };
-    const pasaRol = p => { const email = (p.creadoPor || '').trim().toLowerCase(); return esTotal ? emailsRolesConocidos.includes(email) : email === rolInfo.email.toLowerCase(); };
+    const pasaRol = p => { const email = liqVendedorEfectivo(p, asig); return esTotal ? emailsRolesConocidos.includes(email) : email === rolInfo.email.toLowerCase(); };
     const defsTodos = pedidosData.filter(p => p.tipo === 'DEF' && typeof p.ts === 'number' && !borrados.has(p.codigo) && pasaRol(p));
     // Clientes nuevos: su PRIMERA compra DEF de la historia cae dentro del período
     const primeraCompra = {};
@@ -7582,7 +7746,7 @@ function ModuloLiquidaciones({ onVolver }) {
     const ventaMayor = [...filas].sort((a, b) => b.transferido - a.transferido)[0];
     const ticketPromedio = totales.transferido / filas.length;
     return { clientesNuevos, clientesUnicos, repetidores, dias, diaTopImporte, diaTopCantidad, porModalidad, porVendedor, ventaMayor, ticketPromedio };
-  }, [tipo, pedidosData, rango, rolInfo, esTotal, emailsRolesConocidos, filas, totales, borrados]);
+  }, [tipo, pedidosData, rango, rolInfo, esTotal, emailsRolesConocidos, filas, totales, borrados, asig]);
 
   const borrarFila = async (codigo) => {
     setConfirmarBorrar(null);
@@ -7750,6 +7914,7 @@ function ModuloLiquidaciones({ onVolver }) {
             </div>
           )}
 
+          {errorAsig && <div style={{ marginBottom:14, padding:'10px 14px', background:'rgba(220,38,38,0.12)', border:'1px solid rgba(220,38,38,0.4)', borderRadius:10, fontSize:13, fontWeight:700, color:'#fca5a5' }}>⚠️ {errorAsig}</div>}
           {cargando && <div style={{ padding:'40px 0', textAlign:'center', color:'rgba(255,255,255,0.5)' }}>⏳ Cargando ventas...</div>}
 
           {!cargando && filas.length === 0 && (
@@ -7775,6 +7940,7 @@ function ModuloLiquidaciones({ onVolver }) {
                           <div style={{ fontSize:10, color:'rgba(255,255,255,0.3)', fontFamily:'monospace', marginBottom:1 }}>{f.codigo}</div>
                           <div style={{ fontSize:14, fontWeight:700, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.comprador}</div>
                           {esTotal && <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', marginTop:1 }}>{f.vendedor}</div>}
+                          {f.asignada && <div style={{ fontSize:10.5, color:'#fde68a', fontWeight:700, marginTop:1 }}>🔁 Asignada por Admin · la cargó {f.cargoLabel}</div>}
                         </div>
                         <div style={{ textAlign:'right', marginRight:8, flexShrink:0 }}>
                           <div style={{ fontSize:11, color:'rgba(255,255,255,0.45)' }}>{f.hora}</div>
@@ -7816,6 +7982,14 @@ function ModuloLiquidaciones({ onVolver }) {
                           <div>
                             <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', fontWeight:700, textTransform:'uppercase', marginBottom:4 }}>Comisión 5%</div>
                             <div style={{ fontSize:13, fontWeight:700, color:'#a78bfa' }}>{fmtM(f.comision)}</div>
+                          </div>
+                          <div className="no-print" onClick={e => e.stopPropagation()}>
+                            <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', fontWeight:700, textTransform:'uppercase', marginBottom:4 }}>Liquida para</div>
+                            <select value={f.emailEf} disabled={asignando === f.codigo} onChange={e => asignarManual(f, e.target.value)}
+                              style={{ padding:'5px 8px', background:'#0E141C', color:'#fde68a', border:'1px solid rgba(250,204,21,0.4)', borderRadius:8, fontSize:12, fontWeight:700, fontFamily:'inherit' }}>
+                              {ROLES_LIQ.filter(r => r.email).map(r => <option key={r.key} value={r.email.toLowerCase()}>{r.label}{r.email.toLowerCase() === f.emailCreador ? ' (la cargó)' : ''}</option>)}
+                            </select>
+                            {asignando === f.codigo && <span style={{ marginLeft:6 }}>⏳</span>}
                           </div>
                         </div>
                       )}

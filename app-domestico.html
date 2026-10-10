@@ -5958,9 +5958,9 @@ const ListaPreciosPicker = ({ onAgregar, titulo = '📋 LISTA DE PRECIOS', soloU
 };
 
 // ADMIN — editar la lista: precios, escalas, cantidades rápidas, variantes, activo y COSTO.
-const ModuloListaPrecios = ({ onVolver, verCostos = true }) => {
-  // verCostos=false (NEGOCIO, 06/10/2026): edita precios/productos pero NO ve ni toca costos ni margen
-  // (costos_historial es solo admin por RLS).
+const ModuloListaPrecios = ({ onVolver, verCostos = true, puedePrecargar = true }) => {
+  // 10/10/2026 (Fede): NEGOCIO también ve y carga costo y margen (verCostos=true). costos_historial: admin + NEGOCIO por RLS.
+  // "Precargar" sigue siendo solo admin (puedePrecargar).
   const [lp, setLp] = useState(null);
   const [costos, setCostos] = useState(null);     // lista de versiones de costos_historial
   const [edit, setEdit] = useState(null);          // producto en edición (copia)
@@ -6040,7 +6040,7 @@ const ModuloListaPrecios = ({ onVolver, verCostos = true }) => {
           <button onClick={() => setE('escalas', [...(edit.escalas || []), { desde: '', precio: '' }])} style={s.bS}>+ Agregar escala (ej: desde 50 u, precio menor)</button>
         </div>
         {verCostos && <div style={s.card}>
-          <div style={s.cTit}>🔒 Costo (solo vos lo ves)</div>
+          <div style={s.cTit}>🔒 Costo (solo Administrador y Negocio)</div>
           <label style={s.lbl}>Costo unitario por {edit.unidad}</label>
           <input inputMode="decimal" value={costoEd} onChange={e => setCostoEd(e.target.value)} style={s.inp} placeholder="Vacío = se estima 50% del precio" />
           {cN != null && pb > 0 && <div style={{ fontSize:12.5, marginTop:8, color: pb - cN >= 0 ? '#4ade80' : '#f87171', fontWeight:750 }}>Margen: {lpFmt2(pb - cN)} por {edit.unidad} ({Math.round((pb - cN) / pb * 100)}%)</div>}
@@ -6067,13 +6067,13 @@ const ModuloListaPrecios = ({ onVolver, verCostos = true }) => {
     <div>
       <button onClick={onVolver} style={back}>🏠 Inicio</button>
       <div style={{ fontSize:22, fontWeight:900, marginBottom:4 }}>🏷️ Lista de precios</div>
-      <div style={{ fontSize:12, color:C.tx2, marginBottom:14 }}>Lo que cargues acá aparece en "Agregar productos / extras" y en "Producto manual" para que el vendedor solo toque producto y cantidad.{verCostos ? ' El costo lo ves solo vos y se usa en Ventas y Ganancia.' : ''}</div>
+      <div style={{ fontSize:12, color:C.tx2, marginBottom:14 }}>Lo que cargues acá aparece en "Agregar productos / extras" y en "Producto manual" para que el vendedor solo toque producto y cantidad.{verCostos ? ' El costo lo ven solo Administrador y Negocio, y se usa en Ventas y Ganancia.' : ''}</div>
       {!lp && <div style={{ color:C.tx3 }}>Cargando…</div>}
       {lp?.origen === 'seed' && (
         <div style={{ ...s.card, border:'1px solid rgba(250,204,21,0.4)' }}>
           <div style={{ fontSize:13.5, fontWeight:800, color:'#fde68a', marginBottom:6 }}>{lp.error ? '⚠️ Falta crear la tabla lista_precios en Supabase' : 'La lista editable está vacía'}</div>
           <div style={{ fontSize:12, color:C.tx2, marginBottom:10 }}>Mientras tanto los vendedores ya ven la lista precargada ({LP_SEED.filter(p => p.activo !== false).length} productos). Precargala para poder editarla.</div>
-          {verCostos && <button onClick={precargar} style={s.bP}>⬇️ Precargar {LP_SEED.length} productos</button>}
+          {puedePrecargar && <button onClick={precargar} style={s.bP}>⬇️ Precargar {LP_SEED.length} productos</button>}
         </div>
       )}
       {msg && <div style={{ fontSize:13, color: msg.startsWith('✓') ? '#4ade80' : '#fde68a', marginBottom:10, fontWeight:700 }}>{msg}</div>}
@@ -7401,7 +7401,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
             <ModuloMarketing esAdmin />
           </div>
         )}
-        {etapa==='lista_precios' && (esAdmin(usuarioActual) || esNegocio(usuarioActual)) && <ModuloListaPrecios onVolver={irInicio} verCostos={esAdmin(usuarioActual)} />}
+        {etapa==='lista_precios' && (esAdmin(usuarioActual) || esNegocio(usuarioActual)) && <ModuloListaPrecios onVolver={irInicio} verCostos={esAdmin(usuarioActual) || esNegocio(usuarioActual)} puedePrecargar={esAdmin(usuarioActual)} />}
         {etapa==='ventas_ganancia' && esAdmin(usuarioActual) && <ModuloVentasGanancia onVolver={irInicio} onCambioNoLeidas={setNoLeidasVG} />}
 
       </div>

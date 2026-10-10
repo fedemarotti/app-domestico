@@ -7434,7 +7434,8 @@ const liqEmail = p => (p?.creadoPor || '').trim().toLowerCase();
 const liqLabel = email => (ROLES_LIQ.find(r => r.email && r.email.toLowerCase() === (email || '').toLowerCase()) || {}).label || 'Sin datos';
 const liqTel = c => { const t = String(c?.telefono ?? '').replace(/\D/g, ''); return t.length >= 6 ? t.slice(-10) : null; };
 // Vendedor que cobra la venta: el asignado por el admin, o quien cargó el DEF.
-const liqVendedorEfectivo = (p, asig) => { const a = asig && (p.ts >= LIQ_ASIG_DESDE) && asig[p.codigo]; return (a && a.estado === 'asignada' && a.a) ? a.a.toLowerCase() : liqEmail(p); };
+// 10/10/2026 (Fede): una asignación cargada por el admin vale con cualquier fecha; el corte 18/09 aplica solo a la bandeja automática.
+const liqVendedorEfectivo = (p, asig) => { const a = asig && asig[p.codigo]; return (a && a.estado === 'asignada' && a.a) ? a.a.toLowerCase() : liqEmail(p); };
 const liqCargarAsignaciones = async () => {
   if (!supaClient) return {};
   try {

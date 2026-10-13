@@ -341,6 +341,27 @@ async function codigoDEFDesdePRE(codigoPRE) {
   }
   return genCodigoDEF();
 }
+// ── COPIA LOCAL SEGURA ───────────────────────────────────────────────────────
+// 12/10/2026: el iPhone (Safari) permite ~5 MB de almacenamiento local. Con ~2.250
+// pedidos la copia local pasó ese límite: guardarla tiraba error y la app lo tomaba
+// como "Sin conexión con la nube", mostrando datos viejos aunque la nube respondiera
+// bien (y los clientes nuevos no se subían). Ahora guardar la copia local NUNCA corta
+// el flujo: si no entra completa, se guarda solo lo más reciente; si ni así entra,
+// se borra. La nube siempre manda.
+const cacheSet = (key, obj) => {
+  try { localStorage.setItem(key, JSON.stringify(obj)); return true; } catch (e) {}
+  try {
+    const vals = Object.entries(obj || {}).sort((a, b) => ((b[1]?.ts || b[1]?.updatedAt || 0) - (a[1]?.ts || a[1]?.updatedAt || 0)));
+    try { localStorage.removeItem(key); } catch (e) {}
+    let n = vals.length;
+    while (n >= 50) {
+      try { localStorage.setItem(key, JSON.stringify(Object.fromEntries(vals.slice(0, n)))); if (n < vals.length) console.warn(`Copia local ${key}: se guardaron ${n} de ${vals.length} (límite del dispositivo)`); return true; }
+      catch (e) { n = Math.floor(n * 0.7); }
+    }
+    try { localStorage.removeItem(key); } catch (e) {}
+  } catch (e) {}
+  return false;
+};
 // ── SUPABASE CONFIG ─────────────────────────────────────────────────────────
 const SUPA_URL = window.__SUPA_URL__ || '';
 const SUPA_KEY = window.__SUPA_KEY__ || '';
@@ -356,7 +377,7 @@ const saveLS = async (p) => {
   try {
     const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}');
     all[p.codigo]=p;
-    localStorage.setItem('dom9_pedidos',JSON.stringify(all));
+    cacheSet('dom9_pedidos', all);
   } catch{}
   if (supaClient) {
     try {
@@ -379,7 +400,7 @@ const loadLS = async (c) => {
       if (data?.data) {
         const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}');
         all[c.toUpperCase()] = data.data;
-        localStorage.setItem('dom9_pedidos', JSON.stringify(all));
+        cacheSet('dom9_pedidos', all);
         return data.data;
       }
     } catch{}
@@ -401,7 +422,7 @@ function AvisoSync({ nonce }) {
 // Supabase devuelve como máximo 1000 filas por consulta (límite del servidor).
 // Sin paginar, al pasar las 1000 filas se perdían los pedidos más viejos
 // (30/09/2026: Liquidaciones de julio/agosto aparecían vacías). Trae TODO en tandas.
-const supaTraerTodo = async (armarQuery, porPagina = 1000, timeoutMs = 8000) => {
+const supaTraerTodo = async (armarQuery, porPagina = 1000, timeoutMs = 20000) => {
   const out = [];
   for (let desde = 0; ; desde += porPagina) {
     const timeout = new Promise((_, r) => setTimeout(() => r(new Error('timeout')), timeoutMs));
@@ -420,7 +441,7 @@ const listLS = async () => {
       if (data && data.length > 0) {
         const all = {};
         data.forEach(r => { if (r.data?.codigo) all[r.data.codigo] = r.data; });
-        localStorage.setItem('dom9_pedidos', JSON.stringify(all));
+        cacheSet('dom9_pedidos', all);
         window.__LIST_SYNC = { fuente: 'nube', ts: Date.now() };
         return data.map(r => r.data).filter(Boolean);
       }
@@ -437,7 +458,7 @@ const listLS = async () => {
 };
 const deleteLS = async (codigo) => {
   // Devuelve true solo si el borrado quedó confirmado en la base de datos.
-  try { const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}'); delete all[codigo]; localStorage.setItem('dom9_pedidos', JSON.stringify(all)); } catch{}
+  try { const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}'); delete all[codigo]; cacheSet('dom9_pedidos', all); } catch{}
   if (!supaClient) return true; // modo local puro: no hay base contra la cual fallar
   try {
     const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
@@ -458,7 +479,7 @@ const saveCliente = async (cli) => {
     const existing = all[id] || {};
     const updated = { ...existing, ...cli, id, updatedAt: Date.now(), createdAt: existing.createdAt || Date.now() };
     all[id] = updated;
-    localStorage.setItem(CLIENTES_KEY, JSON.stringify(all));
+    cacheSet(CLIENTES_KEY, all);
     if (supaClient) {
       try {
         await supaClient.from('clientes').upsert({ id, data: updated, updated_at: updated.updatedAt });
@@ -474,7 +495,7 @@ const listClientes = async () => {
       if (data && data.length > 0) {
         const all = {};
         data.forEach(r => { if (r.data?.id) all[r.data.id] = r.data; });
-        localStorage.setItem(CLIENTES_KEY, JSON.stringify(all));
+        cacheSet(CLIENTES_KEY, all);
         return data.map(r => r.data).filter(Boolean);
       }
     } catch{}
@@ -485,7 +506,7 @@ const deleteCliente = async (id) => {
   try {
     const all = JSON.parse(localStorage.getItem(CLIENTES_KEY)||'{}');
     delete all[id];
-    localStorage.setItem(CLIENTES_KEY, JSON.stringify(all));
+    cacheSet(CLIENTES_KEY, all);
     if (supaClient) {
       try { await supaClient.from('clientes').delete().eq('id', id); } catch{}
     }
@@ -8410,7 +8431,7 @@ function ModuloLiquidacionFlex({ onVolver }) {
     setGuardando(pedido.codigo); setErrorGuardar(null);
     const nuevo = { ...pedido, flexLiq };
     let ok = true;
-    try { const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}'); all[nuevo.codigo] = nuevo; localStorage.setItem('dom9_pedidos', JSON.stringify(all)); } catch {}
+    try { const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}'); all[nuevo.codigo] = nuevo; cacheSet('dom9_pedidos', all); } catch {}
     if (supaClient) {
       try {
         const { error } = await supaClient.from('pedidos').upsert({ codigo: nuevo.codigo, data: nuevo, ts: nuevo.ts || Date.now() });

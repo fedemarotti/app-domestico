@@ -151,6 +151,14 @@ const soloCombos20 = items => (items||[]).length>0 && (items||[]).every(esCombo2
 // Textos fijos del Combo 20 para WhatsApp y documentos
 const TXT_C20_TOTAL = '100 Lts de producto en total (5 productos × 20 Lts)';
 const TXT_C20_CAJA  = 'Se entrega todo en una caja (sin cargo)';
+// ENVÍOS FLEX COBRADOS (16/10/2026, Fede): los envíos cobrados SIEMPRE son iguales o más que los bultos
+// enviados. Nunca 3 bultos y 2 envíos cobrados. Se puede cobrar de más a mano (3 bultos / 4 envíos).
+// extras.envios = envíos cobrados; pedidos viejos sin el campo → igual a los bultos.
+const enviosCobradosDe = ex => Math.max(Number(ex?.bultos) || 1, Number(ex?.envios) || 0);
+const unitEnvioDe = (ex, zona, totEnvio) => (Number(ex?.envioUnit) > 0) ? Number(ex.envioUnit)
+  : (zona && Number(zona.precio) > 0) ? Number(zona.precio)
+  : (Number(totEnvio) > 0 ? Number(totEnvio) / enviosCobradosDe(ex) : 0);
+const txtEnviosExtra = ex => enviosCobradosDe(ex) > (Number(ex?.bultos) || 1) ? ` · ${enviosCobradosDe(ex)} envíos cobrados` : '';
 const COLORES_JABON      = [{ label:'Azul',    hex:'#3b82f6', tc:'#fff' }, { label:'Verde',   hex:'#22c55e', tc:'#fff' }, { label:'Violeta', hex:'#a855f7', tc:'#fff' }];
 const COLORES_SUAVIZANTE = [{ label:'Blanco',  hex:'#f1f5f9', tc:'#1e293b' }, { label:'Celeste', hex:'#7dd3fc', tc:'#1e293b' }, { label:'Violeta', hex:'#a855f7', tc:'#fff' }];
 const COLORES_DETERGENTE = [{ label:'Amarillo', hex:'#fbbf24', tc:'#1e293b', default:true }, { label:'Verde', hex:'#4ade80', tc:'#1e293b', apedido:true }, { label:'Azul', hex:'#60a5fa', tc:'#fff', apedido:true }];
@@ -1961,9 +1969,9 @@ function imprimirPedido(pedido, solo=null) {
       : esI
         ? { label:'Envío al interior — VIA CARGO / ANDREANI', spec:'Flete a cargo del cliente', gratis:true }
         : zonaEnvio
-          ? { label:`Envío FLEX · ${bultoPalabra}`, spec:`${zonaEnvio.zona} · ${cliente.localidad||ex.localidad||''}`, gratis:false }
+          ? { label:`Envío FLEX · ${bultoPalabra}${txtEnviosExtra(ex).toUpperCase()}`, spec:`${zonaEnvio.zona} · ${cliente.localidad||ex.localidad||''}`, gratis:false }
           : (tot.envio>0||ex.localidad||cliente.localidad)
-            ? { label:`Envío FLEX · ${bultoPalabra}`, spec:ex.localidad||cliente.localidad||'', gratis:tot.envio===0 }
+            ? { label:`Envío FLEX · ${bultoPalabra}${txtEnviosExtra(ex).toUpperCase()}`, spec:ex.localidad||cliente.localidad||'', gratis:tot.envio===0 }
             : null;
 
     const divRow = `<tr><td colspan="2" style="padding:0;"><div style="border-top:1px solid #e2e8f0;margin:0 4px;"></div></td></tr>`;
@@ -2537,6 +2545,8 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
       agregados: (preData.extras?.agregados || []).length > 0 ? preData.extras.agregados : prev.agregados,
       envio: (modalidadResuelta==='flex' && typeof preData.extras?.envio==='number') ? preData.extras.envio : null,
       bultos: preData.extras?.bultos ?? (preData.envases || 1),
+      envios: enviosCobradosDe({ bultos: preData.extras?.bultos ?? (preData.envases || 1), envios: preData.extras?.envios }),
+      envioUnit: preData.extras?.envioUnit,
       localidad: (modalidadResuelta==='flex' && preData.extras?.localidad) ? preData.extras.localidad : '',
       cajas: desgloseEnvases(preData.envases ?? 0, preData.extras).cajas
     }));
@@ -2635,15 +2645,21 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
       const totalAgr   = agregadosHeredados.reduce((s,a) => s + (parseFloat(a.precio)||0), 0);
       // La entrega NO cambió respecto de la PRE → heredar el envío YA COBRADO tal cual,
       // sin recalcular. PRE y DEF nunca pueden diferir en plata si no se editó nada.
+      // Bultos finales (nunca menos que baldes + cajas + cajas Combo 20) y envíos cobrados (nunca menos que bultos).
+      const bultosFin = Math.max(extrasUsados.bultos || 1, dEnv.baldes + dEnv.cajas + cajasCombo20(carrito));
+      const enviosFin = Math.max(bultosFin, Number(extrasUsados.envios) || 0);
       const entregaSinCambios = pre.extras &&
         !!extrasUsados.retiraLocal === !!pre.extras.retiraLocal &&
         !!extrasUsados.esInterior === !!pre.extras.esInterior &&
         (extrasUsados.localidad || '') === (pre.extras.localidad || '') &&
-        (extrasUsados.bultos || 1) === (pre.extras.bultos || 1);
+        enviosFin === enviosCobradosDe(pre.extras);
+      // Si cambiaron los envíos cobrados, se recalcula: precio por envío × envíos cobrados.
+      const unitEnvio = unitEnvioDe(pre.extras && Number(pre.extras.envioUnit) > 0 ? pre.extras : extrasUsados, zona, pre.totales?.envio);
       const totalEnvio = (extrasUsados.retiraLocal || extrasUsados.esInterior) ? 0
         : (entregaSinCambios && typeof pre.totales?.envio === 'number') ? pre.totales.envio
+        : unitEnvio > 0 ? Math.round(unitEnvio * enviosFin)
         : typeof extrasUsados.envio === 'number' ? extrasUsados.envio
-        : (zona ? zona.precio * (extrasUsados.bultos||1) : 0);
+        : (zona ? zona.precio * enviosFin : 0);
       const total      = totalProd + totalEnv + totalAgr + totalEnvio;
       // Si ya existe un pedidoFinal (el vendedor volvió a "Editar cliente/entrega" y reconfirmó),
       // reusamos el mismo código/fecha para ACTUALIZAR ese mismo registro (saveLS hace upsert por
@@ -2659,7 +2675,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
         ts: pedidoFinal ? pedidoFinal.ts : Date.now(),
         cliente, items:carrito,
         envases:dEnv.baldes,
-        extras:{ ...extrasUsados, bultos: Math.max(extrasUsados.bultos || 1, dEnv.baldes + dEnv.cajas + cajasCombo20(carrito)), agregados:agregadosHeredados, cajas:dEnv.cajas, precioCaja: precioCajaDEF, precioBalde: precioBaldeDEF },
+        extras:{ ...extrasUsados, bultos: bultosFin, envios: (extrasUsados.retiraLocal || extrasUsados.esInterior) ? bultosFin : enviosFin, agregados:agregadosHeredados, cajas:dEnv.cajas, precioCaja: precioCajaDEF, precioBalde: precioBaldeDEF },
         totales:{ productos:totalProd, envases:totalEnv, agregados:totalAgr, envio:totalEnvio, total },
         zonaEnvio:zona, estado: pedidoFinal ? pedidoFinal.estado : 'pendiente',
         creadoPor: pedidoFinal ? pedidoFinal.creadoPor : (usuarioActual?.email || null)
@@ -2895,25 +2911,46 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
               <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)', marginTop:3 }}>
                 {extras.retiraLocal ? 'El cliente retira en Moreno, Bs. As.' : extras.esInterior ? 'El flete corre por cuenta del cliente.' : zona ? `${extras.localidad||cliente.localidad||''} · ${zona.zona}` : extras.localidad || cliente.localidad || ''}
               </div>
-              {!extras.retiraLocal && !extras.esInterior && typeof extras.envio==='number' && (
-                <div style={{ fontSize:13, fontWeight:800, color:'#fb923c', marginTop:6 }}>
-                  💸 Costo envío: {fmt(extras.envio)}
-                </div>
-              )}
+              {!extras.retiraLocal && !extras.esInterior && (() => {
+                const envV = enviosCobradosDe(extras);
+                const unitV = unitEnvioDe(preData?.extras && Number(preData.extras.envioUnit) > 0 ? preData.extras : extras, zona, preData?.totales?.envio);
+                const igualPRE = envV === enviosCobradosDe(preData?.extras) && typeof preData?.totales?.envio === 'number';
+                const costo = igualPRE ? preData.totales.envio : unitV > 0 ? Math.round(unitV * envV) : (typeof extras.envio === 'number' ? extras.envio : 0);
+                return costo > 0 ? (
+                  <div style={{ fontSize:13, fontWeight:800, color:'#fb923c', marginTop:6 }}>
+                    💸 Costo envío: {fmt(costo)}{unitV > 0 ? <span style={{ fontWeight:600, color:'rgba(255,255,255,0.55)' }}> ({envV} envío{envV!==1?'s':''} × {fmt(Math.round(unitV))})</span> : null}
+                  </div>
+                ) : null;
+              })()}
             </div>
 
-            {/* Bultos — solo si es envío local */}
-            {!extras.retiraLocal && !extras.esInterior && (
-              <div style={{ marginBottom:20 }}>
-                <label style={{ fontSize:12, fontWeight:700, color:'rgba(255,255,255,0.7)', display:'block', marginBottom:6 }}>Cantidad de bultos</label>
-                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                  <button onClick={()=>setExtras(e=>{ const d=desgloseEnvases(preData?.envases ?? 0, preData?.extras); return {...e, bultos:Math.max(Math.max(1, d.baldes+d.cajas+cajasCombo20(preData?.items)), (e.bultos||1)-1)}; })} style={{ width:36, height:36, borderRadius:8, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>−</button>
-                  <span style={{ fontSize:22, fontWeight:900, minWidth:30, textAlign:'center' }}>{extras.bultos || 1}</span>
-                  <button onClick={()=>setExtras(e=>({...e,bultos:(e.bultos||1)+1}))} style={{ width:36, height:36, borderRadius:8, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>+</button>
-                  <span style={{ fontSize:12, color:'rgba(255,255,255,0.45)' }}>bulto{(extras.bultos||1)!==1?'s':''}</span>
+            {/* Bultos enviados y envíos cobrados — solo Flex. Envíos cobrados ≥ bultos, siempre. */}
+            {!extras.retiraLocal && !extras.esInterior && (() => {
+              const d = desgloseEnvases(preData?.envases ?? 0, preData?.extras);
+              const minB = Math.max(1, d.baldes + d.cajas + cajasCombo20(preData?.items));
+              const b = extras.bultos || 1; const env = enviosCobradosDe(extras);
+              // Si los envíos estaban igual a los bultos, siguen a los bultos; si se cobraba de más a mano, se respeta (sin bajar de los bultos).
+              const setBultos = n => setExtras(e => { const bb = e.bultos || 1; const ee = enviosCobradosDe(e); return { ...e, bultos:n, envios: ee === bb ? n : Math.max(ee, n) }; });
+              const btn = { width:36, height:36, borderRadius:8, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' };
+              const fila = (label, val, menos, mas, sufijo, nota) => (
+                <div style={{ marginBottom:14 }}>
+                  <label style={{ fontSize:12, fontWeight:700, color:'rgba(255,255,255,0.7)', display:'block', marginBottom:6 }}>{label}</label>
+                  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                    <button onClick={menos} style={btn}>−</button>
+                    <span style={{ fontSize:22, fontWeight:900, minWidth:30, textAlign:'center' }}>{val}</span>
+                    <button onClick={mas} style={btn}>+</button>
+                    <span style={{ fontSize:12, color:'rgba(255,255,255,0.45)' }}>{sufijo}</span>
+                  </div>
+                  {nota && <div style={{ fontSize:11, color:'rgba(255,255,255,0.45)', marginTop:5 }}>{nota}</div>}
                 </div>
-              </div>
-            )}
+              );
+              return (
+                <div style={{ marginBottom:20 }}>
+                  {fila('Cantidad de bultos', b, () => setBultos(Math.max(minB, b - 1)), () => setBultos(b + 1), `bulto${b!==1?'s':''}`, minB > 1 ? `Mínimo ${minB} (baldes + cajas${cajasCombo20(preData?.items) ? ' + cajas Combo 20' : ''})` : null)}
+                  {fila('Envíos cobrados al cliente', env, () => setExtras(e => ({ ...e, envios: Math.max(e.bultos || 1, enviosCobradosDe(e) - 1) })), () => setExtras(e => ({ ...e, envios: enviosCobradosDe(e) + 1 })), `envío${env!==1?'s':''}`, env > b ? `Cobrás ${env - b} envío${env - b !== 1 ? 's' : ''} de más (elegido a mano)` : 'Nunca puede ser menos que los bultos')}
+                </div>
+              );
+            })()}
 
             {/* Nota interior */}
             {extras.esInterior && (
@@ -3062,9 +3099,9 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
                 : ex.esInterior
                   ? `🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`
                   : zonaEnvio
-                    ? `🚚 *ENVÍO FLEX AMBA* — ${zonaEnvio.zona} · ${ex.bultos} bulto${ex.bultos!==1?'s':''} — *${fmt(tot.envio)}*`
+                    ? `🚚 *ENVÍO FLEX AMBA* — ${zonaEnvio.zona} · ${ex.bultos} bulto${ex.bultos!==1?'s':''}${txtEnviosExtra(ex)} — *${fmt(tot.envio)}*`
                     : (cl.localidad||ex.localidad||tot.envio>0)
-                      ? `🚚 *ENVÍO FLEX AMBA*${cl.localidad||ex.localidad ? ` — ${cl.localidad||ex.localidad}` : ''} · ${ex.bultos||1} bulto${(ex.bultos||1)!==1?'s':''}${tot.envio>0 ? ` — *${fmt(tot.envio)}*` : ''}`
+                      ? `🚚 *ENVÍO FLEX AMBA*${cl.localidad||ex.localidad ? ` — ${cl.localidad||ex.localidad}` : ''} · ${ex.bultos||1} bulto${(ex.bultos||1)!==1?'s':''}${txtEnviosExtra(ex)}${tot.envio>0 ? ` — *${fmt(tot.envio)}*` : ''}`
                       : null,
               ``,
               `━━━━━━━━━━━━━━━━`,
@@ -3260,8 +3297,8 @@ _Doméstico · Moreno, Bs. As._`
     ``,`━━━━━━━━━━━━━━━━`,`📦 *MODALIDAD DE ENTREGA*`,
     ex.retiraLocal?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:
       ex.esInterior?`🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`:
-      zonaEnvio?`🚚 *ENVÍO FLEX AMBA* — ${zonaNom} · ${ex.bultos||1} bulto${(ex.bultos||1)!==1?'s':''} — *${fmt(tot.envio)}*`:
-      (cl.localidad||ex.localidad||tot.envio>0)?`🚚 *ENVÍO FLEX AMBA*${cl.localidad||ex.localidad ? ` — ${cl.localidad||ex.localidad}` : ''} · ${ex.bultos||1} bulto${(ex.bultos||1)!==1?'s':''}${tot.envio>0 ? ` — *${fmt(tot.envio)}*` : ''}`:null,
+      zonaEnvio?`🚚 *ENVÍO FLEX AMBA* — ${zonaNom} · ${ex.bultos||1} bulto${(ex.bultos||1)!==1?'s':''}${txtEnviosExtra(ex)} — *${fmt(tot.envio)}*`:
+      (cl.localidad||ex.localidad||tot.envio>0)?`🚚 *ENVÍO FLEX AMBA*${cl.localidad||ex.localidad ? ` — ${cl.localidad||ex.localidad}` : ''} · ${ex.bultos||1} bulto${(ex.bultos||1)!==1?'s':''}${txtEnviosExtra(ex)}${tot.envio>0 ? ` — *${fmt(tot.envio)}*` : ''}`:null,
     ``,`━━━━━━━━━━━━━━━━`,`💰 *TOTAL: ${fmt(tot.total)}*`,`━━━━━━━━━━━━━━━━`,``,
     `_Por favor confirmá que todos los datos son correctos antes de que procesemos el pedido._`,``,
     `_Doméstico · Química de Limpieza · Moreno, Bs. As._`
@@ -3357,7 +3394,7 @@ _Doméstico · Moreno, Bs. As._`
         {!editandoEntrega ? (
           <>
             <div style={{ fontSize:13, fontWeight:700 }}>
-              {ex.retiraLocal ? '🏪 RETIRA EN PLANTA' : ex.esInterior ? '🚚 INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI' : zonaEnvio ? `🚚 ENVÍO FLEX AMBA — ${zonaNom} · ${ex.bultos||1} bulto${(ex.bultos||1)!==1?'s':''}` : cl.localidad||ex.localidad ? `🚚 ENVÍO FLEX AMBA — ${cl.localidad||ex.localidad}` : '—'}
+              {ex.retiraLocal ? '🏪 RETIRA EN PLANTA' : ex.esInterior ? '🚚 INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI' : zonaEnvio ? `🚚 ENVÍO FLEX AMBA — ${zonaNom} · ${ex.bultos||1} bulto${(ex.bultos||1)!==1?'s':''}${txtEnviosExtra(ex)}` : cl.localidad||ex.localidad ? `🚚 ENVÍO FLEX AMBA — ${cl.localidad||ex.localidad}` : '—'}
             </div>
             {!ex.retiraLocal && tot.envio>0 && <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginTop:3 }}>Costo envío: {fmt(tot.envio)}</div>}
           </>
@@ -8531,11 +8568,13 @@ function ModuloLiquidacionFlex({ onVolver }) {
         const ov  = p.flexLiq || {};
         const localidadBase = (ex.localidad || p.cliente?.localidad || '').trim();
         const localidad = (ov.localidad ?? localidadBase) || '—';
-        const bultosBase = Math.max(1, Number(ex.bultos) || 1);
+        // Se le liquida a Flex por envío cobrado (≥ bultos físicos). En pedidos normales son iguales.
+        const bultosBase = enviosCobradosDe(ex);
+        const fisicos = Math.max(1, Number(ex.bultos) || 1);
         const bultos = Math.max(1, Number(ov.bultos ?? bultosBase) || 1);
         const totalBase = Number(p.totales?.envio ?? (typeof ex.envio === 'number' ? ex.envio : 0)) || 0;
         const unitBase = Number(ex.envioUnit) > 0 ? Number(ex.envioUnit)
-                       : (bultosBase > 0 && totalBase > 0 ? Math.round(totalBase / bultosBase) : 0);
+                       : (totalBase > 0 ? Math.round(totalBase / enviosCobradosDe(ex)) : 0);
         const unit  = Number(ov.unit ?? unitBase) || 0;
         const total = ov.unit != null || ov.bultos != null ? Math.round(unit * bultos) : (totalBase || Math.round(unit * bultos));
         const z = ov.zona ? { zona: ov.zona, color: (ZONAS_ENVIO.find(x => x.zona === ov.zona)?.color) || FLEX_NA, origen: 'manual' }
@@ -8546,7 +8585,7 @@ function ModuloLiquidacionFlex({ onVolver }) {
           cliente: p.cliente?.nombre || p.cliente?.telefono || 'Sin datos',
           importePedido: Number(p.totales?.total ?? p.total ?? 0),
           localidad, zona: z.zona, zonaColor: z.color, zonaOrigen: z.origen,
-          unit, bultos, total,
+          unit, bultos, total, fisicos,
           editado: !!(ov.zona || ov.localidad != null || ov.bultos != null || ov.unit != null),
           pedido: p,
         };
@@ -8747,7 +8786,7 @@ function ModuloLiquidacionFlex({ onVolver }) {
                           <div style={{ fontSize:14, fontWeight:700, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.localidad}</div>
                           <div style={{ fontSize:11, marginTop:2 }}>
                             <span style={{ padding:'2px 8px', borderRadius:20, fontWeight:800, background:`${f.zonaColor}22`, color:f.zonaColor }}>{f.zona}</span>
-                            <span style={{ color:'rgba(255,255,255,0.45)', marginLeft:8, whiteSpace:'nowrap' }}>&nbsp;{fmtM(f.unit)} × {f.bultos} bulto{f.bultos!==1?'s':''}</span>
+                            <span style={{ color:'rgba(255,255,255,0.45)', marginLeft:8, whiteSpace:'nowrap' }}>&nbsp;{fmtM(f.unit)} × {f.fisicos !== f.bultos ? `${f.bultos} envíos (${f.fisicos} bulto${f.fisicos!==1?'s':''})` : `${f.bultos} bulto${f.bultos!==1?'s':''}`}</span>
                           </div>
                         </div>
                         <div style={{ textAlign:'right', marginRight:8, flexShrink:0 }}>
@@ -8764,7 +8803,7 @@ function ModuloLiquidacionFlex({ onVolver }) {
                             <div><div style={lblMini}>Cliente</div><div style={{ fontSize:13, fontWeight:700 }}>{f.cliente}</div></div>
                             <div><div style={lblMini}>Importe del pedido</div><div style={{ fontSize:13, fontWeight:700, color:'#4ade80' }}>{fmtM(f.importePedido)}</div></div>
                             <div><div style={lblMini}>Zona detectada por</div><div style={{ fontSize:13, fontWeight:700, color:f.zonaOrigen==='sin'?'#f87171':'rgba(255,255,255,0.8)' }}>{f.zonaOrigen==='localidad'?'localidad':f.zonaOrigen==='importe'?'importe por bulto':f.zonaOrigen==='manual'?'corrección manual':'no se pudo determinar'}</div></div>
-                            <div><div style={lblMini}>Total del envío</div><div style={{ fontSize:13, fontWeight:800, color:FLEX_NA }}>{fmtM(f.unit)} × {f.bultos} = {fmtM(f.total)}</div></div>
+                            <div><div style={lblMini}>Total del envío</div><div style={{ fontSize:13, fontWeight:800, color:FLEX_NA }}>{fmtM(f.unit)} × {f.bultos}{f.fisicos !== f.bultos ? ` envíos (${f.fisicos} bultos)` : ''} = {fmtM(f.total)}</div></div>
                           </div>
                           {f.pedido.flexLiq?.nota && (
                             <div style={{ padding:'8px 12px', background:'rgba(251,146,60,0.10)', border:'1px solid rgba(251,146,60,0.3)', borderRadius:8, fontSize:12.5, color:'#fed7aa', marginBottom:10 }}>📝 {f.pedido.flexLiq.nota}</div>

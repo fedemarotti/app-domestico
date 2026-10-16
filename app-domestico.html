@@ -139,6 +139,15 @@ const PRECIOS_COMBOS = {
   50:  { Inicial: 77924,  Intermedia: 83842,  Premium: 90937  },
   200: { Inicial: 283679, Intermedia: 312180, Premium: 353568 },
 };
+// 16/10/2026 (Fede): COMBO 20 PROMOCIONAL. Solo calidad Premium, 20 L por producto: jabón, suavizante,
+// detergente, lavandina y desodorante de piso (1 unidad de 200 cc, una sola fragancia). No se fracciona,
+// la lavandina no tiene canje y cada combo va en su propia caja SIN CARGO (automática, 1 por combo,
+// cuenta como bulto). Precio fijo para todos los roles y modalidades.
+const PRECIO_COMBO20 = 39000;
+const esCombo20 = it => !!it && (it.tipoItem==='combo' || it.tipo==='combo') && Number(it.cantidad)===20;
+const nombreComboCorto = lt => Number(lt)===20 ? 'Combo 20 Promocional' : Number(lt)===50 ? 'Combo Chico' : 'Combo Grande';
+const cajasCombo20 = items => (items||[]).filter(esCombo20).length;
+const soloCombos20 = items => (items||[]).length>0 && (items||[]).every(esCombo20);
 const COLORES_JABON      = [{ label:'Azul',    hex:'#3b82f6', tc:'#fff' }, { label:'Verde',   hex:'#22c55e', tc:'#fff' }, { label:'Violeta', hex:'#a855f7', tc:'#fff' }];
 const COLORES_SUAVIZANTE = [{ label:'Blanco',  hex:'#f1f5f9', tc:'#1e293b' }, { label:'Celeste', hex:'#7dd3fc', tc:'#1e293b' }, { label:'Violeta', hex:'#a855f7', tc:'#fff' }];
 const COLORES_DETERGENTE = [{ label:'Amarillo', hex:'#fbbf24', tc:'#1e293b', default:true }, { label:'Verde', hex:'#4ade80', tc:'#1e293b', apedido:true }, { label:'Azul', hex:'#60a5fa', tc:'#fff', apedido:true }];
@@ -166,13 +175,15 @@ const desgloseEnvases = (env, ex) => {
   return { baldes: env ?? 0, cajas: 0 };
 };
 const costoEnvases = (env, ex) => { const d = desgloseEnvases(env, ex); return d.baldes * precioBaldeDe(ex) + d.cajas * precioCajaDe(ex); };
-const minBultosDe = (env, ex) => { const d = desgloseEnvases(env, ex); return Math.max(1, d.baldes + d.cajas); };
-const lineasEnvasesWA = (env, ex) => {
+const minBultosDe = (env, ex, items) => { const d = desgloseEnvases(env, ex); return Math.max(1, d.baldes + d.cajas + cajasCombo20(items)); };
+const lineasEnvasesWA = (env, ex, items) => {
   const { baldes, cajas } = desgloseEnvases(env, ex);
+  const c20 = cajasCombo20(items);
   const out = [];
   if (baldes > 0) out.push(`• 🪣 Baldes (${baldes}) — *${fmt(baldes*precioBaldeDe(ex))}*`);
   if (cajas > 0)  out.push(precioCajaDe(ex) > 0 ? `• 📦 Cajas (${cajas}) — *${fmt(cajas*precioCajaDe(ex))}*` : `• 📦 En caja${cajas!==1?'s':''} sin cargo (${cajas})`);
-  if (baldes === 0 && cajas === 0) out.push(`• 🛍️ _Sin envase — se entrega en bolsas (sin cargo)_`);
+  if (c20 > 0) out.push(`• 📦 Combo 20 en caja sin cargo (${c20} caja${c20!==1?'s':''})`);
+  if (baldes === 0 && cajas === 0 && !soloCombos20(items)) out.push(`• 🛍️ _Sin envase — se entrega en bolsas (sin cargo)_`);
   return out;
 };
 // Tarifas Flex por bulto. 24/09/2026: Moreno 4500→5200, Cordón 1 5500→6500, Cordón 2 6500→7500, Cordón 3 9500→10500.
@@ -653,8 +664,18 @@ const ItemLibre = ({ lista, setLista }) => {
 };
 
 // Extras + Envío (compartido PRE y DEF)
-const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar, onVolver, labelBtn='Confirmar', modalidad=null }) => {
-  const minBultos = Math.max(1, envases + (extras.cajas || 0)); // nunca menos bultos que baldes+cajas
+const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar, onVolver, labelBtn='Confirmar', modalidad=null, cajasCombo=0, soloCombo20=false }) => {
+  // nunca menos bultos que baldes + cajas + cajas de Combo 20 (cada combo 20 va en su caja = 1 bulto)
+  const minBultos = Math.max(1, envases + (extras.cajas || 0) + cajasCombo);
+  const esFlexEE = modalidad!=='retiro' && !extras.esInterior && !extras.retiraLocal;
+  React.useEffect(() => {
+    if (!esFlexEE || (extras.bultos || 1) >= minBultos) return;
+    setExtras(e => {
+      const nx = { ...e, bultos: minBultos };
+      if (typeof nx.envioUnit === 'number' && typeof nx.envio === 'number') nx.envio = Math.round(nx.envioUnit * nx.bultos);
+      return nx;
+    });
+  }, [minBultos, esFlexEE]);
   const zonaEf = extras.envio || zona;
   // extras.envio puede ser un número (viene del mapa-flex: total ya calculado) o un objeto zona {zona, precio}
   const envioEsNumero = typeof extras.envio === 'number';
@@ -684,11 +705,20 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
           // mínimo anterior (auto), siguen al nuevo mínimo; si estaban por encima (elección manual), se
           // respetan y solo se suben si quedaran por debajo del nuevo mínimo.
           const nuevosBultos = (actuales, minAnterior, minNuevo) => (actuales||1) <= minAnterior ? minNuevo : Math.max(actuales, minNuevo);
-          const setBaldes = (n) => { setEnvases(n); const nx = { ...extras, sinEnvase:false }; if (esFlex) nx.bultos = nuevosBultos(extras.bultos, Math.max(1, envases + cajas), Math.max(1, n + cajas)); setExtras(syncEnvio(nx)); };
-          const setCajas  = (m) => { const nx = { ...extras, cajas: m, sinEnvase:false }; if (esFlex) nx.bultos = nuevosBultos(extras.bultos, Math.max(1, envases + cajas), Math.max(1, envases + m)); setExtras(syncEnvio(nx)); };
-          const elegirSinEnvase = () => { setEnvases(0); const nx = { ...extras, cajas:0, sinEnvase:true }; if (esFlex) nx.bultos = nuevosBultos(extras.bultos, Math.max(1, envases + cajas), 1); setExtras(syncEnvio(nx)); };
+          const cc = cajasCombo;
+          const setBaldes = (n) => { setEnvases(n); const nx = { ...extras, sinEnvase:false }; if (esFlex) nx.bultos = nuevosBultos(extras.bultos, Math.max(1, envases + cajas + cc), Math.max(1, n + cajas + cc)); setExtras(syncEnvio(nx)); };
+          const setCajas  = (m) => { const nx = { ...extras, cajas: m, sinEnvase:false }; if (esFlex) nx.bultos = nuevosBultos(extras.bultos, Math.max(1, envases + cajas + cc), Math.max(1, envases + m + cc)); setExtras(syncEnvio(nx)); };
+          const elegirSinEnvase = () => { setEnvases(0); const nx = { ...extras, cajas:0, sinEnvase:true }; if (esFlex) nx.bultos = nuevosBultos(extras.bultos, Math.max(1, envases + cajas + cc), Math.max(1, cc)); setExtras(syncEnvio(nx)); };
+          const avisoCombo20 = cc > 0 && (
+            <div style={{ marginBottom:12, padding:'10px 14px', borderRadius:10, fontSize:13, fontWeight:700, background:'rgba(34,197,94,0.13)', border:'1px solid rgba(34,197,94,0.35)', color:'#86efac' }}>
+              📦 Combo 20 Promocional: va en caja SIN CARGO ({cc} caja{cc!==1?'s':''}{cc>1?', una por combo':''}). No lleva baldes.
+            </div>
+          );
+          // Pedido SOLO con Combos 20 y sin otros productos: no hay nada que envasar aparte.
+          if (soloCombo20 && envases===0 && cajas===0 && !(extras.agregados||[]).length) return avisoCombo20;
           return (
             <>
+              {avisoCombo20}
               <div style={{ marginBottom:14 }}>
                 <div style={{ fontSize:12, color:'rgba(255,255,255,0.6)', fontWeight:700, marginBottom:8 }}>🪣 Baldes — {fmt(PRECIO_ENVASE)} c/u (con cargo)</div>
                 <div style={{ display:'flex', alignItems:'center', gap:16 }}>
@@ -809,7 +839,7 @@ const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar
                     )}
                     {zonaEf && (
                       <div>
-                        <label style={s.lbl}>Cantidad de bultos {minBultos>1 && <span style={{ fontSize:10, color:'rgba(255,255,255,0.45)', fontWeight:600 }}>(mínimo {minBultos}: baldes + cajas)</span>}</label>
+                        <label style={s.lbl}>Cantidad de bultos {minBultos>1 && <span style={{ fontSize:10, color:'rgba(255,255,255,0.45)', fontWeight:600 }}>(mínimo {minBultos}: baldes + cajas{cajasCombo>0?' + cajas Combo 20':''})</span>}</label>
                         <div style={{ display:'flex', alignItems:'center', gap:16, marginTop:4 }}>
                           <button onClick={()=>setExtras({...extras,bultos:Math.max(minBultos,extras.bultos-1)})} style={{ width:42, height:42, borderRadius:10, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.08)', color:'#fff', cursor:'pointer', fontSize:22 }}>−</button>
                           <span style={{ fontSize:26, fontWeight:900, minWidth:44, textAlign:'center' }}>{extras.bultos}</span>
@@ -882,7 +912,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
         const { total, localidad, precio_unitario, cantidad, zona_key, manual } = event.data;
         // El mapa no conoce los envases del pedido: acá se valida que los bultos
         // elegidos en el mapa no sean menos que baldes + cajas.
-        const minB = Math.max(1, envases + (extras.cajas || 0));
+        const minB = Math.max(1, envases + (extras.cajas || 0) + cajasCombo20(items));
         const cantMapa = parseInt(cantidad) || ((typeof precio_unitario === 'number' && precio_unitario > 0) ? Math.max(1, Math.round(total / precio_unitario)) : 1);
         const unit = (typeof precio_unitario === 'number' && precio_unitario > 0) ? precio_unitario : (cantMapa > 0 ? total / cantMapa : total);
         const cantFinal = Math.max(cantMapa, minB);
@@ -890,7 +920,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
         const zf = zonaPorClave(zona_key);
         setExtras(e => ({ ...e, envio: totalFinal, envioUnit: unit, localidad: localidad, bultos: cantFinal, zonaFlex: zf ? zf.zona : null, localidadManual: !!manual }));
         if (cantFinal > cantMapa) {
-          alert(`⚠️ Este pedido lleva mínimo ${minB} bulto${minB>1?'s':''} (baldes + cajas) y en el mapa se eligieron ${cantMapa}. El envío se ajustó automáticamente a ${cantFinal} bultos: $${totalFinal.toLocaleString('es-AR')}.`);
+          alert(`⚠️ Este pedido lleva mínimo ${minB} bulto${minB>1?'s':''} (baldes + cajas${cajasCombo20(items)>0?' + cajas del Combo 20':''}) y en el mapa se eligieron ${cantMapa}. El envío se ajustó automáticamente a ${cantFinal} bultos: $${totalFinal.toLocaleString('es-AR')}.`);
         }
       }
     };
@@ -951,6 +981,11 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
     setPaso('inicio');
     // el useEffect de auto-save detectará el cambio en items y persistirá
   };
+  // Combo 20 Promocional: calidad única Premium, precio fijo, sin paso de calidad.
+  const agregarCombo20 = () => {
+    setItems([...items,{ id:uid(), nombre:'Combo 20 Promocional Premium (20 Lts por producto)', precio:PRECIO_COMBO20, tipoItem:'combo', cantidad:20, calidad:'Premium', combo20:true, cajaIncluida:true }]);
+    setPaso('inicio');
+  };
 
   const generarWA = () => {
     snap();
@@ -960,7 +995,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
       `📦 *Productos:*`,
       ...items.map(i=>`• ${i.nombre} — *${precioAgrTxt(i)}*`),
       ...extras.agregados.map(a=>`• ${a.nombre} — *${precioAgrTxt(a)}*`),
-      ...lineasEnvasesWA(envases, extras),``,
+      ...lineasEnvasesWA(envases, extras, items),``,
       `📦 *MODALIDAD DE ENTREGA*`,
       (extras.retiraLocal||modalidadPRE==='retiro')?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:(extras.esInterior||modalidadPRE==='interior')?`🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`:typeof extras.envio==='number'&&extras.localidad?`🚚 *ENVÍO FLEX AMBA* — ${extras.localidad} — *${fmt(extras.envio)}*`:zona?`🚚 *ENVÍO FLEX AMBA* — ${extras.localidad} (${zona.zona}) · ${extras.bultos} bulto${extras.bultos!==1?'s':''} — *${fmt(totalEnvio)}*`:(extras.localidad||modalidadPRE==='flex')?`🚚 *ENVÍO FLEX AMBA*${extras.localidad?` — ${extras.localidad}`:''}`:null,``,
       `━━━━━━━━━━━━━━━━`,`💰 *TOTAL: ${fmt(total)}*`,`━━━━━━━━━━━━━━━━`,``,
@@ -1165,15 +1200,21 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
         <div>
           <button onClick={()=>setPaso('inicio')} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.75)', border:'1px solid rgba(255,255,255,0.14)', borderRadius:8, fontWeight:600, fontSize:12, cursor:'pointer', marginBottom:18 }}>← Atrás</button>
           <SH step="Combo · Tamaño" title="Tamaño del combo" />
-          <div style={{ display:'flex', gap:14, justifyContent:'center' }}>
-            <button className="img-btn" onClick={()=>{ setCur({...cur,cantidad:50}); setPaso('c_cal'); }}
-              style={{ position:'relative', width:175, height:175, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0, flexShrink:0 }}>
+          {/* Tres combos del mismo tamaño en una fila (16/10/2026). El Combo 20 Promocional es solo Premium:
+              se agrega directo, sin paso de calidad. */}
+          <div style={{ display:'flex', gap:10, justifyContent:'center' }}>
+            <button className="img-btn" onClick={()=>{ setCur({...cur,cantidad:50}); setPaso('c_cal'); }} style={{ position:'relative', flex:'1 1 0', minWidth:0, maxWidth:175, aspectRatio:'1 / 1', borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0 }}>
               <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('BOTON COMBO CHICO .PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
             </button>
-            <button className="img-btn" onClick={()=>{ setCur({...cur,cantidad:200}); setPaso('c_cal'); }}
-              style={{ position:'relative', width:175, height:175, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0, flexShrink:0 }}>
+            <button className="img-btn" onClick={()=>{ setCur({...cur,cantidad:200}); setPaso('c_cal'); }} style={{ position:'relative', flex:'1 1 0', minWidth:0, maxWidth:175, aspectRatio:'1 / 1', borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0 }}>
               <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('BOTON COMBO GRANDE.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
             </button>
+            <button className="img-btn" onClick={agregarCombo20} aria-label="Combo 20 Promocional" style={{ position:'relative', flex:'1 1 0', minWidth:0, maxWidth:175, aspectRatio:'1 / 1', borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0 }}>
+              <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('BOTON COMBO 20.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
+            </button>
+          </div>
+          <div style={{ textAlign:'center', fontSize:11.5, color:'rgba(255,255,255,0.55)', marginTop:10 }}>
+            Combo 20 Promocional: Premium · <strong style={{ color:C.na }}>{fmt(PRECIO_COMBO20)}</strong> · en caja sin cargo
           </div>
         </div>
       )}
@@ -1204,6 +1245,8 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
           onConfirmar={generarWA}
           labelBtn="💬 Pre-cierre → Generar WhatsApp"
           modalidad={modalidadPRE}
+          cajasCombo={cajasCombo20(items)}
+          soloCombo20={soloCombos20(items)}
         />
       )}
 
@@ -1490,6 +1533,7 @@ const DetalleDEFCombo = ({ itemPRE, onConfirm }) => {
   const [fragSel, setFragSel]           = useState('');
   const [cantFrag, setCantFrag]         = useState('');
   const es200 = cantidad === 200;
+  const c20 = esCombo20(itemPRE); // Combo 20 Promocional: sin canje de lavandina, desodorante 200 cc con 1 fragancia
   const maxFrag = es200 ? 4 : 1;
   const litFragUsados = fragancias.reduce((s,f)=>s+f.cantidad,0);
   const litFragResto = cantidad - litFragUsados;
@@ -1675,6 +1719,12 @@ const DetalleDEFCombo = ({ itemPRE, onConfirm }) => {
             <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Lavandina {cantidad}lts</div>
             <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)' }}>Incluye activador en polvo + activador líquido amarillo</div>
           </div>
+          {c20 ? (
+            <>
+              <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)', marginBottom:12, textAlign:'center' }}>En el Combo 20 Promocional la lavandina no se canjea.</div>
+              <button onClick={()=>{ setCanje(false); setFragancias([]); setPaso('fragancias'); }} className="sel-btn" style={s.bP}>Siguiente → Desodorante de piso</button>
+            </>
+          ) : (<>
           <div style={s.card}>
             <div style={s.cTit}>🔄 Canjear lavandina por desodorante?</div>
             <div style={{ fontSize:13, color:'rgba(255,255,255,0.6)', marginBottom:14 }}>
@@ -1693,6 +1743,7 @@ const DetalleDEFCombo = ({ itemPRE, onConfirm }) => {
           {canje !== null && (
             <button onClick={()=>setPaso('fragancias')} className="sel-btn" style={s.bP}>Siguiente → Desodorante de piso</button>
           )}
+          </>)}
         </div>
       )}
 
@@ -1701,8 +1752,26 @@ const DetalleDEFCombo = ({ itemPRE, onConfirm }) => {
         <div>
           <button onClick={()=>setPaso('lavandina')} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.75)', border:'1px solid rgba(255,255,255,0.14)', borderRadius:8, fontWeight:600, fontSize:12, cursor:'pointer', marginBottom:14 }}>← Volver a Lavandina</button>
           <div style={s.cTit}>Paso 5 · Desodorante de piso</div>
+          {c20 && (
+            <div>
+              <div style={{...s.card, background:'rgba(249,115,22,0.1)', border:'1px solid rgba(249,115,22,0.25)', marginBottom:12, fontSize:13}}>
+                1 unidad de <strong>200 cc</strong> (rinde 20 Lts) · elegí <strong>una</strong> fragancia
+              </div>
+              <G cols={2} gap={8} style={{ marginBottom:12 }}>
+                {FRAGANCIAS.map(f=>(
+                  <button key={f.label} onClick={()=>setFragSel(f.label)}
+                    className="sel-btn" style={{ padding:'9px 12px', borderRadius:10, border:fragSel===f.label?`2px solid ${C.na}`:'1px solid rgba(255,255,255,0.14)', background:fragSel===f.label?'rgba(249,115,22,0.2)':'rgba(255,255,255,0.06)', color:'#fff', fontWeight:600, fontSize:12, cursor:'pointer', display:'flex', gap:6, alignItems:'center' }}>
+                    {f.icon} {f.label}
+                  </button>
+                ))}
+              </G>
+              {fragSel && (
+                <button onClick={()=>onConfirm({ ...itemPRE, jabon_color:jabonColor, jabon_divs:jabonDivs, suav_color:suavColor, suav_divs:suavDivs, det_color:detColor, det_divs:detDivs, fragancias_piso:[{ fragancia:fragSel, cantidad:20 }], canje_lavandina:false, fragancias_canje:[] })} style={{...s.bP,marginTop:8}}>✓ Confirmar combo</button>
+              )}
+            </div>
+          )}
           {/* litFragTotal = litros base del combo + litros de canje si eligió canjear */}
-          {(() => {
+          {!c20 && (() => {
             const litBase = cantidad;
             const litCanje = canje ? cantidad : 0;
             const litTotal = litBase + litCanje;
@@ -1804,6 +1873,8 @@ function imprimirPedido(pedido, solo=null) {
     // Datos del cliente escapados: un nombre como "Kiosco <Juan> & Cía" rompía el HTML impreso
     const cliente = Object.fromEntries(Object.entries(pedido.cliente || {}).map(([k, v]) => [k, typeof v === 'string' ? lpEsc(v) : v]));
     const { baldes: dBaldes, cajas: dCajas } = desgloseEnvases(env, ex); // conviven baldes (con cargo) y cajas (sin cargo)
+    const dC20 = cajasCombo20(items);       // cajas del Combo 20 Promocional (sin cargo, 1 por combo)
+    const soloC20 = soloCombos20(items);    // pedido solo con Combos 20 → no corresponde sin envase / en bolsas
     const esR = ex.retiraLocal; const esI = ex.esInterior;
     const bultos = ex.bultos || 1;
     const BULTO_WORDS = ['','UN BULTO','DOS BULTOS','TRES BULTOS','CUATRO BULTOS','CINCO BULTOS','SEIS BULTOS','SIETE BULTOS','OCHO BULTOS','NUEVE BULTOS','DIEZ BULTOS'];
@@ -1919,10 +1990,11 @@ function imprimirPedido(pedido, solo=null) {
           subRows.push(`<span style="background:#fff7ed;color:#f97316;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:700;">⚠️ Canje → Desodorante${fr?' ('+fr+')':''}</span>`);
         } else {
           const fr = (item.fragancias_piso||[]).map(f=>f.fragancia+' '+f.cantidad+'lts').join(' + ');
-          const lavLabel = item.cantidad===200 ? '200 Lts (2 × 100)' : '50 Lts';
+          const lavLabel = item.cantidad===200 ? '200 Lts (2 × 100)' : `${item.cantidad||50} Lts`;
           subRows.push(`<span style="background:#f0fdf4;color:#166534;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:700;">LAVANDINA: ${lavLabel}</span>`);
-          if (fr) subRows.push(`<span style="font-size:10px;color:#475569;">Desodorante: ${fr}</span>`);
+          if (fr) subRows.push(`<span style="font-size:10px;color:#475569;">Desodorante: ${fr}${esCombo20(item)?' (200 cc)':''}</span>`);
         }
+        if (esCombo20(item)) subRows.push(`<span style="background:#e0f2fe;color:#0284c7;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:700;">📦 En caja sin cargo</span>`);
         if (subRows.length>0) rows += `<tr><td colspan="2" style="padding:2px 4px 6px 22px;line-height:1.8;">${subRows.join(' ')}</td></tr>`;
             } else {
         // Ítems individuales: chips coloreados igual que combo
@@ -1961,7 +2033,12 @@ function imprimirPedido(pedido, solo=null) {
         <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0284c7;font-weight:900;margin-right:6px;">▸</span><strong>${precioCajaUnit>0 ? `📦 CAJAS (${dCajas}) × ${fmtDoc(precioCajaUnit)}` : `📦 EN CAJAS SIN CARGO (${dCajas} CAJA${dCajas!==1?'S':''})`}</strong></td>
         <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">${precioCajaUnit>0 ? fmtDoc(dCajas*precioCajaUnit) : 'SIN CARGO'}</td>
       </tr>`] : []),
-      ...(dBaldes===0 && dCajas===0 ? [`${divRow}
+      ...(dC20>0 ? [`${divRow}
+      <tr>
+        <td style="padding:8px 4px 2px;font-size:13px;"><span style="color:#0284c7;font-weight:900;margin-right:6px;">▸</span><strong>📦 CAJA COMBO 20 (${dC20} CAJA${dC20!==1?'S':''})</strong></td>
+        <td style="padding:8px 4px 2px;font-size:13px;text-align:right;font-weight:700;">SIN CARGO</td>
+      </tr>`] : []),
+      ...(dBaldes===0 && dCajas===0 && !soloC20 ? [`${divRow}
       <tr>
         <td colspan="2" style="padding:8px 4px 2px;font-size:12px;color:#b45309;font-weight:800;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS (SIN CARGO)</td>
       </tr>`] : []),
@@ -2056,7 +2133,7 @@ function imprimirPedido(pedido, solo=null) {
             prodBody += jabDivs.map((d,i)=>`<span style="font-size:9px;font-weight:700;color:#64748b;">F${i+1}:</span> ${chipColor(d.color,50)} `).join('');
             prodBody += '</div>';
           } else if (item.jabon_color) {
-            prodBody += `<div style="margin-top:5px;"><span style="font-size:10px;font-weight:900;color:#0d5c3a;text-transform:uppercase;">&#129704; JABÓN ${item.cantidad} Lts — unificado:</span> ${chipColor(item.jabon_color,item.cantidad)}</div>`;
+            prodBody += `<div style="margin-top:5px;"><span style="font-size:10px;font-weight:900;color:#0d5c3a;text-transform:uppercase;">&#129704; JABÓN ${esCombo20(item)?'PREMIUM ':''}${item.cantidad} Lts${esCombo20(item)?'':' — unificado'}:</span> ${chipColor(item.jabon_color,item.cantidad)}</div>`;
           }
           // SUAVIZANTE
           if (suavDivs.length>1) {
@@ -2064,7 +2141,7 @@ function imprimirPedido(pedido, solo=null) {
             prodBody += suavDivs.map((d,i)=>`<span style="font-size:9px;font-weight:700;color:#64748b;">F${i+1}:</span> ${chipColor(d.color,50)} `).join('');
             prodBody += '</div>';
           } else if (item.suav_color) {
-            prodBody += `<div style="margin-top:4px;"><span style="font-size:10px;font-weight:900;color:#0d5c3a;text-transform:uppercase;">&#127800; SUAVIZANTE ${item.cantidad} Lts — unificado:</span> ${chipColor(item.suav_color,item.cantidad)}</div>`;
+            prodBody += `<div style="margin-top:4px;"><span style="font-size:10px;font-weight:900;color:#0d5c3a;text-transform:uppercase;">&#127800; SUAVIZANTE ${esCombo20(item)?'PREMIUM ':''}${item.cantidad} Lts${esCombo20(item)?'':' — unificado'}:</span> ${chipColor(item.suav_color,item.cantidad)}</div>`;
           }
           // DETERGENTE
           if (detDivs.length>1) {
@@ -2072,7 +2149,7 @@ function imprimirPedido(pedido, solo=null) {
             prodBody += detDivs.map((d,i)=>`<span style="font-size:9px;font-weight:700;color:#64748b;">F${i+1}:</span> ${chipColor(d.color,50)} `).join('');
             prodBody += '</div>';
           } else if (item.det_color) {
-            prodBody += `<div style="margin-top:4px;"><span style="font-size:10px;font-weight:900;color:#0d5c3a;text-transform:uppercase;">&#129749; DETERGENTE ${item.cantidad} Lts — unificado:</span> ${chipColor(item.det_color,item.cantidad)}</div>`;
+            prodBody += `<div style="margin-top:4px;"><span style="font-size:10px;font-weight:900;color:#0d5c3a;text-transform:uppercase;">&#129749; DETERGENTE ${esCombo20(item)?'PREMIUM ':''}${item.cantidad} Lts${esCombo20(item)?'':' — unificado'}:</span> ${chipColor(item.det_color,item.cantidad)}</div>`;
           }
           // LAVANDINA / CANJE
           if (item.canje_lavandina) {
@@ -2080,10 +2157,11 @@ function imprimirPedido(pedido, solo=null) {
             prodBody += `<div style="margin-top:5px;padding:4px 8px;background:#fff7ed;border:1px solid #f97316;border-radius:6px;font-size:10px;font-weight:700;color:#f97316;">&#9888;&#65039; CANJE: Sin lavandina → Desodorante piso${fr}</div>`;
           } else {
             const fr = (item.fragancias_piso||[]).map(f=>f.fragancia+' '+f.cantidad+' Lts').join(' + ');
-            if (fr) prodBody += `<div style="margin-top:4px;"><span style="font-size:10px;font-weight:900;color:#0d5c3a;text-transform:uppercase;">&#128167; Desodorante piso:</span> <span style="font-size:11px;font-weight:700;">${fr}</span></div>`;
-            const lavQty = item.cantidad===200 ? '200 Lts (2 × 100)' : '50 Lts';
+            if (fr) prodBody += `<div style="margin-top:4px;"><span style="font-size:10px;font-weight:900;color:#0d5c3a;text-transform:uppercase;">&#128167; Desodorante piso${esCombo20(item)?' 20 Lts (200 cc)':''}:</span> <span style="font-size:11px;font-weight:700;">${fr}</span></div>`;
+            const lavQty = item.cantidad===200 ? '200 Lts (2 × 100)' : `${item.cantidad||50} Lts`;
             prodBody += `<div style="margin-top:3px;"><span style="font-size:10px;font-weight:900;color:#0d5c3a;text-transform:uppercase;">&#129531; LAVANDINA:</span> <span style="font-size:11px;font-weight:700;">${lavQty}</span></div>`;
           }
+          if (esCombo20(item)) prodBody += `<div style="margin-top:5px;padding:4px 8px;background:#e0f2fe;border:1px solid #0284c7;border-radius:6px;font-size:10px;font-weight:800;color:#0284c7;">📦 VA TODO EN UNA CAJA (SIN CARGO)</div>`;
         } else {
           // PRODUCTO INDIVIDUAL
           if (divs.filter(d=>d.color).length>1) {
@@ -2114,7 +2192,7 @@ function imprimirPedido(pedido, solo=null) {
         </div>`;
       }).join('')}
       ${(ex.agregados||[]).length>0?`<div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;margin:10px 0 5px;border-top:2px solid #e2e8f0;padding-top:8px;">⭐ Productos Extra</div>${ex.agregados.map(a=>`<div style="padding:8px 10px;border-left:4px solid #0d5c3a;background:#f8fafc;margin-bottom:7px;border-radius:4px;display:flex;justify-content:space-between;align-items:center;"><div><div style="font-weight:900;font-size:13px;color:#0d5c3a;text-transform:uppercase;">${lpEsc(lpTit(a))}</div>${a.listaId ? lpSubHtml(a, { precio:false, grande:true }) : ''}</div><div style="font-size:13px;font-weight:700;color:#0d5c3a;">${a.listaId && !(parseFloat(a.precio) > 0) ? 'SIN CARGO' : fmtDoc(parseFloat(a.precio)||0)}</div></div>`).join('')}`:''}
-      ${dBaldes>0?`<div style="padding:8px 10px;border-left:4px solid #f97316;background:#fff7ed;margin-bottom:7px;border-radius:4px;font-weight:800;">🪣 Envases vacíos (baldes): ${dBaldes}</div>`:''}${dCajas>0?`<div style="padding:8px 10px;border-left:4px solid #0284c7;background:#e0f2fe;margin-bottom:7px;border-radius:4px;font-weight:800;">📦 ${precioCajaDe(ex)>0?'EN CAJAS':'EN CAJAS SIN CARGO'}: ${dCajas} caja${dCajas!==1?'s':''}</div>`:''}${dBaldes===0&&dCajas===0?`<div style="padding:8px 10px;border-left:4px solid #b45309;background:#fefce8;margin-bottom:7px;border-radius:6px;font-size:12px;font-weight:800;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:''}
+      ${dBaldes>0?`<div style="padding:8px 10px;border-left:4px solid #f97316;background:#fff7ed;margin-bottom:7px;border-radius:4px;font-weight:800;">🪣 Envases vacíos (baldes): ${dBaldes}</div>`:''}${dCajas>0?`<div style="padding:8px 10px;border-left:4px solid #0284c7;background:#e0f2fe;margin-bottom:7px;border-radius:4px;font-weight:800;">📦 ${precioCajaDe(ex)>0?'EN CAJAS':'EN CAJAS SIN CARGO'}: ${dCajas} caja${dCajas!==1?'s':''}</div>`:''}${dC20>0?`<div style="padding:8px 10px;border-left:4px solid #0284c7;background:#e0f2fe;margin-bottom:7px;border-radius:4px;font-weight:800;">📦 CAJAS COMBO 20 (SIN CARGO): ${dC20} caja${dC20!==1?'s':''}</div>`:''}${dBaldes===0&&dCajas===0&&!soloC20?`<div style="padding:8px 10px;border-left:4px solid #b45309;background:#fefce8;margin-bottom:7px;border-radius:6px;font-size:12px;font-weight:800;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:''}
       <div style="margin-top:10px;padding:8px 12px;background:#e0f2fe;border-left:4px solid #0284c7;border-radius:6px;font-size:11px;">
         <span style="font-weight:900;color:#0284c7;">📦 ENTREGA:</span>
         <span style="font-weight:700;margin-left:6px;">${esR?'RETIRA EN PLANTA':esI?'INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI':'ENVÍO FLEX AMBA — '+( cliente.localidad||ex.localidad||'')}</span>
@@ -2165,7 +2243,9 @@ function imprimirPedido(pedido, solo=null) {
       </div>
       ${dCajas>0?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #0284c7;border-radius:6px;text-align:center;">
         <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#0284c7;line-height:1.5;">📦 ${precioCajaDe(ex)>0?'EN CAJAS':'EN CAJAS SIN CARGO'}: ${dCajas} CAJA${dCajas!==1?'S':''}${dBaldes>0?` + ${dBaldes} BALDE${dBaldes!==1?'S':''}`:''}</div>
-      </div>`:''}${dBaldes===0&&dCajas===0?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #b45309;border-radius:6px;text-align:center;">
+      </div>`:''}${dC20>0?`<div style="margin-top:3mm;padding:6px 10px;border:2px solid #0284c7;border-radius:6px;text-align:center;">
+        <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#0284c7;line-height:1.5;">📦 COMBO 20 EN CAJA: ${dC20} CAJA${dC20!==1?'S':''}</div>
+      </div>`:''}${dBaldes===0&&dCajas===0&&!soloC20?`<div style="margin-top:4mm;padding:6px 10px;border:2px solid #b45309;border-radius:6px;text-align:center;">
         <div style="font-size:11px;font-weight:900;text-transform:uppercase;color:#b45309;line-height:1.5;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS<br/>POR ELECCIÓN DEL CLIENTE.</div>
       </div>`:''}
       ${esR?`<div style="margin-top:3mm;border-top:2px dashed #0d5c3a;padding-top:2.5mm;">
@@ -2220,10 +2300,11 @@ function imprimirPedido(pedido, solo=null) {
           html+=`<div style="margin-left:28px;margin-top:3px;font-size:10px;font-weight:700;color:#f97316;">⚠️ CANJE → Desodorante${fr}</div>`;
         } else {
           const fr = (item.fragancias_piso||[]).length?(item.fragancias_piso.map(f=>f.fragancia+' '+f.cantidad+'lts').join(' + ')):'';
-          if (fr) html+=`<div style="margin-left:28px;margin-top:3px;font-size:10px;color:#475569;"><span style="font-weight:700;">Desodorante:</span> ${fr}</div>`;
+          if (fr) html+=`<div style="margin-left:28px;margin-top:3px;font-size:10px;color:#475569;"><span style="font-weight:700;">Desodorante:</span> ${fr}${esCombo20(item)?' (200 cc)':''}</div>`;
         }
+        if (esCombo20(item)) html+=`<div style="margin-left:28px;margin-top:3px;font-size:10px;font-weight:800;color:#0284c7;">📦 Todo dentro de su caja (sin cargo)</div>`;
         // LAVANDINA combo - mostrar cantidad real
-        const lavQtyCheck = item.cantidad===200 ? '200 Lts (2 × 100)' : '50 Lts';
+        const lavQtyCheck = item.cantidad===200 ? '200 Lts (2 × 100)' : `${item.cantidad||50} Lts`;
         if (!item.canje_lavandina) html+=`<div style="margin-left:28px;margin-top:3px;font-size:10px;color:#475569;"><span style="font-weight:700;">LAVANDINA:</span> ${lavQtyCheck}</div>`;
         html+='</div>';
         return html;
@@ -2270,7 +2351,7 @@ function imprimirPedido(pedido, solo=null) {
             // 50lts: 1 activador
             rows.push(`<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
               <div style="width:18px;height:18px;border:2px solid #0d5c3a;border-radius:3px;flex-shrink:0;"></div>
-              <div style="font-weight:700;">ACTIVADOR EN POLVO PARA ${label} × 50 Lts</div>
+              <div style="font-weight:700;">ACTIVADOR EN POLVO PARA ${label} × ${cantidad===20?20:50} Lts</div>
             </div>`);
           }
         };
@@ -2297,6 +2378,8 @@ function imprimirPedido(pedido, solo=null) {
           if (!item.canje_lavandina) {
             if (item.cantidad === 200) {
               rows.push(`<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;"><div style="width:18px;height:18px;border:2px solid #0d5c3a;border-radius:3px;flex-shrink:0;"></div><div style="font-weight:700;">ACTIVADOR PARA LAVANDINA (COMBO) — 2 Botellas para 100 Litros</div></div>`);
+            } else if (esCombo20(item)) {
+              rows.push(`<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;"><div style="width:18px;height:18px;border:2px solid #0d5c3a;border-radius:3px;flex-shrink:0;"></div><div style="font-weight:700;">ACTIVADOR PARA LAVANDINA (COMBO 20) — para 20 Litros</div></div>`);
             } else {
               rows.push(`<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;"><div style="width:18px;height:18px;border:2px solid #0d5c3a;border-radius:3px;flex-shrink:0;"></div><div style="font-weight:700;">ACTIVADOR PARA LAVANDINA (COMBO) — 1 Botella para 50 Litros</div></div>`);
             }
@@ -2337,7 +2420,14 @@ function imprimirPedido(pedido, solo=null) {
           <div style="width:18px;height:18px;border:2px solid #0284c7;border-radius:3px;flex-shrink:0;"></div>
           <span>📦 <strong>CAJA ${i+1} de ${dCajas}</strong>${precioCajaDe(ex)>0?'':' — SIN CARGO'}</span>
         </div>`).join('')}`:'',
-      (dBaldes===0&&dCajas===0)?`\n      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:4px;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:'',
+      dC20>0?`
+      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:6px;color:#0284c7;">📦 Cajas Combo 20 (sin cargo)</div>
+      ${Array.from({length:dC20}).map((_,i)=>`
+        <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">
+          <div style="width:18px;height:18px;border:2px solid #0284c7;border-radius:3px;flex-shrink:0;"></div>
+          <span>📦 <strong>CAJA COMBO 20 · ${i+1} de ${dC20}</strong> — SIN CARGO</span>
+        </div>`).join('')}`:'',
+      (dBaldes===0&&dCajas===0&&!soloC20)?`\n      <div style="font-weight:800;font-size:11px;text-transform:uppercase;margin-top:12px;margin-bottom:4px;color:#b45309;">🛍️ SIN ENVASE — SE ENTREGA EN BOLSAS</div>`:'',
     ].join('');
 
     const tipoEnvioCheck = esR ? 'RETIRA EN PLANTA' : esI ? 'INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI' : `ENVÍO FLEX AMBA — ${cliente.localidad||ex.localidad||''}`;
@@ -2555,7 +2645,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
         ts: pedidoFinal ? pedidoFinal.ts : Date.now(),
         cliente, items:carrito,
         envases:dEnv.baldes,
-        extras:{ ...extrasUsados, bultos: Math.max(extrasUsados.bultos || 1, dEnv.baldes + dEnv.cajas), agregados:agregadosHeredados, cajas:dEnv.cajas, precioCaja: precioCajaDEF, precioBalde: precioBaldeDEF },
+        extras:{ ...extrasUsados, bultos: Math.max(extrasUsados.bultos || 1, dEnv.baldes + dEnv.cajas + cajasCombo20(carrito)), agregados:agregadosHeredados, cajas:dEnv.cajas, precioCaja: precioCajaDEF, precioBalde: precioBaldeDEF },
         totales:{ productos:totalProd, envases:totalEnv, agregados:totalAgr, envio:totalEnvio, total },
         zonaEnvio:zona, estado: pedidoFinal ? pedidoFinal.estado : 'pendiente',
         creadoPor: pedidoFinal ? pedidoFinal.creadoPor : (usuarioActual?.email || null)
@@ -2803,7 +2893,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
               <div style={{ marginBottom:20 }}>
                 <label style={{ fontSize:12, fontWeight:700, color:'rgba(255,255,255,0.7)', display:'block', marginBottom:6 }}>Cantidad de bultos</label>
                 <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                  <button onClick={()=>setExtras(e=>{ const d=desgloseEnvases(preData?.envases ?? 0, preData?.extras); return {...e, bultos:Math.max(Math.max(1, d.baldes+d.cajas), (e.bultos||1)-1)}; })} style={{ width:36, height:36, borderRadius:8, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>−</button>
+                  <button onClick={()=>setExtras(e=>{ const d=desgloseEnvases(preData?.envases ?? 0, preData?.extras); return {...e, bultos:Math.max(Math.max(1, d.baldes+d.cajas+cajasCombo20(preData?.items)), (e.bultos||1)-1)}; })} style={{ width:36, height:36, borderRadius:8, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>−</button>
                   <span style={{ fontSize:22, fontWeight:900, minWidth:30, textAlign:'center' }}>{extras.bultos || 1}</span>
                   <button onClick={()=>setExtras(e=>({...e,bultos:(e.bultos||1)+1}))} style={{ width:36, height:36, borderRadius:8, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>+</button>
                   <span style={{ fontSize:12, color:'rgba(255,255,255,0.45)' }}>bulto{(extras.bultos||1)!==1?'s':''}</span>
@@ -2883,11 +2973,12 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
                   const frc = (it.fragancias_canje||[]).map(f=>`${f.fragancia} ${f.cantidad}Lts`).join(' + ');
                   lineas.push(`  ⚠️ CANJE: Sin lavandina → Desodorante de piso${frc?' ('+frc+')':''}`);
                 } else {
-                  const lavLabel = it.cantidad===200 ? '200 Lts (2 × 100)' : '50 Lts';
+                  const lavLabel = it.cantidad===200 ? '200 Lts (2 × 100)' : `${it.cantidad||50} Lts`;
                   lineas.push(`  🧴 Lavandina: ${lavLabel}`);
                   const frP = (it.fragancias_piso||[]).map(f=>`${f.fragancia} ${f.cantidad}Lts`).join(' + ');
-                  if (frP) lineas.push(`  🌿 Desodorante piso: ${frP}`);
+                  if (frP) lineas.push(`  🌿 Desodorante piso: ${frP}${esCombo20(it)?' (200 cc)':''}`);
                 }
+                if (esCombo20(it)) lineas.push(`  📦 Va en caja sin cargo`);
               } else {
                 // Producto individual
                 const divs = it.divisiones||[];
@@ -2947,7 +3038,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
               `━━━━━━━━━━━━━━━━`,
               ...lineasProductos,
               ...(ex.agregados||[]).map(a=>`• ${a.nombre} — *${precioAgrTxt(a)}*`),
-              ...lineasEnvasesWA(env, ex),
+              ...lineasEnvasesWA(env, ex, items),
               ``,
               `━━━━━━━━━━━━━━━━`,
               `📦 *MODALIDAD DE ENTREGA*`,
@@ -3097,11 +3188,12 @@ _Doméstico · Moreno, Bs. As._`
         const frc = (it.fragancias_canje||[]).map(f=>`${f.fragancia} ${f.cantidad}Lts`).join(' + ');
         lineas.push(`  ⚠️ CANJE: Sin lavandina → Desodorante de piso${frc?' ('+frc+')':''}`);
       } else {
-        const lavLabel = it.cantidad===200 ? '200 Lts (2 × 100)' : '50 Lts';
+        const lavLabel = it.cantidad===200 ? '200 Lts (2 × 100)' : `${it.cantidad||50} Lts`;
         lineas.push(`  🧴 Lavandina: ${lavLabel}`);
         const frP = (it.fragancias_piso||[]).map(f=>`${f.fragancia} ${f.cantidad}Lts`).join(' + ');
-        if (frP) lineas.push(`  🌿 Desodorante piso: ${frP}`);
+        if (frP) lineas.push(`  🌿 Desodorante piso: ${frP}${esCombo20(it)?' (200 cc)':''}`);
       }
+      if (esCombo20(it)) lineas.push(`  📦 Va en caja sin cargo`);
     } else {
       const divs = it.divisiones||[];
       if (it.tipo==='desodorante') {
@@ -3148,7 +3240,7 @@ _Doméstico · Moreno, Bs. As._`
     ``,`━━━━━━━━━━━━━━━━`,`🛒 *PRODUCTOS Y DETALLE*`,`━━━━━━━━━━━━━━━━`,
     ...lineasProductos,
     ...(ex.agregados||[]).map(a=>`• ${a.nombre} — *${precioAgrTxt(a)}*`),
-    ...lineasEnvasesWA(env, ex),
+    ...lineasEnvasesWA(env, ex, items),
     ``,`━━━━━━━━━━━━━━━━`,`📦 *MODALIDAD DE ENTREGA*`,
     ex.retiraLocal?`🏪 *RETIRA EN PLANTA* (Moreno, Bs. As.)`:
       ex.esInterior?`🚚 *INTERIOR DEL PAÍS — VÍA CARGO / ANDREANI* _(flete paga el cliente)_`:
@@ -3229,7 +3321,8 @@ _Doméstico · Moreno, Bs. As._`
         {(ex.agregados||[]).map((a,i) => <div key={i} style={{ fontSize:13 }}>• {a.nombre} — <span style={{ color:'#f97316' }}>{precioAgrTxt(a)}</span></div>)}
         {desgloseEnvases(env,ex).baldes>0 && <div style={{ fontSize:13, marginBottom:4 }}>🪣 Baldes ({desgloseEnvases(env,ex).baldes}) — <span style={{ color:'#f97316' }}>{fmt((tot.envases||0) - desgloseEnvases(env,ex).cajas*precioCajaDe(ex))}</span></div>}
         {desgloseEnvases(env,ex).cajas>0 && <div style={{ fontSize:13, marginBottom:4 }}>{precioCajaDe(ex)>0 ? <>📦 Cajas ({desgloseEnvases(env,ex).cajas}) — <span style={{ color:'#f97316' }}>{fmt(desgloseEnvases(env,ex).cajas*precioCajaDe(ex))}</span></> : <>📦 En cajas sin cargo ({desgloseEnvases(env,ex).cajas})</>}</div>}
-        {desgloseEnvases(env,ex).baldes===0 && desgloseEnvases(env,ex).cajas===0 && <div style={{ fontSize:12, color:'rgba(255,200,0,0.7)' }}>🛍️ Sin envase — se entrega en bolsas</div>}
+        {cajasCombo20(items)>0 && <div style={{ fontSize:13, marginBottom:4 }}>📦 Combo 20 en caja — <span style={{ color:'#4ade80' }}>sin cargo ({cajasCombo20(items)})</span></div>}
+        {desgloseEnvases(env,ex).baldes===0 && desgloseEnvases(env,ex).cajas===0 && !soloCombos20(items) && <div style={{ fontSize:12, color:'rgba(255,200,0,0.7)' }}>🛍️ Sin envase — se entrega en bolsas</div>}
       </div>
 
       {/* Entrega */}
@@ -3718,10 +3811,10 @@ const ModuloGestion = ({ onVolver }) => {
     const porCalidad = { Inicial: 0, Intermedia: 0, Premium: 0 };
     defs.forEach(p => (p.items || []).forEach(it => {
       const esCombo = it.tipoItem === 'combo' || it.tipo === 'combo';
-      const litros = (it.cantidad === 50 || it.cantidad === 200) ? it.cantidad : null;
+      const litros = (it.cantidad === 50 || it.cantidad === 200 || (esCombo && it.cantidad === 20)) ? it.cantidad : null;
       if (esCombo && litros) {
         const nProd = 3 + (it.canje_lavandina ? 0 : 1);
-        addProd(`Combo ${litros === 50 ? 'Chico' : 'Grande'}${it.calidad ? ' ' + it.calidad : ''}`, gNum(it.precio), litros * nProd, 1);
+        addProd(`${nombreComboCorto(litros)}${it.calidad ? ' ' + it.calidad : ''}`, gNum(it.precio), litros * nProd, 1);
         if (it.calidad && porCalidad[it.calidad] !== undefined) porCalidad[it.calidad] += gNum(it.precio);
       } else if (!esCombo && it.tipo && litros) {
         const nom = it.tipo.charAt(0).toUpperCase() + it.tipo.slice(1);
@@ -4499,7 +4592,7 @@ const mkCsv = (nombreArchivo, cabecera, filas) => {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 };
 const MK_DIAS = ['LUN','MAR','MIÉ','JUE','VIE','SÁB','DOM'];
-const mkItemsTxt = p => (p.items || []).map(it => it.tipoItem === 'combo' || it.tipo === 'combo' ? `Combo ${it.cantidad === 50 ? 'Chico' : 'Grande'} ${it.calidad || ''}`.trim()
+const mkItemsTxt = p => (p.items || []).map(it => it.tipoItem === 'combo' || it.tipo === 'combo' ? `${nombreComboCorto(it.cantidad)} ${it.calidad || ''}`.trim()
   : it.tipoItem === 'manual' ? String(it.nombre || 'Producto manual') : `${(it.tipo || '').charAt(0).toUpperCase() + (it.tipo || '').slice(1)} ${it.calidad || ''} ${it.cantidad ? it.cantidad + ' L' : ''}`.replace(/\s+/g, ' ').trim()).join(' · ');
 
 // Métricas de un conjunto de pedidos (se usa para el total y para cada usuario en "Comparar")
@@ -4606,13 +4699,13 @@ const ModuloMarketing = ({ esAdmin = false }) => {
     const provArr = Object.entries(prov).map(([k, v]) => ({ nombre: k, ...v })).sort((a, b) => b.n - a.n);
 
     // Productos
-    const prod = {}; const porCal = { Inicial: 0, Intermedia: 0, Premium: 0 }; const porFmt = { 50: 0, 200: 0 }; let fCombo = 0, fIndiv = 0, fManual = 0, litros = 0;
+    const prod = {}; const porCal = { Inicial: 0, Intermedia: 0, Premium: 0 }; const porFmt = { 20: 0, 50: 0, 200: 0 }; let fCombo = 0, fIndiv = 0, fManual = 0, litros = 0;
     const add = (k, f, u, l) => { if (!prod[k]) prod[k] = { f: 0, u: 0, l: 0 }; prod[k].f += f; prod[k].u += u; prod[k].l += l; };
     defs.forEach(p => (p.items || []).forEach(it => {
       const esCombo = it.tipoItem === 'combo' || it.tipo === 'combo';
-      const lt = (it.cantidad === 50 || it.cantidad === 200) ? it.cantidad : null;
+      const lt = (it.cantidad === 50 || it.cantidad === 200 || (esCombo && it.cantidad === 20)) ? it.cantidad : null;
       const pr = gNum(it.precio);
-      if (esCombo && lt) { const lts = lt * 5; add(`Combo ${lt === 50 ? 'Chico' : 'Grande'}${it.calidad ? ' ' + it.calidad : ''}`, pr, 1, lts); fCombo += pr; porFmt[lt] += pr; litros += lts; if (porCal[it.calidad] !== undefined) porCal[it.calidad] += pr; }
+      if (esCombo && lt) { const lts = lt * 5; add(`${nombreComboCorto(lt)}${it.calidad ? ' ' + it.calidad : ''}`, pr, 1, lts); fCombo += pr; porFmt[lt] += pr; litros += lts; if (porCal[it.calidad] !== undefined) porCal[it.calidad] += pr; }
       else if (!esCombo && it.tipo && lt) { const nom = it.tipo.charAt(0).toUpperCase() + it.tipo.slice(1); add(`${nom}${it.calidad ? ' ' + it.calidad : ''} ${lt} L`, pr, 1, lt); fIndiv += pr; porFmt[lt] += pr; litros += lt; if (porCal[it.calidad] !== undefined) porCal[it.calidad] += pr; }
       else if (it.tipoItem === 'manual' && it.nombre) { add(String(it.listaId && it.nombreBase ? it.nombreBase : it.nombre).trim(), pr, it.listaId && it.unidad === 'u' ? (Number(it.cant) || 1) : 1, 0); fManual += pr; }
     }));
@@ -5372,7 +5465,7 @@ const ModuloMarketing = ({ esAdmin = false }) => {
 
       {/* ═══ PRODUCTOS ═══ */}
       {!cargando && rango && tab === 'productos' && (() => {
-        const totProd = m.fCombo + m.fIndiv + m.fManual; const totCal = m.porCal.Inicial + m.porCal.Intermedia + m.porCal.Premium; const totFmt = m.porFmt[50] + m.porFmt[200];
+        const totProd = m.fCombo + m.fIndiv + m.fManual; const totCal = m.porCal.Inicial + m.porCal.Intermedia + m.porCal.Premium; const totFmt = (m.porFmt[20] || 0) + m.porFmt[50] + m.porFmt[200];
         const maxP = m.topProd.length ? m.topProd[0].f : 1;
         return (
           <div>
@@ -5391,6 +5484,7 @@ const ModuloMarketing = ({ esAdmin = false }) => {
             <div style={card}>
               <div style={cTit}><span>📦 Formato y tipo</span></div>
               {totFmt === 0 ? vacio('Sin datos.') : <>
+                {(m.porFmt[20] || 0) > 0 && <Barra nombre="20 L (Combo 20)" pct={m.porFmt[20] / totFmt * 100} val={`${Math.round(m.porFmt[20] / totFmt * 100)}%`} color="#6ee7b7" />}
                 <Barra nombre="50 L" pct={m.porFmt[50] / totFmt * 100} val={`${Math.round(m.porFmt[50] / totFmt * 100)}%`} color="#34d399" />
                 <Barra nombre="200 L" pct={m.porFmt[200] / totFmt * 100} val={`${Math.round(m.porFmt[200] / totFmt * 100)}%`} color="#10b981" />
               </>}
@@ -6142,7 +6236,12 @@ const VG_COSTOS_BASE = {
   lavandina50: 646.69, desodorante50: 1499.02,
   bolsa: 171, etiquetaChica: 18, etiquetaGrande: 43, balde: 3800, caja: 400,
   comiDepo: 3.5, comiVentas: 5,
+  // Combo 20 Promocional (16/10/2026): costo de cada componente para 20 L. Vacío = sin cargar
+  // → la venta usa costo estimado 50% hasta que se carguen en ⚙️ Costos.
+  combo20: { jabon: '', suavizante: '', detergente: '', lavandina: '', desodorante: '' },
 };
+const VG_C20 = [['jabon','Jabón Premium 20 L'],['suavizante','Suavizante Premium 20 L'],['detergente','Detergente Premium 20 L'],['lavandina','Lavandina 20 L'],['desodorante','Desodorante piso 200 cc']];
+const vgC20Cargado = C => VG_C20.every(([k]) => C?.combo20?.[k] !== undefined && C.combo20[k] !== '' && C.combo20[k] !== null);
 const VG_TIPOS = [['jabon','Jabón'],['suavizante','Suavizante'],['detergente','Detergente']];
 const VG_CALS = ['Inicial','Intermedia','Premium'];
 const VG_BOLSAS = { jabon: { 50: 1, 200: 4 }, suavizante: { 50: 2, 200: 8 }, detergente: { 50: 1, 200: 4 } };
@@ -6167,6 +6266,16 @@ const vgCostoDEF = (p, C, costosManuales = {}) => {
     const t = it.cantidad === 200 ? 200 : 50;
     const pr = vgN(it.precio);
     if (it.tipoItem === 'manual') { manual('i' + idx, it.nombre || 'Producto manual', pr, '✍️', it); return; }
+    if (esCombo20(it)) {
+      // Sin costos cargados: se trata como producto manual (costo cargable por venta o estimado 50%)
+      if (!vgC20Cargado(C)) { manual('i' + idx, 'Combo 20 Promocional (cargá sus costos en ⚙️ Costos)', pr, '📦', it); return; }
+      const comp = VG_C20.reduce((a, [k]) => a + vgN(C.combo20[k]), 0);
+      // Insumos: 1 bolsa por pasta (3), etiquetas igual que el combo de 50 (3 por producto = 15 chicas + 1 grande), caja sin cargo
+      const bolsas = 3, chicas = 15, grandes = 1;
+      const tot = comp + bolsas * C.bolsa + chicas * C.etiquetaChica + grandes * C.etiquetaGrande + vgN(C.caja);
+      add('Combo 20 Promocional Premium', pr, tot, `5 productos ${vgFmt(comp)} · ${bolsas} bolsas · ${chicas} etiq. chicas + 1 grande · caja`);
+      return;
+    }
     if (esCombo) {
       const cal = it.calidad; let pasta = 0;
       VG_TIPOS.forEach(([k]) => { pasta += vgN(C.pasta?.[k]?.[t]?.[cal]); });
@@ -6277,7 +6386,7 @@ const VgHold = ({ onDone, label = '✓ Mantené para marcar leída', ms = 1000 }
 // Editor de costos (crea una versión nueva vigente desde ahora; las ventas viejas conservan su costo)
 const VgEditorCostos = ({ actual, onGuardado, onCerrar }) => {
   const base = actual || VG_COSTOS_BASE;
-  const [c, setC] = useState(() => JSON.parse(JSON.stringify(base)));
+  const [c, setC] = useState(() => { const o = JSON.parse(JSON.stringify(base)); if (!o.combo20) o.combo20 = { ...VG_COSTOS_BASE.combo20 }; return o; });
   const [estado, setEstado] = useState(null);
   const inp = (val, onCh) => <input inputMode="decimal" value={val} onChange={e => onCh(e.target.value)} style={{ ...s.inp, padding:'9px 6px', fontSize:12.5, textAlign:'right', minWidth:0 }} />;
   const setP = (tipo, lt, cal, v) => setC(o => ({ ...o, pasta: { ...o.pasta, [tipo]: { ...o.pasta[tipo], [lt]: { ...o.pasta[tipo][lt], [cal]: v } } } }));
@@ -6285,6 +6394,8 @@ const VgEditorCostos = ({ actual, onGuardado, onCerrar }) => {
     const limpio = JSON.parse(JSON.stringify(c));
     VG_TIPOS.forEach(([k]) => [50, 200].forEach(lt => VG_CALS.forEach(cal => { limpio.pasta[k][lt][cal] = vgN(limpio.pasta[k][lt][cal]); })));
     ['lavandina50','desodorante50','bolsa','etiquetaChica','etiquetaGrande','balde','caja','comiDepo','comiVentas'].forEach(k => { limpio[k] = vgN(limpio[k]); });
+    // Combo 20: vacío queda vacío (= sin cargar); con valor se normaliza
+    limpio.combo20 = Object.fromEntries(VG_C20.map(([k]) => { const v = (c.combo20 || {})[k]; return [k, v === '' || v == null ? '' : vgN(v)]; }));
     setEstado('guardando');
     const { error } = await supaClient.from('costos_historial').insert({ vigente_desde: Date.now(), data: limpio });
     if (error) { setEstado('No se pudo guardar: ' + error.message); return; }
@@ -6315,6 +6426,15 @@ const VgEditorCostos = ({ actual, onGuardado, onCerrar }) => {
         <div style={{ display:'grid', gridTemplateColumns:'1fr 120px', gap:8, alignItems:'center' }}>
           {[['lavandina50','Lavandina (cada 50 L)'],['desodorante50','Desodorante piso (cada 50 L)'],['bolsa','Bolsa'],['etiquetaChica','Etiqueta chica'],['etiquetaGrande','Etiqueta grande'],['balde','Balde / envase suavizante'],['caja','Caja']].map(([k, l]) => (
             <React.Fragment key={k}><div style={lbl}>{l}</div>{inp(c[k], v => setC(o => ({ ...o, [k]: v })))}</React.Fragment>
+          ))}
+        </div>
+      </div>
+      <div style={s.card}>
+        <div style={s.cTit}>📦 Combo 20 Promocional · costo por componente</div>
+        <div style={{ fontSize:11.5, color:C.tx2, marginBottom:8 }}>Mientras falte alguno, las ventas del Combo 20 usan costo estimado 50%. Bolsas, etiquetas y caja se suman solas.</div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 120px', gap:8, alignItems:'center' }}>
+          {VG_C20.map(([k, l]) => (
+            <React.Fragment key={k}><div style={lbl}>{l}</div>{inp((c.combo20 || {})[k] ?? '', v => setC(o => ({ ...o, combo20: { ...(o.combo20 || {}), [k]: v } })))}</React.Fragment>
           ))}
         </div>
       </div>
@@ -6834,7 +6954,7 @@ const entResumen = (p) => {
     if (cl.dni) filas.push(['DNI', cl.dni]);
   }
   let bultos = ex.bultos;
-  if (!bultos) { try { bultos = minBultosDe(p.envases, ex); } catch { bultos = null; } }
+  if (!bultos) { try { bultos = minBultosDe(p.envases, ex, p.items); } catch { bultos = null; } }
   if (bultos) filas.push(['Bultos', String(bultos)]);
   return { mod, icono, titulo, filas };
 };

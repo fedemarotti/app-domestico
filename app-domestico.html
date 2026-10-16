@@ -6238,10 +6238,14 @@ const VG_COSTOS_BASE = {
   comiDepo: 3.5, comiVentas: 5,
   // Combo 20 Promocional (16/10/2026): costo de cada componente para 20 L. Vacío = sin cargar
   // → la venta usa costo estimado 50% hasta que se carguen en ⚙️ Costos.
-  combo20: { jabon: '', suavizante: '', detergente: '', lavandina: '', desodorante: '' },
+  // total = costo provisorio del combo completo (todo incluido: productos, bolsas, etiquetas y caja).
+  // 16/10/2026 Fede: "el costo aún no lo tengo exacto, ponele 16000". Se usa mientras no estén los 5 componentes.
+  combo20: { total: 16000, jabon: '', suavizante: '', detergente: '', lavandina: '', desodorante: '' },
 };
 const VG_C20 = [['jabon','Jabón Premium 20 L'],['suavizante','Suavizante Premium 20 L'],['detergente','Detergente Premium 20 L'],['lavandina','Lavandina 20 L'],['desodorante','Desodorante piso 200 cc']];
 const vgC20Cargado = C => VG_C20.every(([k]) => C?.combo20?.[k] !== undefined && C.combo20[k] !== '' && C.combo20[k] !== null);
+// Versiones de costos guardadas antes del Combo 20 no tienen `combo20`: usan el provisorio de VG_COSTOS_BASE.
+const vgC20 = C => (C && C.combo20) ? C.combo20 : VG_COSTOS_BASE.combo20;
 const VG_TIPOS = [['jabon','Jabón'],['suavizante','Suavizante'],['detergente','Detergente']];
 const VG_CALS = ['Inicial','Intermedia','Premium'];
 const VG_BOLSAS = { jabon: { 50: 1, 200: 4 }, suavizante: { 50: 2, 200: 8 }, detergente: { 50: 1, 200: 4 } };
@@ -6267,9 +6271,14 @@ const vgCostoDEF = (p, C, costosManuales = {}) => {
     const pr = vgN(it.precio);
     if (it.tipoItem === 'manual') { manual('i' + idx, it.nombre || 'Producto manual', pr, '✍️', it); return; }
     if (esCombo20(it)) {
-      // Sin costos cargados: se trata como producto manual (costo cargable por venta o estimado 50%)
-      if (!vgC20Cargado(C)) { manual('i' + idx, 'Combo 20 Promocional (cargá sus costos en ⚙️ Costos)', pr, '📦', it); return; }
-      const comp = VG_C20.reduce((a, [k]) => a + vgN(C.combo20[k]), 0);
+      const c20 = vgC20(C);
+      if (!vgC20Cargado({ combo20: c20 })) {
+        // Sin detalle por componente: costo total provisorio (todo incluido). Sin total: estimado 50% como producto manual.
+        const tot20 = vgN(c20.total);
+        if (tot20 > 0) { add('Combo 20 Promocional Premium', pr, tot20, `costo total provisorio ${vgFmt(tot20)} (todo incluido) · ajustalo en ⚙️ Costos`); return; }
+        manual('i' + idx, 'Combo 20 Promocional (cargá sus costos en ⚙️ Costos)', pr, '📦', it); return;
+      }
+      const comp = VG_C20.reduce((a, [k]) => a + vgN(c20[k]), 0);
       // Insumos: 1 bolsa por pasta (3), etiquetas igual que el combo de 50 (3 por producto = 15 chicas + 1 grande), caja sin cargo
       const bolsas = 3, chicas = 15, grandes = 1;
       const tot = comp + bolsas * C.bolsa + chicas * C.etiquetaChica + grandes * C.etiquetaGrande + vgN(C.caja);
@@ -6395,7 +6404,7 @@ const VgEditorCostos = ({ actual, onGuardado, onCerrar }) => {
     VG_TIPOS.forEach(([k]) => [50, 200].forEach(lt => VG_CALS.forEach(cal => { limpio.pasta[k][lt][cal] = vgN(limpio.pasta[k][lt][cal]); })));
     ['lavandina50','desodorante50','bolsa','etiquetaChica','etiquetaGrande','balde','caja','comiDepo','comiVentas'].forEach(k => { limpio[k] = vgN(limpio[k]); });
     // Combo 20: vacío queda vacío (= sin cargar); con valor se normaliza
-    limpio.combo20 = Object.fromEntries(VG_C20.map(([k]) => { const v = (c.combo20 || {})[k]; return [k, v === '' || v == null ? '' : vgN(v)]; }));
+    limpio.combo20 = Object.fromEntries([['total'], ...VG_C20].map(([k]) => { const v = (c.combo20 || {})[k]; return [k, v === '' || v == null ? '' : vgN(v)]; }));
     setEstado('guardando');
     const { error } = await supaClient.from('costos_historial').insert({ vigente_desde: Date.now(), data: limpio });
     if (error) { setEstado('No se pudo guardar: ' + error.message); return; }
@@ -6430,9 +6439,10 @@ const VgEditorCostos = ({ actual, onGuardado, onCerrar }) => {
         </div>
       </div>
       <div style={s.card}>
-        <div style={s.cTit}>📦 Combo 20 Promocional · costo por componente</div>
-        <div style={{ fontSize:11.5, color:C.tx2, marginBottom:8 }}>Mientras falte alguno, las ventas del Combo 20 usan costo estimado 50%. Bolsas, etiquetas y caja se suman solas.</div>
+        <div style={s.cTit}>📦 Combo 20 Promocional · costo</div>
+        <div style={{ fontSize:11.5, color:C.tx2, marginBottom:8 }}>Si cargás los 5 componentes se usa el detalle (bolsas, etiquetas y caja se suman solas). Si no, se usa el costo total provisorio (todo incluido).</div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 120px', gap:8, alignItems:'center' }}>
+          <div style={{ ...lbl, color:'#fff' }}>Costo total provisorio (todo incluido)</div>{inp((c.combo20 || {}).total ?? '', v => setC(o => ({ ...o, combo20: { ...(o.combo20 || {}), total: v } })))}
           {VG_C20.map(([k, l]) => (
             <React.Fragment key={k}><div style={lbl}>{l}</div>{inp((c.combo20 || {})[k] ?? '', v => setC(o => ({ ...o, combo20: { ...(o.combo20 || {}), [k]: v } })))}</React.Fragment>
           ))}

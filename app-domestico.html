@@ -1221,16 +1221,16 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
         <div>
           <button onClick={()=>setPaso('inicio')} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.75)', border:'1px solid rgba(255,255,255,0.14)', borderRadius:8, fontWeight:600, fontSize:12, cursor:'pointer', marginBottom:18 }}>← Atrás</button>
           <SH step="Combo · Tamaño" title="Tamaño del combo" />
-          {/* Tres combos del mismo tamaño en una fila (16/10/2026). El Combo 20 Promocional es solo Premium:
+          {/* Tres combos del mismo tamaño, uno debajo del otro (16/10/2026, pedido de Fede). El Combo 20 Promocional es solo Premium:
               se agrega directo, sin paso de calidad. */}
-          <div style={{ display:'flex', gap:10, justifyContent:'center' }}>
-            <button className="img-btn" onClick={()=>{ setCur({...cur,cantidad:50}); setPaso('c_cal'); }} style={{ position:'relative', flex:'1 1 0', minWidth:0, maxWidth:175, aspectRatio:'1 / 1', borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0 }}>
+          <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:14 }}>
+            <button className="img-btn" onClick={()=>{ setCur({...cur,cantidad:50}); setPaso('c_cal'); }} style={{ position:'relative', width:200, height:200, flexShrink:0, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0 }}>
               <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('BOTON COMBO CHICO .PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
             </button>
-            <button className="img-btn" onClick={()=>{ setCur({...cur,cantidad:200}); setPaso('c_cal'); }} style={{ position:'relative', flex:'1 1 0', minWidth:0, maxWidth:175, aspectRatio:'1 / 1', borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0 }}>
+            <button className="img-btn" onClick={()=>{ setCur({...cur,cantidad:200}); setPaso('c_cal'); }} style={{ position:'relative', width:200, height:200, flexShrink:0, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0 }}>
               <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('BOTON COMBO GRANDE.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
             </button>
-            <button className="img-btn" onClick={agregarCombo20} aria-label="Combo 20 Promocional" style={{ position:'relative', flex:'1 1 0', minWidth:0, maxWidth:175, aspectRatio:'1 / 1', borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0 }}>
+            <button className="img-btn" onClick={agregarCombo20} aria-label="Combo 20 Promocional" style={{ position:'relative', width:200, height:200, flexShrink:0, borderRadius:20, overflow:'hidden', border:'1px solid rgba(255,255,255,0.10)', background:'linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.028))', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 30px rgba(0,0,0,0.45)', cursor:'pointer', padding:0 }}>
               <div style={{ position:'absolute', inset:6, borderRadius:14, backgroundImage:"url('BOTON COMBO 20.PNG')", backgroundSize:'cover', backgroundPosition:'center' }} />
             </button>
           </div>

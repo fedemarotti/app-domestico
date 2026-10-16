@@ -148,6 +148,9 @@ const esCombo20 = it => !!it && (it.tipoItem==='combo' || it.tipo==='combo') && 
 const nombreComboCorto = lt => Number(lt)===20 ? 'Combo 20 Promocional' : Number(lt)===50 ? 'Combo Chico' : 'Combo Grande';
 const cajasCombo20 = items => (items||[]).filter(esCombo20).length;
 const soloCombos20 = items => (items||[]).length>0 && (items||[]).every(esCombo20);
+// Textos fijos del Combo 20 para WhatsApp y documentos
+const TXT_C20_TOTAL = '100 Lts de producto en total (5 productos × 20 Lts)';
+const TXT_C20_CAJA  = 'Se entrega todo en una caja (sin cargo)';
 const COLORES_JABON      = [{ label:'Azul',    hex:'#3b82f6', tc:'#fff' }, { label:'Verde',   hex:'#22c55e', tc:'#fff' }, { label:'Violeta', hex:'#a855f7', tc:'#fff' }];
 const COLORES_SUAVIZANTE = [{ label:'Blanco',  hex:'#f1f5f9', tc:'#1e293b' }, { label:'Celeste', hex:'#7dd3fc', tc:'#1e293b' }, { label:'Violeta', hex:'#a855f7', tc:'#fff' }];
 const COLORES_DETERGENTE = [{ label:'Amarillo', hex:'#fbbf24', tc:'#1e293b', default:true }, { label:'Verde', hex:'#4ade80', tc:'#1e293b', apedido:true }, { label:'Azul', hex:'#60a5fa', tc:'#fff', apedido:true }];
@@ -667,15 +670,6 @@ const ItemLibre = ({ lista, setLista }) => {
 const ExtrasEnvio = ({ envases, setEnvases, extras, setExtras, zona, onConfirmar, onVolver, labelBtn='Confirmar', modalidad=null, cajasCombo=0, soloCombo20=false }) => {
   // nunca menos bultos que baldes + cajas + cajas de Combo 20 (cada combo 20 va en su caja = 1 bulto)
   const minBultos = Math.max(1, envases + (extras.cajas || 0) + cajasCombo);
-  const esFlexEE = modalidad!=='retiro' && !extras.esInterior && !extras.retiraLocal;
-  React.useEffect(() => {
-    if (!esFlexEE || (extras.bultos || 1) >= minBultos) return;
-    setExtras(e => {
-      const nx = { ...e, bultos: minBultos };
-      if (typeof nx.envioUnit === 'number' && typeof nx.envio === 'number') nx.envio = Math.round(nx.envioUnit * nx.bultos);
-      return nx;
-    });
-  }, [minBultos, esFlexEE]);
   const zonaEf = extras.envio || zona;
   // extras.envio puede ser un número (viene del mapa-flex: total ya calculado) o un objeto zona {zona, precio}
   const envioEsNumero = typeof extras.envio === 'number';
@@ -905,6 +899,24 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
 
   const zona = zonaDeExtras(extras) || detectarZona(extras.localidad) || (extras.envio && typeof extras.envio === 'object' ? extras.envio : null);
 
+  // Bultos Flex: nunca menos que baldes + cajas + cajas del Combo 20. Si el mínimo sube, sube; si baja
+  // (ej: se quita un Combo 20) y los bultos estaban justo en el mínimo anterior, bajan con él. Si el
+  // vendedor eligió más bultos a mano, se respetan. El envío del mapa se recalcula por bulto.
+  const minBultosPRE = Math.max(1, envases + (extras.cajas || 0) + cajasCombo20(items));
+  const minPrevPRE = React.useRef(minBultosPRE);
+  React.useEffect(() => {
+    const prev = minPrevPRE.current; minPrevPRE.current = minBultosPRE;
+    if (modalidadPRE !== 'flex') return;
+    setExtras(e => {
+      const b = e.bultos || 1;
+      const obj = b < minBultosPRE ? minBultosPRE : (minBultosPRE < prev && b === prev ? minBultosPRE : b);
+      if (obj === b) return e;
+      const nx = { ...e, bultos: obj };
+      if (typeof nx.envioUnit === 'number' && typeof nx.envio === 'number') nx.envio = Math.round(nx.envioUnit * obj);
+      return nx;
+    });
+  }, [minBultosPRE, modalidadPRE]);
+
   // Listener postMessage para recibir datos del mapa-flex iframe
   React.useEffect(() => {
     const handler = (event) => {
@@ -926,7 +938,7 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [envases, extras.cajas]);
+  }, [envases, extras.cajas, items]); // items: las cajas del Combo 20 suben el mínimo de bultos
 
   const totalProd    = items.reduce((s,i)=>s+(Number(i.precio)||0),0);
   const totalEnvases = envases * PRECIO_ENVASE + (extras.cajas || 0) * PRECIO_CAJA; // baldes + cajas (ambos con cargo)
@@ -993,7 +1005,8 @@ const PreCotizacion = ({ onVolver, onIrDEF, preloaded, clienteInicial, usuarioAc
       `🧹 *DOMÉSTICO · Pre-Cotización*`,
       `📋 *Código: ${codigo}*`,``,
       `📦 *Productos:*`,
-      ...items.map(i=>`• ${i.nombre} — *${precioAgrTxt(i)}*`),
+      ...items.flatMap(i=>[`• ${i.nombre} — *${precioAgrTxt(i)}*`,
+        ...(esCombo20(i) ? [`  🎁 *Combo promocional: ${TXT_C20_TOTAL}*`, `  Jabón, detergente, suavizante, lavandina y desodorante de pisos · Premium`, `  📦 ${TXT_C20_CAJA}`] : [])]),
       ...extras.agregados.map(a=>`• ${a.nombre} — *${precioAgrTxt(a)}*`),
       ...lineasEnvasesWA(envases, extras, items),``,
       `📦 *MODALIDAD DE ENTREGA*`,
@@ -1994,7 +2007,8 @@ function imprimirPedido(pedido, solo=null) {
           subRows.push(`<span style="background:#f0fdf4;color:#166534;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:700;">LAVANDINA: ${lavLabel}</span>`);
           if (fr) subRows.push(`<span style="font-size:10px;color:#475569;">Desodorante: ${fr}${esCombo20(item)?' (200 cc)':''}</span>`);
         }
-        if (esCombo20(item)) subRows.push(`<span style="background:#e0f2fe;color:#0284c7;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:700;">📦 En caja sin cargo</span>`);
+        if (esCombo20(item)) subRows.push(`<span style="background:#e0f2fe;color:#0284c7;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:700;">📦 ${TXT_C20_CAJA}</span>`);
+        if (esCombo20(item)) subRows.unshift(`<span style="background:#fef9c3;color:#854d0e;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">🎁 COMBO PROMOCIONAL · ${TXT_C20_TOTAL}</span>`);
         if (subRows.length>0) rows += `<tr><td colspan="2" style="padding:2px 4px 6px 22px;line-height:1.8;">${subRows.join(' ')}</td></tr>`;
             } else {
         // Ítems individuales: chips coloreados igual que combo
@@ -2956,6 +2970,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
               const lineas = [];
               const esCombo = it.tipo==='combo' || it.tipoItem==='combo';
               if (esCombo) {
+                if (esCombo20(it)) lineas.push(`  🎁 Combo promocional: ${TXT_C20_TOTAL}`);
                 // Jabón
                 const jabDivs = it.jabon_divs||[];
                 if (jabDivs.length>1) lineas.push(`  🧼 Jabón fraccionado: ${jabDivs.map((d,i)=>`F${i+1} ${d.color} 50Lts`).join(' + ')}`);
@@ -2978,7 +2993,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
                   const frP = (it.fragancias_piso||[]).map(f=>`${f.fragancia} ${f.cantidad}Lts`).join(' + ');
                   if (frP) lineas.push(`  🌿 Desodorante piso: ${frP}${esCombo20(it)?' (200 cc)':''}`);
                 }
-                if (esCombo20(it)) lineas.push(`  📦 Va en caja sin cargo`);
+                if (esCombo20(it)) lineas.push(`  📦 ${TXT_C20_CAJA}`);
               } else {
                 // Producto individual
                 const divs = it.divisiones||[];
@@ -3175,6 +3190,7 @@ _Doméstico · Moreno, Bs. As._`
     const lineas = [];
     const esCombo = it.tipo==='combo' || it.tipoItem==='combo';
     if (esCombo) {
+      if (esCombo20(it)) lineas.push(`  🎁 Combo promocional: ${TXT_C20_TOTAL}`);
       const jabDivs = it.jabon_divs||[];
       if (jabDivs.length>1) lineas.push(`  🧼 Jabón fraccionado: ${jabDivs.map((d,i)=>`F${i+1} ${d.color} 50Lts`).join(' + ')}`);
       else if (it.jabon_color) lineas.push(`  🧼 Jabón: ${it.jabon_color} ${it.cantidad}Lts`);
@@ -3193,7 +3209,7 @@ _Doméstico · Moreno, Bs. As._`
         const frP = (it.fragancias_piso||[]).map(f=>`${f.fragancia} ${f.cantidad}Lts`).join(' + ');
         if (frP) lineas.push(`  🌿 Desodorante piso: ${frP}${esCombo20(it)?' (200 cc)':''}`);
       }
-      if (esCombo20(it)) lineas.push(`  📦 Va en caja sin cargo`);
+      if (esCombo20(it)) lineas.push(`  📦 ${TXT_C20_CAJA}`);
     } else {
       const divs = it.divisiones||[];
       if (it.tipo==='desodorante') {

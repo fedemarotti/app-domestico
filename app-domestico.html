@@ -62,6 +62,30 @@
       outline: 3px solid #4ade80;
       outline-offset: 3px;
     }
+    /* ── Botones liquid glass del panel (02/11/2026) ── */
+    .lg-tile {
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -10px 20px rgba(0,0,0,0.16), 0 8px 22px rgba(0,0,0,0.38);
+      transition: transform 0.16s cubic-bezier(.34,1.56,.64,1), box-shadow 0.2s ease, filter 0.2s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .lg-tile::before {
+      content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+      background: linear-gradient(180deg, rgba(255,255,255,0.16), transparent 40%);
+    }
+    @media (hover: hover) {
+      .lg-tile:hover {
+        transform: translateY(-2px);
+        filter: brightness(1.18);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.32), 0 0 0 1px rgba(var(--glow),0.55), 0 12px 30px rgba(var(--glow),0.28), 0 8px 22px rgba(0,0,0,0.38);
+      }
+    }
+    .lg-tile:active {
+      transform: translateY(2px) scale(0.96);
+      filter: brightness(0.92);
+      box-shadow: inset 0 3px 10px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 6px rgba(0,0,0,0.3);
+      transition-duration: 0.06s;
+    }
+    .lg-tile:focus-visible { outline: 3px solid rgba(var(--glow),0.9); outline-offset: 2px; }
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
@@ -2678,7 +2702,8 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
         extras:{ ...extrasUsados, bultos: bultosFin, envios: (extrasUsados.retiraLocal || extrasUsados.esInterior) ? bultosFin : enviosFin, agregados:agregadosHeredados, cajas:dEnv.cajas, precioCaja: precioCajaDEF, precioBalde: precioBaldeDEF },
         totales:{ productos:totalProd, envases:totalEnv, agregados:totalAgr, envio:totalEnvio, total },
         zonaEnvio:zona, estado: pedidoFinal ? pedidoFinal.estado : 'pendiente',
-        creadoPor: pedidoFinal ? pedidoFinal.creadoPor : (usuarioActual?.email || null)
+        creadoPor: pedidoFinal ? pedidoFinal.creadoPor : (usuarioActual?.email || null),
+        ...(pedidoFinal && pedidoFinal.pago ? { pago: pedidoFinal.pago } : {})
       };
       saveLS(p);
       if (cliente.nombre && cliente.telefono) saveCliente({ ...cliente });
@@ -2696,6 +2721,11 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
 
   return (
     <div>
+      {/* Forma de pago (02/11/2026): obligatoria apenas se confirma el DEF. Uso interno, no va a WhatsApp ni a imprimibles. */}
+      {paso==='docs' && pedidoFinal && !pedidoFinal.pago && (
+        <ModalFormaPago total={Number(pedidoFinal.totales?.total || 0)} titulo={`${pedidoFinal.codigo}${pedidoFinal.cliente?.nombre ? ' · ' + pedidoFinal.cliente.nombre : ''}`}
+          onGuardar={async (pago) => { const p2 = { ...pedidoFinal, pago }; await saveLS(p2); setPedidoFinal(p2); return null; }} />
+      )}
       <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}>
         <Chip codigo={codigo} tipo="DEF" />
         {codigoPRE && <span style={{ fontSize:12, color:'rgba(255,255,255,0.4)' }}>desde {codigoPRE}</span>}
@@ -6729,13 +6759,13 @@ const ModuloVentasGanancia = ({ onVolver, onCambioNoLeidas }) => {
       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
         {nueva ? <span style={{ fontSize:9.5, fontWeight:900, background:AM, color:'#1e293b', borderRadius:6, padding:'2px 7px' }}>NUEVA</span> : <span style={{ fontSize:12, color:'#38bdf8', fontWeight:900 }}>✓✓</span>}
         <span style={{ fontWeight:900, fontSize:14, color: mkColor(r.u) }}>{r.u}</span>
-        <span style={{ fontSize:12, color:C.tx2, flex:1, minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.cliente?.nombre || ''}</span>
+        <span style={{ fontSize:12, color:C.tx2, flex:1, minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.cliente?.nombre || ''} <b style={{ color:C.tx3, fontWeight:800 }}>— {p.codigo}</b></span>
         <span style={{ fontSize:12, color:C.tx3, fontWeight:700 }}>{arHora(p.ts)}</span>
       </div>
       <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:10 }}>
         <div>
           <div style={{ fontSize:10, fontWeight:800, color:C.tx3, letterSpacing:'0.08em' }}>COBRADO</div>
-          <div style={{ fontSize:18, fontWeight:900 }}>{vgFmt(r.total)}</div>
+          <div style={{ fontSize:18, fontWeight:900, display:'flex', alignItems:'center', gap:7, flexWrap:'wrap' }}>{vgFmt(r.total)}{(tesPago(p) || p.ts >= TES_DESDE) && <ChipPago p={p} />}</div>
         </div>
         <div style={{ textAlign:'right' }}>
           <div style={{ fontSize:10, fontWeight:800, color:C.tx3, letterSpacing:'0.08em' }}>GANANCIA{r.cst.manEstimado ? ' *' : ''}</div>
@@ -7183,33 +7213,43 @@ const ModuloEntregas = ({ usuarioActual, onVolver, onAbrirTracking, onCambioNoLe
   );
 };
 
-// Botón ancho (06/10/2026): ocupa el ancho de 3 tiles y la mitad de alto. Mismo estilo que Tile.
+// Botones del panel con estilo liquid glass (02/11/2026, referencia de Fede): ícono en círculo arriba a la
+// derecha, texto abajo a la izquierda. solid='te' (verde agua) / 'na' (naranja) = botones principales.
+const TILE_SOL = {
+  na: { bg:'linear-gradient(180deg,#F5B57E 0%,#EC8A3E 52%,#D26A28 100%)', tx:'#1d1006', glow:'235,132,58' },
+  te: { bg:'linear-gradient(180deg,#BDEBE2 0%,#80CDBF 52%,#5EAE9F 100%)', tx:'#0c2420', glow:'120,205,190' },
+};
+const tileFondo = (rgb, sv) => sv ? sv.bg : `linear-gradient(160deg,rgba(${rgb},0.17) 0%,rgba(${rgb},0.05) 55%,rgba(255,255,255,0.03) 100%), rgba(150,190,210,0.07)`;
+const TileIcono = ({ icon, sv, size=34 }) => (
+  <span style={{ width:size, height:size, flexShrink:0, borderRadius:'50%', display:'grid', placeItems:'center', fontSize:Math.round(size*0.5), lineHeight:1,
+    background: sv ? '#14110f' : 'rgba(0,0,0,0.28)', border:'1px solid rgba(255,255,255,0.08)' }}>{icon}</span>
+);
 const TileAncho = ({ icon, label, rgb, onClick }) => (
-  <button onClick={onClick} className="sel-btn" style={{
-    width:'100%', aspectRatio:'6.2 / 1', minHeight:56, borderRadius:18, display:'flex', flexDirection:'row', alignItems:'center', justifyContent:'center',
-    gap:12, cursor:'pointer', fontFamily:'inherit', fontSize:13, fontWeight:800, letterSpacing:'-0.01em', color: C.tx, marginBottom:14,
-    background:`linear-gradient(180deg,rgba(${rgb},0.18) 0%,rgba(${rgb},0.06) 100%)`, border:`1px solid rgba(${rgb},0.38)`,
-    boxShadow:`inset 0 1px 0 rgba(255,255,255,0.16), 0 10px 24px rgba(0,0,0,0.4), 0 8px 22px rgba(${rgb},0.14)`,
-    transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), filter 0.15s ease' }}>
-    <span style={{ fontSize:26, lineHeight:1 }}>{icon}</span>
+  <button onClick={onClick} className="lg-tile" style={{
+    position:'relative', width:'100%', minWidth:0, height:58, borderRadius:18, display:'flex', flexDirection:'row', alignItems:'center', justifyContent:'flex-start',
+    gap:10, padding:'0 12px', cursor:'pointer', fontFamily:'inherit', fontSize:12.5, fontWeight:800, letterSpacing:'-0.02em', lineHeight:1.12, textAlign:'left', color: C.tx,
+    background: tileFondo(rgb), border:`1px solid rgba(${rgb},0.30)`, backdropFilter:'blur(18px) saturate(140%)', WebkitBackdropFilter:'blur(18px) saturate(140%)', '--glow': rgb }}>
+    <TileIcono icon={icon} size={30} />
     <span>{label}</span>
   </button>
 );
-const Tile = ({ icon, label, rgb, solid, onClick, badge, tag }) => (
-  <button onClick={onClick} className="sel-btn" style={{
-    aspectRatio:'1 / 1', width:'100%', minWidth:0, borderRadius:18, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-    gap:7, textAlign:'center', position:'relative', cursor:'pointer', fontFamily:'inherit', fontSize:12, fontWeight:800, lineHeight:1.15,
-    letterSpacing:'-0.01em', padding:6, color: solid ? '#fff' : C.tx,
-    background: solid ? 'linear-gradient(165deg,#FB923C 0%,#F97316 48%,#DB6209 100%)' : `linear-gradient(180deg,rgba(${rgb},0.18) 0%,rgba(${rgb},0.06) 100%)`,
-    border: solid ? '1px solid rgba(255,255,255,0.22)' : `1px solid rgba(${rgb},0.38)`,
-    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.16), 0 10px 24px rgba(0,0,0,0.4)${solid ? ', 0 10px 26px rgba(249,115,22,0.30)' : `, 0 8px 22px rgba(${rgb},0.14)`}`,
-    transition:'transform 0.15s cubic-bezier(.34,1.56,.64,1), filter 0.15s ease' }}>
-    <span style={{ fontSize:29, lineHeight:1 }}>{icon}</span>
-    <span>{label}</span>
-    {tag && <span style={{ position:'absolute', top:6, left:6, fontSize:8.5, fontWeight:900, background:'#facc15', color:'#1e293b', borderRadius:6, padding:'1px 5px' }}>{tag}</span>}
-    {badge > 0 && <span style={{ position:'absolute', top:6, right:6, minWidth:20, height:20, borderRadius:10, background:'#ef4444', color:'#fff', fontSize:11, fontWeight:900, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 5px', boxShadow:'0 0 0 2px #0A0F16' }}>{badge}</span>}
-  </button>
-);
+const Tile = ({ icon, label, rgb, solid, onClick, badge, tag }) => {
+  const sv = solid ? TILE_SOL[solid === true ? 'na' : solid] : null;
+  const c = rgb || '255,255,255';
+  return (
+    <button onClick={onClick} className="lg-tile" style={{
+      position:'relative', width:'100%', minWidth:0, aspectRatio:'1 / 0.88', borderRadius:22, padding:'10px 10px 11px',
+      display:'flex', flexDirection:'column', justifyContent:'space-between', alignItems:'stretch', textAlign:'left', cursor:'pointer', fontFamily:'inherit',
+      color: sv ? sv.tx : C.tx, fontSize:12.5, fontWeight:800, lineHeight:1.12, letterSpacing:'-0.02em',
+      background: tileFondo(c, sv), border: sv ? '1px solid rgba(255,255,255,0.42)' : `1px solid rgba(${c},0.30)`,
+      backdropFilter:'blur(18px) saturate(140%)', WebkitBackdropFilter:'blur(18px) saturate(140%)', '--glow': sv ? sv.glow : c }}>
+      <span style={{ alignSelf:'flex-end' }}><TileIcono icon={icon} sv={sv} /></span>
+      <span>{label}</span>
+      {tag && <span style={{ position:'absolute', top:9, left:9, fontSize:8.5, fontWeight:900, background:'#9fe3d4', color:'#0c2420', borderRadius:6, padding:'2px 6px' }}>{tag}</span>}
+      {badge > 0 && <span style={{ position:'absolute', top:-6, left:-4, minWidth:22, height:22, borderRadius:11, background:'#e5484d', color:'#fff', fontSize:11.5, fontWeight:900, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 6px', boxShadow:'0 0 0 2px #0A0F16' }}>{badge}</span>}
+    </button>
+  );
+};
 const TileLbl = ({ children }) => <div style={{ fontSize:10.5, fontWeight:800, color:C.tx3, textTransform:'uppercase', letterSpacing:'0.12em', margin:'4px 0 8px' }}>{children}</div>;
 
 // Cambiar la contraseña del usuario logueado (Supabase Auth). Solo lo ve el administrador.
@@ -7531,33 +7571,36 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
 
             <TileLbl>Ventas</TileLbl>
             <G cols={3} gap={10} style={{ marginBottom:14 }}>
-              <Tile icon="📋" label={<>NUEVA<br/>PRE</>} solid onClick={irPreNuevo} />
-              <Tile icon="📦" label={<>NUEVO<br/>DEF</>} rgb={RGB.vd} onClick={irDefNuevo} />
-              {esAdmin(usuarioActual) && <Tile icon="💰" label={<>VENTAS Y<br/>GANANCIA</>} rgb="250,204,21" badge={noLeidasVG} onClick={()=>setEtapa('ventas_ganancia')} />}
-              {esNegocio(usuarioActual) && <Tile icon="🧪" label={<>FÓRMULAS<br/>PRODUCCIÓN</>} rgb={RGB.vd} onClick={()=>{ window.location.href = 'formulas-produccion.html'; }} />}
+              <Tile icon="📋" label={<>Nueva<br/>PRE</>} solid="te" onClick={irPreNuevo} />
+              <Tile icon="📦" label={<>Nuevo<br/>DEF</>} solid="na" onClick={irDefNuevo} />
+              {esAdmin(usuarioActual) && <Tile icon="💰" label={<>Ventas y<br/>ganancia</>} rgb="250,204,21" badge={noLeidasVG} onClick={()=>setEtapa('ventas_ganancia')} />}
+              {esNegocio(usuarioActual) && <Tile icon="🧪" label={<>Fórmulas<br/>producción</>} rgb={RGB.vd} onClick={()=>{ window.location.href = 'formulas-produccion.html'; }} />}
             </G>
 
             {esNegocio(usuarioActual) && (<>
               <TileLbl>Entregas</TileLbl>
               <G cols={3} gap={10} style={{ marginBottom:14 }}>
-                <Tile icon="🚚" label={<>ENTREGAS DE<br/>PEDIDOS</>} rgb="251,191,36" badge={noLeidasEnt} onClick={()=>setEtapa('entregas')} />
-                <Tile icon="🛵" label={<>LIQUIDACIÓN<br/>FLEX</>} rgb={RGB.na} onClick={()=>setEtapa('liquidacion_flex')} />
-                <Tile icon="🏷️" label={<>LISTA DE<br/>PRECIOS</>} rgb="250,204,21" onClick={()=>setEtapa('lista_precios')} />
+                <Tile icon="🚚" label={<>Entregas de<br/>pedidos</>} rgb="251,191,36" badge={noLeidasEnt} onClick={()=>setEtapa('entregas')} />
+                <Tile icon="🛵" label={<>Liquidación<br/>Flex</>} rgb={RGB.na} onClick={()=>setEtapa('liquidacion_flex')} />
+                <Tile icon="🏷️" label={<>Lista de<br/>precios</>} rgb="250,204,21" onClick={()=>setEtapa('lista_precios')} />
               </G>
             </>)}
 
             {esAdmin(usuarioActual) && (<>
               <TileLbl>Administración</TileLbl>
-              <G cols={3} gap={10} style={{ marginBottom:14 }}>
-                <Tile icon="📊" label={<>LIQUIDA-<br/>CIONES</>} rgb={RGB.az} onClick={()=>setEtapa('liquidaciones')} />
-                <Tile icon="🛵" label={<>LIQUIDACIÓN<br/>FLEX</>} rgb={RGB.na} onClick={()=>setEtapa('liquidacion_flex')} />
-                <Tile icon="🚚" label={<>ENTREGAS DE<br/>PEDIDOS</>} rgb="251,191,36" badge={noLeidasEnt} onClick={()=>setEtapa('entregas')} />
-                <Tile icon="📣" label="MARKETING" rgb="244,114,182" onClick={()=>setEtapa('marketing')} />
-                <Tile icon="🏷️" label={<>LISTA DE<br/>PRECIOS</>} rgb="250,204,21" onClick={()=>setEtapa('lista_precios')} />
-                <Tile icon="🔁" label={<>ASIGNAR<br/>VENTAS</>} rgb="167,139,250" badge={pendAsig} onClick={()=>setEtapa('asignar_ventas')} />
+              <G cols={3} gap={10} style={{ marginBottom:10 }}>
+                <Tile icon="📊" label={<>Liquida-<br/>ciones</>} rgb={RGB.az} onClick={()=>setEtapa('liquidaciones')} />
+                <Tile icon="🛵" label={<>Liquidación<br/>Flex</>} rgb={RGB.na} onClick={()=>setEtapa('liquidacion_flex')} />
+                <Tile icon="🚚" label={<>Entregas de<br/>pedidos</>} rgb="251,191,36" badge={noLeidasEnt} onClick={()=>setEtapa('entregas')} />
+                <Tile icon="📣" label="Marketing" rgb="244,114,182" onClick={()=>setEtapa('marketing')} />
+                <Tile icon="🏦" label="Tesorería" rgb="120,205,190" tag="NUEVO" onClick={()=>setEtapa('tesoreria')} />
+                <Tile icon="🔁" label={<>Asignar<br/>ventas</>} rgb="167,139,250" badge={pendAsig} onClick={()=>setEtapa('asignar_ventas')} />
               </G>
-              {/* Fórmulas producción: barra a lo ancho (3 botones) y media altura */}
-              <TileAncho icon="🧪" label="FÓRMULAS PRODUCCIÓN" rgb={RGB.vd} onClick={()=>{ window.location.href = 'formulas-produccion.html'; }} />
+              {/* Fila finita, mitad y mitad (02/11/2026) */}
+              <G cols={2} gap={10} style={{ marginBottom:14 }}>
+                <TileAncho icon="🏷️" label="Lista de precios" rgb="250,204,21" onClick={()=>setEtapa('lista_precios')} />
+                <TileAncho icon="🧪" label="Fórmulas producción" rgb={RGB.vd} onClick={()=>{ window.location.href = 'formulas-produccion.html'; }} />
+              </G>
             </>)}
           </div>
         )}
@@ -7607,6 +7650,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
         )}
         {etapa==='lista_precios' && (esAdmin(usuarioActual) || esNegocio(usuarioActual)) && <ModuloListaPrecios onVolver={irInicio} verCostos={esAdmin(usuarioActual) || esNegocio(usuarioActual)} puedePrecargar={esAdmin(usuarioActual)} />}
         {etapa==='ventas_ganancia' && esAdmin(usuarioActual) && <ModuloVentasGanancia onVolver={irInicio} onCambioNoLeidas={setNoLeidasVG} />}
+        {etapa==='tesoreria' && esAdmin(usuarioActual) && <ModuloTesoreria onVolver={irInicio} />}
 
       </div>
     </div>
@@ -7758,6 +7802,586 @@ const MESES_NOMBRE = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','
 const DIAS_SEMANA_NOMBRE = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
 const fmtDiaLargo = (ts) => { const { y, m, day } = arParts(ts); const dw = new Date(Date.UTC(y, m, day)).getUTCDay(); return `${DIAS_SEMANA_NOMBRE[dw]} ${day} DE ${MESES_NOMBRE[m].toUpperCase()} DE ${y}`; };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// FORMA DE PAGO + TESORERÍA (02/11/2026, pedido por Fede)
+// · Al confirmar un DEF, el vendedor carga cómo pagó el cliente: transferencia, efectivo o mixto.
+//   Transferencia / efectivo: importe precargado con el total del DEF, editable. Mixto: los dos a mano.
+//   Si lo pagado no coincide con el total, se pide un motivo. Queda en pedido.pago.
+//   USO INTERNO: no aparece en WhatsApp ni en ningún imprimible.
+// · TESORERÍA (solo admin): Financiera (transferencias netas del 3,5%, retiros virtuales, cierres
+//   lunes y jueves 15:30 que se cobran martes y viernes; con feriado el corte pasa al último día hábil
+//   anterior al pago), Efectivo (solo informativo) e Informes por período.
+// · Datos en liq_asignaciones con código 'TES|<id>' · tipo ('retiro'|'reasig'|'feriado'|'liq')
+// ═══════════════════════════════════════════════════════════════════════════════
+const TES_RETENCION = 0.035;
+const TES_DESDE = Date.UTC(2026, 10, 2, 3, 0, 0, 0); // 02/11/2026 00:00 AR: desde acá cada DEF lleva forma de pago
+const TES_CORTE_H = 15, TES_CORTE_M = 30;
+const tesPago = p => (p && p.pago && typeof p.pago === 'object') ? p.pago : null;
+const tesTotalDef = p => Number(p?.totales?.total ?? p?.total ?? 0);
+const tesFormaTxt = f => f === 'transferencia' ? 'Transferencia' : f === 'efectivo' ? 'Efectivo' : f === 'mixto' ? 'Mixto' : 'Sin datos';
+const tesFormaCol = f => f === 'transferencia' ? { bg:'rgba(96,165,250,0.18)', c:'#bfdbfe' } : f === 'efectivo' ? { bg:'rgba(52,211,153,0.18)', c:'#a7f3d0' } : f === 'mixto' ? { bg:'rgba(167,139,250,0.2)', c:'#ddd6fe' } : { bg:'rgba(255,255,255,0.08)', c:'#cbd5e1' };
+const tesNum = v => Number(String(v ?? '').replace(/[^\d]/g, '')) || 0;
+const tesFmt = n => { const v = Math.round(Number(n) || 0); return (v < 0 ? '−$' : '$') + Math.abs(v).toLocaleString('es-AR'); };
+const tesMiles = n => n ? Number(n).toLocaleString('es-AR') : '';
+// Días calendario de Argentina como número de día (UTC/864e5) para no depender de la zona del dispositivo
+const tesDN = iso => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d) / 864e5; };
+const tesIso = n => { const d = new Date(n * 864e5); return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`; };
+const tesDow = n => new Date(n * 864e5).getUTCDay();
+const tesDNdeTs = ts => { const { y, m, day } = arParts(ts); return Date.UTC(y, m, day) / 864e5; };
+const tesTs = (n, h, mi) => n * 864e5 + (h * 60 + mi) * 60000 + AR_OFFSET_MS;
+const TES_DIAS = ['dom','lun','mar','mié','jue','vie','sáb'];
+const tesDiaTxt = n => `${TES_DIAS[tesDow(n)]} ${tesIso(n).slice(8)}/${tesIso(n).slice(5, 7)}`;
+const tesTsTxt = ts => `${tesDiaTxt(tesDNdeTs(ts))} ${arHora(ts)}`;
+const tesHabil = (n, feriados) => { const dw = tesDow(n); return dw >= 1 && dw <= 5 && !feriados.has(tesIso(n)); };
+
+// Liquidaciones de la financiera entre dos días. Pago martes y viernes; corte 15:30 del último día
+// hábil antes del pago. Overrides: { [isoPagoProgramado]: { corte:'AAAA-MM-DDTHH:MM', pago:'AAAA-MM-DD' } }
+const tesLiquidaciones = (desdeN, hastaN, feriados, overrides) => {
+  const out = [];
+  for (let n = desdeN; n <= hastaN; n++) {
+    const dw = tesDow(n); if (dw !== 2 && dw !== 5) continue;
+    const key = tesIso(n); const ov = overrides[key] || {};
+    let c = n - 1, k = 0; while (!tesHabil(c, feriados) && k < 10) { c--; k++; }
+    let corte = tesTs(c, TES_CORTE_H, TES_CORTE_M);
+    if (ov.corte && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(ov.corte)) { const [d, h] = ov.corte.split('T'); const [hh, mm] = h.split(':').map(Number); corte = tesTs(tesDN(d), hh, mm); }
+    let pagoN = n; let j = 0; while (feriados.has(tesIso(pagoN)) && j < 10) { pagoN++; j++; }
+    if (ov.pago && /^\d{4}-\d{2}-\d{2}$/.test(ov.pago)) pagoN = tesDN(ov.pago);
+    out.push({ key, corte, pagoN, editada: !!(ov.corte || ov.pago) });
+  }
+  out.sort((a, b) => a.corte - b.corte);
+  for (let i = 0; i < out.length; i++) out[i].desde = i > 0 ? out[i - 1].corte : out[i].corte - 7 * 864e5;
+  return out;
+};
+const tesTramoDe = (liqs, ts) => liqs.find(l => ts > l.desde && ts <= l.corte) || null;
+
+// ── Supabase: los registros de Tesorería viven en liq_asignaciones (RLS solo admin) con código 'TES|<id>'.
+// Esa tabla no permite borrar filas: un borrado se guarda como { borrado:true } y se ignora al leer.
+// Las claves 'TES|…' nunca coinciden con un código de pedido, así que Liquidaciones y Asignar ventas no las ven.
+const TES_PREF = 'TES|';
+const tesCargar = async () => {
+  if (!supaClient) return { error:'Sin conexión con la nube', filas:[] };
+  try {
+    const filas = await supaTraerTodo(() => supaClient.from('liq_asignaciones').select('codigo,data').like('codigo', TES_PREF + '%').order('codigo', { ascending:true }));
+    return { filas: (filas || []).filter(r => r.data && !r.data.borrado && r.data.tipo).map(r => ({ id: r.codigo.slice(TES_PREF.length), tipo: r.data.tipo, data: r.data.d || {}, ts: r.data.ts })) };
+  } catch (e) { return { error: e?.message || 'No se pudo leer Tesorería', filas:[] }; }
+};
+const tesGuardar = async (id, tipo, data) => {
+  try { const { error } = await supaClient.from('liq_asignaciones').upsert({ codigo: TES_PREF + id, data: { tipo, d: data, ts: Date.now() }, actualizado: new Date().toISOString() }, { onConflict:'codigo' }); return error ? (error.message || 'error') : null; }
+  catch (e) { return e?.message || 'error'; }
+};
+const tesBorrar = async (id) => {
+  try { const { error } = await supaClient.from('liq_asignaciones').upsert({ codigo: TES_PREF + id, data: { borrado: true, ts: Date.now() }, actualizado: new Date().toISOString() }, { onConflict:'codigo' }); return error ? (error.message || 'error') : null; }
+  catch (e) { return e?.message || 'error'; }
+};
+
+// ── Ventana Forma de pago (vendedores al confirmar el DEF; admin desde Tesorería) ──
+function ModalFormaPago({ total, inicial, titulo, onGuardar, onCancelar }) {
+  const [forma, setForma] = React.useState(inicial?.forma || 'transferencia');
+  const [uno, setUno] = React.useState(inicial && inicial.forma !== 'mixto' ? Number(inicial.total) || 0 : total);
+  const [ef, setEf] = React.useState(inicial?.forma === 'mixto' ? Number(inicial.efectivo) || 0 : 0);
+  const [tr, setTr] = React.useState(inicial?.forma === 'mixto' ? Number(inicial.transferencia) || 0 : 0);
+  const [nota, setNota] = React.useState(inicial?.nota || '');
+  const [guardando, setGuardando] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const elegir = f => { setForma(f); setError(''); if (f === 'mixto') { setEf(0); setTr(0); } else setUno(total); };
+  const pagado = forma === 'mixto' ? ef + tr : uno;
+  const dif = pagado - total;
+  const vacio = forma === 'mixto' ? (ef + tr === 0) : uno === 0;
+  const puede = !vacio && !guardando && (dif === 0 || nota.trim().length > 0);
+  const guardar = async () => {
+    if (!puede) return;
+    setGuardando(true); setError('');
+    let por = null; try { const { data } = await supaClient.auth.getSession(); por = (data?.session?.user?.email || '').toLowerCase() || null; } catch (_) {}
+    const pago = { forma, efectivo: forma === 'efectivo' ? uno : forma === 'mixto' ? ef : 0, transferencia: forma === 'transferencia' ? uno : forma === 'mixto' ? tr : 0,
+      total: pagado, totalDef: total, diferencia: dif, nota: dif !== 0 ? nota.trim() : '', por, ts: Date.now() };
+    const err = await onGuardar(pago);
+    if (err) { setError(err); setGuardando(false); }
+  };
+  const campo = (lbl, val, set, auto) => (
+    <div style={{ marginBottom:10 }}>
+      <div style={{ fontSize:12, fontWeight:700, color:C.tx2, margin:'0 2px 5px' }}>{lbl}</div>
+      <div style={{ display:'flex', alignItems:'center', gap:6, padding:'0 14px', borderRadius:15, background:'rgba(0,0,0,0.3)', border:'1px solid rgba(255,255,255,0.14)' }}>
+        <span style={{ color:C.tx3, fontWeight:800 }}>$</span>
+        <input inputMode="numeric" autoFocus={auto} value={tesMiles(val)} placeholder="0" onChange={e => set(tesNum(e.target.value))}
+          style={{ flex:1, minWidth:0, background:'none', border:'none', outline:'none', color:C.tx, fontFamily:'inherit', fontSize:19, fontWeight:800, padding:'12px 0' }} />
+      </div>
+    </div>
+  );
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:900, display:'flex', alignItems:'flex-end', justifyContent:'center', background:'rgba(2,6,9,0.62)', backdropFilter:'blur(4px)', WebkitBackdropFilter:'blur(4px)' }}>
+      <div role="dialog" aria-label="Forma de pago" style={{ width:'100%', maxWidth:520, maxHeight:'92vh', overflowY:'auto', borderRadius:'28px 28px 0 0', padding:'18px 18px calc(22px + env(safe-area-inset-bottom,0px))',
+        background:'linear-gradient(180deg,rgba(30,58,72,0.97),rgba(12,28,36,0.99))', borderTop:'1px solid rgba(200,230,245,0.22)', boxShadow:'0 -20px 50px rgba(0,0,0,0.5)' }}>
+        <div style={{ width:40, height:5, borderRadius:3, background:'rgba(255,255,255,0.22)', margin:'0 auto 14px' }} />
+        <div style={{ fontSize:19, fontWeight:850, letterSpacing:'-0.02em' }}>Forma de pago</div>
+        <div style={{ fontSize:13, color:C.tx2, margin:'3px 0 14px' }}>{titulo || 'DEF'} · total <b style={{ color:C.tx }}>{tesFmt(total)}</b></div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:6, padding:5, borderRadius:18, background:'rgba(0,0,0,0.28)', border:'1px solid rgba(255,255,255,0.07)', marginBottom:14 }}>
+          {[['transferencia','Transferencia'],['efectivo','Efectivo'],['mixto','Mixto']].map(([k, l]) => (
+            <button key={k} type="button" onClick={() => elegir(k)} className="sel-btn" style={{ fontFamily:'inherit', fontSize:13, fontWeight:800, padding:'11px 4px', borderRadius:13, cursor:'pointer',
+              color: forma === k ? '#1d1006' : C.tx2, background: forma === k ? 'linear-gradient(180deg,#f2b27a,#e5843a)' : 'transparent', border: forma === k ? '1px solid rgba(255,220,180,0.6)' : '1px solid transparent' }}>{l}</button>
+          ))}
+        </div>
+        {forma !== 'mixto' && <>
+          {campo(forma === 'transferencia' ? 'Importe transferido' : 'Importe en efectivo', uno, setUno, false)}
+          <div style={{ fontSize:11.5, color:C.tx3, margin:'-4px 2px 10px' }}>Precargado con el total del DEF. Si el cliente pagó otro importe, cambialo.</div>
+        </>}
+        {forma === 'mixto' && <>{campo('Efectivo', ef, setEf, true)}{campo('Transferencia', tr, setTr, false)}</>}
+        {!vacio && (
+          <div style={{ margin:'2px 0 10px', padding:'10px 12px', borderRadius:14, fontSize:13, fontWeight:700,
+            ...(dif === 0 ? { background:'rgba(52,211,153,0.12)', border:'1px solid rgba(52,211,153,0.35)', color:'#a7f3d0' }
+              : dif < 0 ? { background:'rgba(239,68,68,0.14)', border:'1px solid rgba(239,68,68,0.4)', color:'#fecaca' }
+              : { background:'rgba(250,204,21,0.12)', border:'1px solid rgba(250,204,21,0.4)', color:'#fde68a' }) }}>
+            {dif === 0 ? 'Coincide con el total del DEF' : `${dif < 0 ? 'Faltan' : 'Sobran'} ${tesFmt(Math.abs(dif))} respecto del total`}
+          </div>
+        )}
+        {!vacio && dif !== 0 && (
+          <div style={{ marginBottom:10 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:C.tx2, margin:'0 2px 5px' }}>Motivo de la diferencia</div>
+            <textarea value={nota} onChange={e => setNota(e.target.value)} placeholder="Ej.: redondeó para arriba, queda saldo a favor" rows={2}
+              style={{ ...s.inp, resize:'none', minHeight:56 }} />
+          </div>
+        )}
+        {error && <div style={{ fontSize:12.5, color:'#fca5a5', fontWeight:700, marginBottom:8 }}>⚠️ No se pudo guardar: {error}</div>}
+        <button type="button" onClick={guardar} disabled={!puede} className="sel-btn" style={{ ...s.bP, opacity: puede ? 1 : 0.4, cursor: puede ? 'pointer' : 'not-allowed' }}>{guardando ? 'Guardando…' : 'Guardar forma de pago'}</button>
+        {onCancelar && <button type="button" onClick={onCancelar} className="sel-btn" style={{ ...s.bS, width:'100%', marginTop:8 }}>Cancelar</button>}
+        <div style={{ fontSize:11, color:C.tx3, textAlign:'center', marginTop:10 }}>Uso interno. No aparece en WhatsApp ni en ningún imprimible.</div>
+      </div>
+    </div>
+  );
+}
+
+// Chip de forma de pago (Ventas y Ganancia, Tesorería)
+const ChipPago = ({ p }) => {
+  const f = tesPago(p)?.forma; const c = tesFormaCol(f);
+  return <span style={{ fontSize:10.5, fontWeight:850, padding:'3px 8px', borderRadius:8, background:c.bg, color:c.c, whiteSpace:'nowrap' }}>{tesFormaTxt(f)}</span>;
+};
+
+// ── Períodos de los informes ──
+const tesRangoPeriodo = (per, mesSel, dISO, hISO) => {
+  const hoyN = tesDNdeTs(Date.now());
+  const ini = n => tesTs(n, 0, 0), fin = n => tesTs(n + 1, 0, 0) - 1;
+  if (per === 'hoy') return { desde: ini(hoyN), hasta: fin(hoyN), txt:`Hoy · ${tesDiaTxt(hoyN)}` };
+  if (per === 'ayer') return { desde: ini(hoyN - 1), hasta: fin(hoyN - 1), txt:`Ayer · ${tesDiaTxt(hoyN - 1)}` };
+  if (per === 'semana') { const lun = hoyN - ((tesDow(hoyN) + 6) % 7); return { desde: ini(lun), hasta: fin(hoyN), txt:`Semana · ${tesDiaTxt(lun)} a ${tesDiaTxt(hoyN)}` }; }
+  if (per === 'mes') { const { y, m } = arParts(Date.now()); return { desde: arInicioDeMes(y, m), hasta: fin(hoyN), txt:`${MESES_NOMBRE[m]} ${y} hasta hoy` }; }
+  if (per === 'mescompleto' && mesSel) return { desde: arInicioDeMes(mesSel.y, mesSel.m), hasta: arFinDeMes(mesSel.y, mesSel.m), txt:`${MESES_NOMBRE[mesSel.m]} ${mesSel.y} completo` };
+  if (per === '30') return { desde: ini(hoyN - 29), hasta: fin(hoyN), txt:`Últimos 30 días · ${tesDiaTxt(hoyN - 29)} a ${tesDiaTxt(hoyN)}` };
+  if (per === 'periodo' && dISO && hISO && hISO >= dISO) return { desde: ini(tesDN(dISO)), hasta: fin(tesDN(hISO)), txt:`${tesDiaTxt(tesDN(dISO))} al ${tesDiaTxt(tesDN(hISO))}` };
+  return null;
+};
+const TES_PERIODOS = [['hoy','Hoy'],['ayer','Ayer'],['semana','Semana'],['mes','Mes en curso'],['mescompleto','Mes completo'],['30','Últimos 30 días'],['periodo','Período']];
+function TesSelectorPeriodo({ per, setPer, mesSel, setMesSel, dISO, setDISO, hISO, setHISO }) {
+  const meses = React.useMemo(() => { const { y, m } = arParts(Date.now()); const o = []; for (let i = 0; i <= 12; i++) { let mm = m - i, yy = y; while (mm < 0) { mm += 12; yy--; } o.push({ y: yy, m: mm }); } return o; }, []);
+  const chip = (k, l) => (
+    <button key={k} onClick={() => setPer(k)} className="sel-btn" style={{ padding:'7px 11px', borderRadius:20, fontSize:11.5, fontWeight:800, cursor:'pointer', fontFamily:'inherit',
+      background: per === k ? 'rgba(120,205,190,0.2)' : 'rgba(255,255,255,0.06)', border: per === k ? '1px solid rgba(120,205,190,0.6)' : '1px solid rgba(255,255,255,0.14)', color: per === k ? '#b5e9df' : 'rgba(255,255,255,0.75)' }}>{l}</button>
+  );
+  return (
+    <div style={{ marginBottom:12 }}>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>{TES_PERIODOS.map(([k, l]) => chip(k, l))}</div>
+      {per === 'mescompleto' && (
+        <select value={mesSel ? `${mesSel.y}-${mesSel.m}` : ''} onChange={e => { const [y, m] = e.target.value.split('-').map(Number); setMesSel({ y, m }); }} style={{ ...s.inp, marginTop:8 }}>
+          <option value="" disabled>Elegí el mes</option>
+          {meses.map(o => <option key={`${o.y}-${o.m}`} value={`${o.y}-${o.m}`}>{MESES_NOMBRE[o.m]} {o.y}</option>)}
+        </select>
+      )}
+      {per === 'periodo' && (
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginTop:8 }}>
+          <InputFecha value={dISO} onChange={e => setDISO(e.target.value)} style={s.inp} />
+          <InputFecha value={hISO} onChange={e => setHISO(e.target.value)} style={s.inp} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Módulo TESORERÍA (solo admin) ──
+function ModuloTesoreria({ onVolver }) {
+  const [pedidos, setPedidos] = React.useState(null);
+  const [filasTes, setFilasTes] = React.useState([]);
+  const [errTes, setErrTes] = React.useState('');
+  const [sync, setSync] = React.useState(null);
+  const [tab, setTab] = React.useState('financiera');
+  const [idxTramo, setIdxTramo] = React.useState(null);
+  const [modalPago, setModalPago] = React.useState(null);   // pedido al que se le carga la forma de pago
+  const [formRetiro, setFormRetiro] = React.useState(null);  // { importe, motivo, fecha, hora }
+  const [verCal, setVerCal] = React.useState(false);
+  const [feriadoISO, setFeriadoISO] = React.useState('');
+  const [editLiq, setEditLiq] = React.useState(null);        // { key, cd, ch, pd }
+  const [mover, setMover] = React.useState(null);            // { codigo, destino, motivo }
+  const [trabajando, setTrabajando] = React.useState(false);
+  const [aviso, setAviso] = React.useState('');
+  const [per, setPer] = React.useState('hoy');
+  const [mesSel, setMesSel] = React.useState(null);
+  const [dISO, setDISO] = React.useState('');
+  const [hISO, setHISO] = React.useState('');
+
+  const cargar = React.useCallback(async () => {
+    const [arr, t] = await Promise.all([listLS(), tesCargar()]);
+    setPedidos(Array.isArray(arr) ? arr : []); setFilasTes(t.filas || []); setErrTes(t.error || ''); setSync(Date.now());
+  }, []);
+  React.useEffect(() => {
+    cargar();
+    const t = setInterval(cargar, 30000);
+    const alVolver = () => { if (!document.hidden) cargar(); };
+    document.addEventListener('visibilitychange', alVolver);
+    let canal = null;
+    try { canal = supaClient?.channel('tes-pedidos-' + Date.now()).on('postgres_changes', { event:'*', schema:'public', table:'pedidos' }, () => cargar()).subscribe(); } catch (_) {}
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', alVolver); try { canal && supaClient.removeChannel(canal); } catch (_) {} };
+  }, [cargar]);
+
+  const feriados = React.useMemo(() => new Set(filasTes.filter(f => f.tipo === 'feriado').map(f => f.data?.iso).filter(Boolean)), [filasTes]);
+  const overrides = React.useMemo(() => { const o = {}; filasTes.filter(f => f.tipo === 'liq' && f.data?.key).forEach(f => { o[f.data.key] = f.data; }); return o; }, [filasTes]);
+  const reasig = React.useMemo(() => { const o = {}; filasTes.filter(f => f.tipo === 'reasig' && f.data?.codigo).forEach(f => { o[f.data.codigo] = f.data; }); return o; }, [filasTes]);
+  const retiros = React.useMemo(() => filasTes.filter(f => f.tipo === 'retiro' && f.data).map(f => ({ id: f.id, ...f.data })).sort((a, b) => a.ts - b.ts), [filasTes]);
+
+  const hoyN = tesDNdeTs(Date.now());
+  const liqs = React.useMemo(() => tesLiquidaciones(tesDNdeTs(TES_DESDE) - 7, hoyN + 60, feriados, overrides), [feriados, overrides, hoyN]);
+  const idxAbierta = Math.max(0, liqs.findIndex(l => l.corte >= Date.now()));
+  const idxVer = idxTramo == null ? idxAbierta : Math.min(Math.max(0, idxTramo), liqs.length - 1);
+
+  const defs = React.useMemo(() => (pedidos || []).filter(p => p && p.tipo === 'DEF' && typeof p.ts === 'number'), [pedidos]);
+  const defsConPago = React.useMemo(() => defs.filter(p => tesPago(p)), [defs]);
+  const sinPago = React.useMemo(() => defs.filter(p => p.ts >= TES_DESDE && !tesPago(p)).sort((a, b) => b.ts - a.ts), [defs]);
+  const conDif = React.useMemo(() => defsConPago.filter(p => Number(tesPago(p).diferencia) !== 0).sort((a, b) => b.ts - a.ts), [defsConPago]);
+
+  // Entradas de financiera agrupadas por liquidación (reasignación manual > fecha del DEF)
+  const porTramo = React.useMemo(() => {
+    const m = {}; liqs.forEach(l => { m[l.key] = { entradas: [], retiros: [] }; });
+    defsConPago.forEach(p => {
+      const tr = Number(tesPago(p).transferencia) || 0; if (tr <= 0) return;
+      const ra = reasig[p.codigo]; const key = ra && m[ra.tramo] ? ra.tramo : tesTramoDe(liqs, p.ts)?.key;
+      if (key && m[key]) m[key].entradas.push({ p, bruto: tr, neto: Math.round(tr * (1 - TES_RETENCION) * 100) / 100, movida: !!(ra && m[ra.tramo]) });
+    });
+    retiros.forEach(r => { const key = r.tramo && m[r.tramo] ? r.tramo : tesTramoDe(liqs, r.ts)?.key; if (key && m[key]) m[key].retiros.push(r); });
+    Object.values(m).forEach(t => { t.entradas.sort((a, b) => a.p.ts - b.p.ts); t.bruto = t.entradas.reduce((a, e) => a + e.bruto, 0); t.neto = t.entradas.reduce((a, e) => a + e.neto, 0);
+      t.retirado = t.retiros.reduce((a, r) => a + (Number(r.importe) || 0), 0); t.aCobrar = t.neto - t.retirado; });
+    return m;
+  }, [liqs, defsConPago, reasig, retiros]);
+
+  const L = liqs[idxVer]; const T = L ? porTramo[L.key] : null;
+  const abierta = liqs[idxAbierta]; const Tab = abierta ? porTramo[abierta.key] : null;
+  const cerradaSinCobrar = liqs.filter(l => l.corte < Date.now() && l.pagoN >= hoyN);
+
+  const correr = async (fn, ok) => { setTrabajando(true); setAviso(''); const err = await fn(); setTrabajando(false); if (err) { setAviso(`⚠️ No se pudo guardar: ${err}`); return false; } if (ok) setAviso(ok); await cargar(); return true; };
+  const quien = async () => { try { const { data } = await supaClient.auth.getSession(); return (data?.session?.user?.email || '').toLowerCase(); } catch (_) { return ''; } };
+
+  const guardarRetiro = async () => {
+    const importe = tesNum(formRetiro.importe); const motivo = (formRetiro.motivo || '').trim();
+    if (!importe || !motivo) { setAviso('⚠️ Cargá el importe y el motivo del retiro.'); return; }
+    const [hh, mm] = (formRetiro.hora || '00:00').split(':').map(Number);
+    const ts = formRetiro.fecha ? tesTs(tesDN(formRetiro.fecha), hh || 0, mm || 0) : Date.now();
+    const por = await quien(); const id = 'RET-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    if (await correr(() => tesGuardar(id, 'retiro', { importe, motivo, ts, por, cargado: Date.now() }), `✓ Retiro de ${tesFmt(importe)} registrado`)) setFormRetiro(null);
+  };
+  const guardarPagoAdmin = async (pago) => {
+    const p = modalPago; const nuevo = { ...p, pago };
+    await saveLS(nuevo);
+    setPedidos(prev => (prev || []).map(x => x.codigo === p.codigo ? nuevo : x)); setModalPago(null); setAviso(`✓ Forma de pago de ${p.codigo} guardada`);
+    return null;
+  };
+  const moverEntrada = async () => {
+    const por = await quien();
+    const ok = await correr(() => tesGuardar('REA-' + mover.codigo, 'reasig', { codigo: mover.codigo, tramo: mover.destino, motivo: (mover.motivo || '').trim(), por, ts: Date.now() }), `✓ ${mover.codigo} pasó a la liquidación que se cobra el ${tesDiaTxt(liqs.find(l => l.key === mover.destino).pagoN)}`);
+    if (ok) setMover(null);
+  };
+  const marcarFeriado = async () => {
+    if (!feriadoISO) return; const por = await quien();
+    if (await correr(() => tesGuardar('FER-' + feriadoISO, 'feriado', { iso: feriadoISO, por, ts: Date.now() }), `✓ Feriado ${tesDiaTxt(tesDN(feriadoISO))} cargado: se recalcularon los cortes`)) setFeriadoISO('');
+  };
+  const guardarEditLiq = async () => {
+    const e = editLiq; const por = await quien();
+    if (await correr(() => tesGuardar('LIQ-' + e.key, 'liq', { key: e.key, corte: e.cd && e.ch ? `${e.cd}T${e.ch}` : '', pago: e.pd || '', por, ts: Date.now() }), '✓ Liquidación actualizada')) setEditLiq(null);
+  };
+
+  // ── Informes por período ──
+  const rango = tesRangoPeriodo(per, mesSel, dISO, hISO);
+  const inf = React.useMemo(() => {
+    if (!rango) return null;
+    const enR = p => p.ts >= rango.desde && p.ts <= rango.hasta;
+    const conP = defsConPago.filter(enR); const sinP = defs.filter(p => enR(p) && p.ts >= TES_DESDE && !tesPago(p));
+    const vend = {};
+    conP.forEach(p => { const v = liqLabel(liqEmail(p)); const pg = tesPago(p); const o = vend[v] || (vend[v] = { v, cant:0, ef:0, tr:0 }); o.cant++; o.ef += Number(pg.efectivo) || 0; o.tr += Number(pg.transferencia) || 0; });
+    const ef = conP.reduce((a, p) => a + (Number(tesPago(p).efectivo) || 0), 0);
+    const tr = conP.reduce((a, p) => a + (Number(tesPago(p).transferencia) || 0), 0);
+    const ret = retiros.filter(r => r.ts >= rango.desde && r.ts <= rango.hasta);
+    return { conP: conP.sort((a, b) => a.ts - b.ts), sinP, ef, tr, total: ef + tr, retencion: tr * TES_RETENCION, netoFin: tr * (1 - TES_RETENCION),
+      retiros: ret, retirado: ret.reduce((a, r) => a + (Number(r.importe) || 0), 0), dif: conP.filter(p => Number(tesPago(p).diferencia) !== 0),
+      vend: Object.values(vend).sort((a, b) => (b.ef + b.tr) - (a.ef + a.tr)) };
+  }, [rango && rango.desde, rango && rango.hasta, defsConPago, defs, retiros]);
+
+  const imprimir = () => {
+    if (!inf) return;
+    const fila = (a, b) => `<tr><td>${a}</td><td style="text-align:right">${b}</td></tr>`;
+    const esc = t => String(t ?? '').replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Tesorería · ${esc(rango.txt)}</title><style>body{font-family:system-ui,sans-serif;padding:24px;color:#111}h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;margin:18px 0 6px}table{width:100%;border-collapse:collapse;font-size:12px}td,th{border-bottom:1px solid #ddd;padding:5px 4px;text-align:left}th{background:#f3f4f6}.n{text-align:right}</style></head><body>
+      <h1>Tesorería · Doméstico</h1><div>${esc(rango.txt)} · emitido ${esc(tesTsTxt(Date.now()))}</div>
+      <h2>Resumen</h2><table>${fila('Total cobrado', tesFmt(inf.total))}${fila('Efectivo', tesFmt(inf.ef))}${fila('Transferencias (bruto)', tesFmt(inf.tr))}${fila('Retención financiera 3,5%', tesFmt(-inf.retencion))}${fila('Neto financiera', tesFmt(inf.netoFin))}${fila('Retiros virtuales', tesFmt(-inf.retirado))}${fila('DEF con diferencia', inf.dif.length)}${fila('DEF sin forma de pago', inf.sinP.length)}</table>
+      <h2>Por vendedor</h2><table><tr><th>Vendedor</th><th class="n">Ventas</th><th class="n">Efectivo</th><th class="n">Transferencia</th><th class="n">Total</th></tr>${inf.vend.map(v => `<tr><td>${esc(v.v)}</td><td class="n">${v.cant}</td><td class="n">${tesFmt(v.ef)}</td><td class="n">${tesFmt(v.tr)}</td><td class="n">${tesFmt(v.ef + v.tr)}</td></tr>`).join('')}</table>
+      <h2>Detalle</h2><table><tr><th>Fecha</th><th>DEF</th><th>Vendedor</th><th>Cliente</th><th>Forma</th><th class="n">Efectivo</th><th class="n">Transf.</th><th>Nota</th></tr>${inf.conP.map(p => { const g = tesPago(p); return `<tr><td>${esc(tesTsTxt(p.ts))}</td><td>${esc(p.codigo)}</td><td>${esc(liqLabel(liqEmail(p)))}</td><td>${esc(p.cliente?.nombre || '')}</td><td>${esc(tesFormaTxt(g.forma))}</td><td class="n">${tesFmt(g.efectivo)}</td><td class="n">${tesFmt(g.transferencia)}</td><td>${esc(g.nota || '')}</td></tr>`; }).join('')}</table>
+      ${inf.retiros.length ? `<h2>Retiros virtuales</h2><table><tr><th>Fecha</th><th>Motivo</th><th class="n">Importe</th></tr>${inf.retiros.map(r => `<tr><td>${esc(tesTsTxt(r.ts))}</td><td>${esc(r.motivo)}</td><td class="n">${tesFmt(r.importe)}</td></tr>`).join('')}</table>` : ''}
+      <script>window.onload=()=>window.print()<\/script></body></html>`;
+    const w = window.open('', '_blank'); if (!w) { setAviso('⚠️ El navegador bloqueó la ventana de impresión.'); return; }
+    w.document.write(html); w.document.close();
+  };
+
+  // ── UI ──
+  const card = { ...s.card, padding:14 };
+  const kpi = (lbl, val, col, sub) => (
+    <div style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:14, padding:'10px 12px' }}>
+      <div style={{ fontSize:10, fontWeight:800, color:C.tx3, letterSpacing:'0.08em' }}>{lbl.toUpperCase()}</div>
+      <div style={{ fontSize:18, fontWeight:900, color: col || C.tx }}>{val}</div>
+      {sub && <div style={{ fontSize:11, color:C.tx3, marginTop:2 }}>{sub}</div>}
+    </div>
+  );
+  const btnMini = (bg, col, bd) => ({ padding:'8px 10px', background:bg, color:col, border:`1px solid ${bd}`, borderRadius:10, fontWeight:800, fontSize:12, cursor:'pointer', fontFamily:'inherit' });
+  const lineaDef = (p, derecha, extra) => (
+    <div key={p.codigo} style={{ padding:'9px 0', borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:13.5, fontWeight:800, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{liqLabel(liqEmail(p))} · {p.cliente?.nombre || p.cliente?.telefono || 'Sin datos'}</div>
+          <div style={{ fontSize:11, color:C.tx3 }}>{p.codigo} · {tesTsTxt(p.ts)}</div>
+        </div>
+        {derecha}
+      </div>
+      {extra}
+    </div>
+  );
+
+  return (
+    <div>
+      {modalPago && <ModalFormaPago total={tesTotalDef(modalPago)} inicial={tesPago(modalPago)} titulo={`${modalPago.codigo} · ${modalPago.cliente?.nombre || ''}`} onGuardar={guardarPagoAdmin} onCancelar={() => setModalPago(null)} />}
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+        <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>🏠 Inicio</button>
+        <div style={{ flex:1 }} />
+        <button onClick={cargar} style={{ padding:'8px 12px', background:'rgba(74,222,128,0.12)', color:'#4ade80', border:'1px solid rgba(74,222,128,0.4)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>🔄 Actualizar{sync ? ` · ${arHora(sync)}` : ''}</button>
+      </div>
+      <div style={{ fontSize:22, fontWeight:900, letterSpacing:'-0.4px', marginBottom:10 }}>🏦 Tesorería</div>
+      <AvisoSync nonce={sync} />
+      {errTes && <div style={{ ...card, borderColor:'rgba(239,68,68,0.5)', color:'#fca5a5', fontSize:12.5, fontWeight:700 }}>⚠️ No se pudieron leer retiros, feriados y ajustes de Tesorería: {errTes}</div>}
+      {aviso && <div onClick={() => setAviso('')} style={{ ...card, padding:'10px 14px', fontSize:13, fontWeight:700, color: aviso.startsWith('⚠️') ? '#fca5a5' : '#a7f3d0', borderColor: aviso.startsWith('⚠️') ? 'rgba(239,68,68,0.5)' : 'rgba(52,211,153,0.4)' }}>{aviso}</div>}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:6, marginBottom:12 }}>
+        {[['financiera','🏦 Financiera'],['efectivo','💵 Efectivo'],['informes','📊 Informes']].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} className="sel-btn" style={{ padding:'11px 6px', borderRadius:12, fontSize:12.5, fontWeight:900, cursor:'pointer', fontFamily:'inherit',
+            background: tab === k ? 'linear-gradient(180deg,rgba(120,205,190,0.24),rgba(120,205,190,0.08))' : 'rgba(255,255,255,0.05)', border: tab === k ? '1px solid rgba(120,205,190,0.6)' : '1px solid rgba(255,255,255,0.12)', color: tab === k ? '#b5e9df' : 'rgba(255,255,255,0.7)' }}>{l}</button>
+        ))}
+      </div>
+      {!pedidos && <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,0.6)' }}>Cargando…</div>}
+
+      {pedidos && tab === 'financiera' && <>
+        {abierta && Tab && (
+          <div style={{ ...card, borderColor:'rgba(120,205,190,0.45)', background:'linear-gradient(180deg,rgba(120,205,190,0.14),rgba(120,205,190,0.04))' }}>
+            <div style={s.cTit}>Disponible en la financiera</div>
+            <div style={{ fontSize:30, fontWeight:900, letterSpacing:'-0.04em', color:'#b5e9df' }}>{tesFmt(Tab.aCobrar)}</div>
+            <div style={{ fontSize:12.5, color:C.tx2, marginTop:4 }}>Liquidación abierta · corta el {tesTsTxt(abierta.corte)} · se cobra el {tesDiaTxt(abierta.pagoN)}</div>
+            <div style={{ fontSize:12, color:C.tx3, marginTop:2 }}>Neto {tesFmt(Tab.neto)} (bruto {tesFmt(Tab.bruto)} − 3,5%){Tab.retirado ? ` − retiros ${tesFmt(Tab.retirado)}` : ''}</div>
+          </div>
+        )}
+        {cerradaSinCobrar.map(l => { const t = porTramo[l.key]; return (
+          <div key={l.key} style={{ ...card, borderColor:'rgba(250,204,21,0.45)' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', gap:8, alignItems:'baseline' }}>
+              <div style={{ fontSize:13, fontWeight:800, color:'#fde68a' }}>Cerrada · se cobra el {tesDiaTxt(l.pagoN)}</div>
+              <div style={{ fontSize:20, fontWeight:900 }}>{tesFmt(t.aCobrar)}</div>
+            </div>
+            <div style={{ fontSize:11.5, color:C.tx3 }}>Cortó el {tesTsTxt(l.corte)}</div>
+          </div>
+        ); })}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:14 }}>
+          <button onClick={() => { const n = Date.now(); setFormRetiro({ importe:'', motivo:'', fecha: tesIso(tesDNdeTs(n)), hora: arHora(n) }); setVerCal(false); }} className="sel-btn" style={s.bLiq}>➖ Retiro virtual</button>
+          <button onClick={() => { setVerCal(v => !v); setFormRetiro(null); }} className="sel-btn" style={s.bLiq}>📅 Calendario</button>
+        </div>
+
+        {formRetiro && (
+          <div style={card}>
+            <div style={s.cTit}>Nuevo retiro virtual</div>
+            <label style={s.lbl}>Importe</label>
+            <input inputMode="numeric" value={tesMiles(tesNum(formRetiro.importe))} onChange={e => setFormRetiro(f => ({ ...f, importe: e.target.value }))} placeholder="$" style={{ ...s.inp, marginBottom:10 }} />
+            <label style={s.lbl}>¿Para qué es?</label>
+            <input value={formRetiro.motivo} onChange={e => setFormRetiro(f => ({ ...f, motivo: e.target.value }))} placeholder="Ej.: pago proveedor de envases" style={{ ...s.inp, marginBottom:10 }} />
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:6 }}>
+              <InputFecha value={formRetiro.fecha} onChange={e => setFormRetiro(f => ({ ...f, fecha: e.target.value }))} style={s.inp} />
+              <input type="time" value={formRetiro.hora} onChange={e => setFormRetiro(f => ({ ...f, hora: e.target.value }))} style={{ ...s.inp, colorScheme:'dark' }} />
+            </div>
+            <div style={{ fontSize:11.5, color:C.tx3, marginBottom:10 }}>Se descuenta de la liquidación abierta en esa fecha y hora.</div>
+            <G cols={2} gap={8}><button onClick={() => setFormRetiro(null)} className="sel-btn" style={s.bS}>Cancelar</button><button disabled={trabajando} onClick={guardarRetiro} className="sel-btn" style={s.bP}>{trabajando ? 'Guardando…' : 'Guardar retiro'}</button></G>
+          </div>
+        )}
+
+        {verCal && (
+          <div style={card}>
+            <div style={s.cTit}>Calendario de liquidaciones</div>
+            <div style={{ fontSize:12, color:C.tx2, marginBottom:10, lineHeight:1.45 }}>Se arma solo: corte 15:30 del último día hábil antes del pago (martes y viernes). Marcá los feriados y la app corre los cortes.</div>
+            <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+              <div style={{ flex:1 }}><InputFecha value={feriadoISO} onChange={e => setFeriadoISO(e.target.value)} style={s.inp} /></div>
+              <button disabled={!feriadoISO || trabajando} onClick={marcarFeriado} className="sel-btn" style={{ ...btnMini('rgba(250,204,21,0.14)', '#fde68a', 'rgba(250,204,21,0.45)'), padding:'0 14px' }}>Marcar feriado</button>
+            </div>
+            {[...feriados].sort().filter(f => tesDN(f) >= hoyN - 31).map(f => (
+              <div key={f} style={{ display:'flex', alignItems:'center', gap:8, fontSize:12.5, padding:'4px 0' }}>
+                <span style={{ flex:1 }}>Feriado · {tesDiaTxt(tesDN(f))}</span>
+                <button disabled={trabajando} onClick={() => correr(() => tesBorrar('FER-' + f), 'Feriado quitado')} style={btnMini('transparent', '#fca5a5', 'rgba(239,68,68,0.4)')}>Quitar</button>
+              </div>
+            ))}
+            <div style={{ marginTop:8 }}>
+              {liqs.filter(l => l.pagoN >= hoyN - 1).slice(0, 8).map(l => (
+                <div key={l.key} style={{ padding:'8px 0', borderTop:'1px solid rgba(255,255,255,0.07)' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <div style={{ flex:1, fontSize:12.5 }}>
+                      <b>Pago {tesDiaTxt(l.pagoN)}</b>{l.editada && <span style={{ color:'#fde68a' }}> · editada</span>}
+                      <div style={{ color:C.tx3, fontSize:11.5 }}>Recaudado del {tesTsTxt(l.desde)} al {tesTsTxt(l.corte)}</div>
+                    </div>
+                    <button onClick={() => { const cN = tesDNdeTs(l.corte); setEditLiq({ key: l.key, cd: tesIso(cN), ch: arHora(l.corte), pd: tesIso(l.pagoN) }); }} style={btnMini('rgba(255,255,255,0.06)', '#e2e8f0', 'rgba(255,255,255,0.2)')}>Editar</button>
+                  </div>
+                  {editLiq && editLiq.key === l.key && (
+                    <div style={{ marginTop:8 }}>
+                      <div style={{ fontSize:11.5, color:C.tx2, marginBottom:4 }}>Corte (fecha y hora)</div>
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
+                        <InputFecha value={editLiq.cd} onChange={e => setEditLiq(x => ({ ...x, cd: e.target.value }))} style={s.inp} />
+                        <input type="time" value={editLiq.ch} onChange={e => setEditLiq(x => ({ ...x, ch: e.target.value }))} style={{ ...s.inp, colorScheme:'dark' }} />
+                      </div>
+                      <div style={{ fontSize:11.5, color:C.tx2, marginBottom:4 }}>Fecha de pago</div>
+                      <InputFecha value={editLiq.pd} onChange={e => setEditLiq(x => ({ ...x, pd: e.target.value }))} style={{ ...s.inp, marginBottom:8 }} />
+                      <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                        <button disabled={trabajando} onClick={guardarEditLiq} style={btnMini('rgba(52,211,153,0.15)', '#a7f3d0', 'rgba(52,211,153,0.45)')}>Guardar</button>
+                        {l.editada && <button disabled={trabajando} onClick={() => correr(() => tesBorrar('LIQ-' + l.key), 'Liquidación restablecida').then(() => setEditLiq(null))} style={btnMini('transparent', '#fde68a', 'rgba(250,204,21,0.4)')}>Volver a la regla automática</button>}
+                        <button onClick={() => setEditLiq(null)} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.2)')}>Cancelar</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {L && T && (
+          <div style={card}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+              <button disabled={idxVer <= 0} onClick={() => setIdxTramo(idxVer - 1)} style={{ ...btnMini('rgba(255,255,255,0.06)', '#fff', 'rgba(255,255,255,0.2)'), opacity: idxVer <= 0 ? 0.35 : 1 }}>◀</button>
+              <div style={{ flex:1, textAlign:'center' }}>
+                <div style={{ fontSize:13.5, fontWeight:900 }}>Liquidación del {tesDiaTxt(L.pagoN)}{idxVer === idxAbierta ? ' · abierta' : L.corte < Date.now() ? ' · cerrada' : ' · próxima'}</div>
+                <div style={{ fontSize:11, color:C.tx3 }}>{tesTsTxt(L.desde)} → {tesTsTxt(L.corte)}</div>
+              </div>
+              <button disabled={idxVer >= liqs.length - 1} onClick={() => setIdxTramo(idxVer + 1)} style={{ ...btnMini('rgba(255,255,255,0.06)', '#fff', 'rgba(255,255,255,0.2)'), opacity: idxVer >= liqs.length - 1 ? 0.35 : 1 }}>▶</button>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
+              {kpi('Transferido', tesFmt(T.bruto), null, `${T.entradas.length} DEF`)}
+              {kpi('Retención 3,5%', tesFmt(-(T.bruto - T.neto)), '#fca5a5')}
+              {kpi('Retiros', tesFmt(-T.retirado), '#fca5a5', `${T.retiros.length} retiro${T.retiros.length !== 1 ? 's' : ''}`)}
+              {kpi('A cobrar', tesFmt(T.aCobrar), T.aCobrar >= 0 ? '#86efac' : '#f87171')}
+            </div>
+            {T.entradas.length === 0 && <div style={{ fontSize:12.5, color:C.tx3, padding:'6px 0' }}>Sin transferencias en esta liquidación.</div>}
+            {T.entradas.map(e => lineaDef(e.p,
+              <div style={{ textAlign:'right' }}>
+                <div style={{ fontSize:14, fontWeight:900 }}>{tesFmt(e.neto)}</div>
+                <div style={{ fontSize:10.5, color:C.tx3 }}>de {tesFmt(e.bruto)}{e.movida ? ' · movida' : ''}</div>
+              </div>,
+              <div style={{ display:'flex', gap:6, marginTop:6, flexWrap:'wrap' }}>
+                {idxVer > 0 && <button onClick={() => setMover({ codigo: e.p.codigo, destino: liqs[idxVer - 1].key, motivo:'' })} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.18)')}>◀ A la anterior</button>}
+                {idxVer < liqs.length - 1 && <button onClick={() => setMover({ codigo: e.p.codigo, destino: liqs[idxVer + 1].key, motivo:'' })} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.18)')}>A la próxima ▶</button>}
+                {e.movida && <button disabled={trabajando} onClick={() => correr(() => tesBorrar('REA-' + e.p.codigo), `${e.p.codigo} volvió a su liquidación por fecha`)} style={btnMini('transparent', '#fde68a', 'rgba(250,204,21,0.4)')}>↩ Por fecha</button>}
+                {mover && mover.codigo === e.p.codigo && (
+                  <div style={{ width:'100%', marginTop:4 }}>
+                    <input value={mover.motivo} onChange={ev => setMover(m => ({ ...m, motivo: ev.target.value }))} placeholder="Motivo (ej.: la financiera lo acreditó en otro tramo)" style={{ ...s.inp, padding:'9px 11px', fontSize:13, marginBottom:6 }} />
+                    <div style={{ display:'flex', gap:6 }}>
+                      <button disabled={trabajando} onClick={moverEntrada} style={btnMini('rgba(52,211,153,0.15)', '#a7f3d0', 'rgba(52,211,153,0.45)')}>Mover a la del {tesDiaTxt(liqs.find(l => l.key === mover.destino).pagoN)}</button>
+                      <button onClick={() => setMover(null)} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.2)')}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+            {T.retiros.length > 0 && <div style={{ ...s.cTit, marginTop:12, marginBottom:4 }}>Retiros virtuales</div>}
+            {T.retiros.map(r => (
+              <div key={r.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13.5, fontWeight:800 }}>{r.motivo}</div>
+                  <div style={{ fontSize:11, color:C.tx3 }}>{tesTsTxt(r.ts)}</div>
+                </div>
+                <div style={{ fontSize:14, fontWeight:900, color:'#fca5a5' }}>{tesFmt(-r.importe)}</div>
+                <button disabled={trabajando} onClick={() => correr(() => tesBorrar(r.id), 'Retiro borrado')} style={btnMini('transparent', '#fca5a5', 'rgba(239,68,68,0.4)')}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {sinPago.length > 0 && (
+          <div style={{ ...card, borderColor:'rgba(239,68,68,0.45)' }}>
+            <div style={s.cTit}>DEF sin forma de pago · {sinPago.length}</div>
+            {sinPago.slice(0, 30).map(p => lineaDef(p, <button onClick={() => setModalPago(p)} style={btnMini('rgba(249,115,22,0.15)', '#fdba74', 'rgba(249,115,22,0.45)')}>Cargar</button>))}
+          </div>
+        )}
+        {conDif.length > 0 && (
+          <div style={card}>
+            <div style={s.cTit}>DEF con diferencia de pago · {conDif.length}</div>
+            {conDif.slice(0, 30).map(p => { const g = tesPago(p); return lineaDef(p,
+              <div style={{ textAlign:'right' }}>
+                <div style={{ fontSize:13.5, fontWeight:900, color: g.diferencia < 0 ? '#fca5a5' : '#fde68a' }}>{g.diferencia < 0 ? 'Faltan' : 'Sobran'} {tesFmt(Math.abs(g.diferencia))}</div>
+                <button onClick={() => setModalPago(p)} style={{ ...btnMini('transparent', C.tx2, 'rgba(255,255,255,0.18)'), marginTop:4, padding:'4px 8px' }}>Corregir</button>
+              </div>,
+              g.nota ? <div style={{ fontSize:12, color:C.tx2, marginTop:4 }}>“{g.nota}”</div> : null); })}
+          </div>
+        )}
+      </>}
+
+      {pedidos && tab === 'efectivo' && <>
+        <div style={{ fontSize:12.5, color:C.tx2, marginBottom:10, lineHeight:1.45 }}>Solo informativo: lo cobrado en efectivo va a otra caja. No lleva saldo ni control.</div>
+        <TesSelectorPeriodo {...{ per, setPer, mesSel, setMesSel, dISO, setDISO, hISO, setHISO }} />
+        {!inf && <div style={{ fontSize:12.5, color:C.tx3 }}>Elegí el período.</div>}
+        {inf && <>
+          <div style={card}>
+            <div style={s.cTit}>{rango.txt}</div>
+            <div style={{ fontSize:28, fontWeight:900, color:'#a7f3d0' }}>{tesFmt(inf.ef)}</div>
+            <div style={{ fontSize:12, color:C.tx3 }}>cobrado en efectivo</div>
+            {inf.vend.filter(v => v.ef > 0).map(v => <div key={v.v} style={{ display:'flex', justifyContent:'space-between', fontSize:13, padding:'6px 0', borderTop:'1px solid rgba(255,255,255,0.07)', marginTop:6 }}><span>{v.v}</span><b>{tesFmt(v.ef)}</b></div>)}
+          </div>
+          <div style={card}>
+            {inf.conP.filter(p => Number(tesPago(p).efectivo) > 0).length === 0 && <div style={{ fontSize:12.5, color:C.tx3 }}>Sin cobros en efectivo en el período.</div>}
+            {inf.conP.filter(p => Number(tesPago(p).efectivo) > 0).map(p => lineaDef(p, <div style={{ textAlign:'right' }}><div style={{ fontSize:14, fontWeight:900 }}>{tesFmt(tesPago(p).efectivo)}</div><ChipPago p={p} /></div>))}
+          </div>
+        </>}
+      </>}
+
+      {pedidos && tab === 'informes' && <>
+        <TesSelectorPeriodo {...{ per, setPer, mesSel, setMesSel, dISO, setDISO, hISO, setHISO }} />
+        {!inf && <div style={{ fontSize:12.5, color:C.tx3 }}>Elegí el período.</div>}
+        {inf && <>
+          <div style={card}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+              <div style={{ ...s.cTit, marginBottom:0, flex:1 }}>{rango.txt}</div>
+              <button onClick={imprimir} style={btnMini('rgba(255,255,255,0.06)', '#e2e8f0', 'rgba(255,255,255,0.2)')}>🖨 Imprimir</button>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+              {kpi('Total cobrado', tesFmt(inf.total), null, `${inf.conP.length} DEF`)}
+              {kpi('Efectivo', tesFmt(inf.ef), '#a7f3d0')}
+              {kpi('Transferencias', tesFmt(inf.tr), '#bfdbfe')}
+              {kpi('Retención 3,5%', tesFmt(-inf.retencion), '#fca5a5')}
+              {kpi('Neto financiera', tesFmt(inf.netoFin), '#b5e9df')}
+              {kpi('Retiros virtuales', tesFmt(-inf.retirado), '#fca5a5', `${inf.retiros.length} retiro${inf.retiros.length !== 1 ? 's' : ''}`)}
+            </div>
+            {(inf.dif.length > 0 || inf.sinP.length > 0) && <div style={{ fontSize:12, color:'#fde68a', marginTop:10 }}>{inf.dif.length} DEF con diferencia · {inf.sinP.length} sin forma de pago</div>}
+          </div>
+          <div style={card}>
+            <div style={s.cTit}>Por vendedor</div>
+            {inf.vend.length === 0 && <div style={{ fontSize:12.5, color:C.tx3 }}>Sin ventas con forma de pago en el período.</div>}
+            {inf.vend.map(v => (
+              <div key={v.v} style={{ padding:'8px 0', borderTop:'1px solid rgba(255,255,255,0.07)' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:14, fontWeight:850 }}><span>{v.v} · {v.cant}</span><span>{tesFmt(v.ef + v.tr)}</span></div>
+                <div style={{ fontSize:11.5, color:C.tx3 }}>Efectivo {tesFmt(v.ef)} · Transferencia {tesFmt(v.tr)}</div>
+              </div>
+            ))}
+          </div>
+          <div style={card}>
+            <div style={s.cTit}>Detalle</div>
+            {inf.conP.map(p => { const g = tesPago(p); return lineaDef(p,
+              <div style={{ textAlign:'right' }}><div style={{ fontSize:14, fontWeight:900 }}>{tesFmt(g.total)}</div><ChipPago p={p} /></div>,
+              g.forma === 'mixto' || g.diferencia ? <div style={{ fontSize:11.5, color:C.tx3, marginTop:3 }}>{g.forma === 'mixto' ? `Efectivo ${tesFmt(g.efectivo)} · Transferencia ${tesFmt(g.transferencia)}` : ''}{g.diferencia ? `${g.forma === 'mixto' ? ' · ' : ''}${g.diferencia < 0 ? 'faltan' : 'sobran'} ${tesFmt(Math.abs(g.diferencia))}${g.nota ? ` (${g.nota})` : ''}` : ''}</div> : null); })}
+            {inf.conP.length === 0 && <div style={{ fontSize:12.5, color:C.tx3 }}>Sin ventas con forma de pago en el período.</div>}
+          </div>
+        </>}
+      </>}
+    </div>
+  );
+}
+
 function ModuloLiquidaciones({ onVolver }) {
   const [stack, setStack] = React.useState(['rol']);
   const [pos, setPos]     = React.useState(0);
@@ -7852,6 +8476,21 @@ function ModuloLiquidaciones({ onVolver }) {
     document.addEventListener('visibilitychange', alVolver);
     window.addEventListener('focus', alVolver);
     return () => { document.removeEventListener('visibilitychange', alVolver); window.removeEventListener('focus', alVolver); };
+  }, [step]);
+
+  // Tiempo real (02/11/2026): mientras la lista está abierta se actualiza sola cada 30 s y apenas
+  // cualquier vendedor guarda un pedido (canal realtime de Supabase), sin vaciar la pantalla.
+  React.useEffect(() => {
+    if (step !== 'lista') return;
+    let vivo = true;
+    const silencioso = () => {
+      if (document.hidden) return;
+      Promise.all([listLS(), liqCargarAsignaciones()]).then(([arr, m]) => { if (!vivo) return; if (Array.isArray(arr)) setPedidosData(arr); setAsig(m || {}); setUltimaSync(Date.now()); });
+    };
+    const t = setInterval(silencioso, 30000);
+    let canal = null;
+    try { canal = supaClient?.channel('liq-pedidos-' + Date.now()).on('postgres_changes', { event:'*', schema:'public', table:'pedidos' }, silencioso).subscribe(); } catch (_) {}
+    return () => { vivo = false; clearInterval(t); try { canal && supaClient.removeChannel(canal); } catch (_) {} };
   }, [step]);
 
   const rango = React.useMemo(() => {
@@ -8036,6 +8675,7 @@ function ModuloLiquidaciones({ onVolver }) {
                 style={getRolBtnStyle(r, false)}>
                 <span style={{ fontSize:34, lineHeight:1 }}>{r.icon}</span>
                 <span style={{ textAlign:'center', lineHeight:1.2 }}>{r.label}</span>
+                {r.key === 'admin' && <span style={{ fontSize:10.5, fontWeight:700, opacity:0.8 }}>solo tus ventas</span>}
               </button>
             ))}
           </div>
@@ -8053,6 +8693,7 @@ function ModuloLiquidaciones({ onVolver }) {
               style={getRolBtnStyle(r, true)}>
               <span style={{ fontSize:30, lineHeight:1 }}>{r.icon}</span>
               <span>{r.label}</span>
+              <span style={{ fontSize:10.5, fontWeight:700, opacity:0.85 }}>todos los vendedores</span>
             </button>
           ))}
         </div>

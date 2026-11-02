@@ -7300,6 +7300,18 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
   const [noLeidasVG, setNoLeidasVG] = useState(0);
   const [noLeidasEnt, setNoLeidasEnt] = useState(0); // avisos de Entregas sin leer (NEGOCIO y ADMIN)
   const [pendAsig, setPendAsig] = useState(0);        // ventas a asignar (solo ADMIN)
+  const [tesPend, setTesPend] = useState(0);          // DEF sin revisar en Tesorería (solo ADMIN)
+  React.useEffect(() => {
+    if (!esAdmin(usuarioActual)) return;
+    let vivo = true;
+    const tick = () => { if (document.hidden) return; tesContarPendientes().then(n => { if (vivo && n != null) setTesPend(n); }); };
+    tick(); const t = setInterval(tick, 30000);
+    const alVolver = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', alVolver);
+    let canal = null;
+    try { canal = supaClient?.channel('tes-badge-' + Date.now()).on('postgres_changes', { event:'*', schema:'public', table:'pedidos' }, tick).subscribe(); } catch (_) {}
+    return () => { vivo = false; clearInterval(t); document.removeEventListener('visibilitychange', alVolver); try { canal && supaClient.removeChannel(canal); } catch (_) {} };
+  }, [usuarioActual]);
   const [trackDesde, setTrackDesde] = useState('inicio');
   React.useEffect(() => {
     if (!esAdmin(usuarioActual)) return;
@@ -7593,7 +7605,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
                 <Tile icon="🛵" label={<>Liquidación<br/>Flex</>} rgb={RGB.na} onClick={()=>setEtapa('liquidacion_flex')} />
                 <Tile icon="🚚" label={<>Entregas de<br/>pedidos</>} rgb="251,191,36" badge={noLeidasEnt} onClick={()=>setEtapa('entregas')} />
                 <Tile icon="📣" label="Marketing" rgb="244,114,182" onClick={()=>setEtapa('marketing')} />
-                <Tile icon="🏦" label="Tesorería" rgb="120,205,190" tag="NUEVO" onClick={()=>setEtapa('tesoreria')} />
+                <Tile icon="🏦" label="Tesorería" rgb="120,205,190" badge={tesPend} onClick={()=>setEtapa('tesoreria')} />
                 <Tile icon="🔁" label={<>Asignar<br/>ventas</>} rgb="167,139,250" badge={pendAsig} onClick={()=>setEtapa('asignar_ventas')} />
               </G>
               {/* Fila finita, mitad y mitad (02/11/2026) */}
@@ -7650,7 +7662,7 @@ const App = ({ usuarioActual, onCerrarSesion } = {}) => {
         )}
         {etapa==='lista_precios' && (esAdmin(usuarioActual) || esNegocio(usuarioActual)) && <ModuloListaPrecios onVolver={irInicio} verCostos={esAdmin(usuarioActual) || esNegocio(usuarioActual)} puedePrecargar={esAdmin(usuarioActual)} />}
         {etapa==='ventas_ganancia' && esAdmin(usuarioActual) && <ModuloVentasGanancia onVolver={irInicio} onCambioNoLeidas={setNoLeidasVG} />}
-        {etapa==='tesoreria' && esAdmin(usuarioActual) && <ModuloTesoreria onVolver={irInicio} />}
+        {etapa==='tesoreria' && esAdmin(usuarioActual) && <ModuloTesoreria onVolver={irInicio} onCambio={setTesPend} />}
 
       </div>
     </div>
@@ -7874,6 +7886,26 @@ const tesBorrar = async (id) => {
   catch (e) { return e?.message || 'error'; }
 };
 
+// ── Revisión del admin (02/11/2026): cada DEF desde TES_DESDE queda pendiente hasta que el admin la revisa.
+// Se guarda en liq_asignaciones como 'TES|REV-<codigo>' (no en el pedido, para que un guardado viejo de otro
+// usuario no la pise). Si después cambian la forma de pago (pago.ts más nuevo), vuelve a pendiente.
+const tesRevMapa = filas => { const m = {}; (filas || []).filter(f => f.tipo === 'rev' && f.data && f.data.codigo).forEach(f => { m[f.data.codigo] = f.data; }); return m; };
+const tesPendienteRev = (p, rev) => !!p && p.tipo === 'DEF' && typeof p.ts === 'number' && p.ts >= TES_DESDE
+  && (!rev[p.codigo] || (Number(tesPago(p)?.ts) || 0) > (Number(rev[p.codigo].pagoTs) || 0));
+// Globito del botón Tesorería: consulta liviana (solo código, fecha y pago de los DEF desde TES_DESDE)
+const tesContarPendientes = async () => {
+  if (!supaClient) return null;
+  try {
+    const [ped, t] = await Promise.all([
+      supaTraerTodo(() => supaClient.from('pedidos').select('codigo,ts,pago:data->pago').gte('ts', TES_DESDE).like('codigo', 'DEF%').order('ts', { ascending:true }).order('codigo', { ascending:true })),
+      tesCargar()
+    ]);
+    if (t.error) return null;
+    const rev = tesRevMapa(t.filas);
+    return (ped || []).filter(r => tesPendienteRev({ codigo: r.codigo, tipo:'DEF', ts: Number(r.ts), pago: r.pago }, rev)).length;
+  } catch (e) { return null; }
+};
+
 // ── Ventana Forma de pago (vendedores al confirmar el DEF; admin desde Tesorería) ──
 function ModalFormaPago({ total, inicial, titulo, onGuardar, onCancelar }) {
   const [forma, setForma] = React.useState(inicial?.forma || 'transferencia');
@@ -7995,12 +8027,14 @@ function TesSelectorPeriodo({ per, setPer, mesSel, setMesSel, dISO, setDISO, hIS
 }
 
 // ── Módulo TESORERÍA (solo admin) ──
-function ModuloTesoreria({ onVolver }) {
+function ModuloTesoreria({ onVolver, onCambio }) {
   const [pedidos, setPedidos] = React.useState(null);
   const [filasTes, setFilasTes] = React.useState([]);
   const [errTes, setErrTes] = React.useState('');
   const [sync, setSync] = React.useState(null);
-  const [tab, setTab] = React.useState('financiera');
+  const [tab, setTab] = React.useState('revisar');
+  const [confBorrar, setConfBorrar] = React.useState(null);
+  const [verRevisadas, setVerRevisadas] = React.useState(false);
   const [idxTramo, setIdxTramo] = React.useState(null);
   const [modalPago, setModalPago] = React.useState(null);   // pedido al que se le carga la forma de pago
   const [formRetiro, setFormRetiro] = React.useState(null);  // { importe, motivo, fecha, hora }
@@ -8034,6 +8068,7 @@ function ModuloTesoreria({ onVolver }) {
   const reasig = React.useMemo(() => { const o = {}; filasTes.filter(f => f.tipo === 'reasig' && f.data?.codigo).forEach(f => { o[f.data.codigo] = f.data; }); return o; }, [filasTes]);
   const retiros = React.useMemo(() => filasTes.filter(f => f.tipo === 'retiro' && f.data).map(f => ({ id: f.id, ...f.data })).sort((a, b) => a.ts - b.ts), [filasTes]);
 
+  const rev = React.useMemo(() => tesRevMapa(filasTes), [filasTes]);
   const hoyN = tesDNdeTs(Date.now());
   const liqs = React.useMemo(() => tesLiquidaciones(tesDNdeTs(TES_DESDE) - 7, hoyN + 60, feriados, overrides), [feriados, overrides, hoyN]);
   const idxAbierta = Math.max(0, liqs.findIndex(l => l.corte >= Date.now()));
@@ -8044,6 +8079,9 @@ function ModuloTesoreria({ onVolver }) {
   const sinPago = React.useMemo(() => defs.filter(p => p.ts >= TES_DESDE && !tesPago(p)).sort((a, b) => b.ts - a.ts), [defs]);
   const conDif = React.useMemo(() => defsConPago.filter(p => Number(tesPago(p).diferencia) !== 0).sort((a, b) => b.ts - a.ts), [defsConPago]);
 
+  const pendRev = React.useMemo(() => defs.filter(p => tesPendienteRev(p, rev)).sort((a, b) => b.ts - a.ts), [defs, rev]);
+  const revisadas = React.useMemo(() => defs.filter(p => p.ts >= TES_DESDE && rev[p.codigo] && !tesPendienteRev(p, rev)).sort((a, b) => (rev[b.codigo].ts || 0) - (rev[a.codigo].ts || 0)), [defs, rev]);
+  React.useEffect(() => { if (pedidos && !errTes && onCambio) onCambio(pendRev.length); }, [pendRev.length, pedidos, errTes]);
   // Entradas de financiera agrupadas por liquidación (reasignación manual > fecha del DEF)
   const porTramo = React.useMemo(() => {
     const m = {}; liqs.forEach(l => { m[l.key] = { entradas: [], retiros: [] }; });
@@ -8076,8 +8114,20 @@ function ModuloTesoreria({ onVolver }) {
   const guardarPagoAdmin = async (pago) => {
     const p = modalPago; const nuevo = { ...p, pago };
     await saveLS(nuevo);
+    // Si ya estaba revisada, la corrección del admin no la vuelve a pendiente
+    if (rev[p.codigo] && !tesPendienteRev(p, rev)) await tesGuardar('REV-' + p.codigo, 'rev', { ...rev[p.codigo], pagoTs: pago.ts });
     setPedidos(prev => (prev || []).map(x => x.codigo === p.codigo ? nuevo : x)); setModalPago(null); setAviso(`✓ Forma de pago de ${p.codigo} guardada`);
+    cargar();
     return null;
+  };
+  const marcarRevisada = async (p) => { const por = await quien(); await correr(() => tesGuardar('REV-' + p.codigo, 'rev', { codigo: p.codigo, pagoTs: Number(tesPago(p)?.ts) || 0, por, ts: Date.now() }), `✓ ${p.codigo} revisada`); };
+  const desmarcar = async (p) => { await correr(() => tesBorrar('REV-' + p.codigo), `${p.codigo} volvió a Revisar`); };
+  const borrarVenta = async (p) => {
+    setConfBorrar(null); setTrabajando(true); setAviso('');
+    const ok = await deleteLS(p.codigo);
+    setTrabajando(false);
+    if (!ok) { setAviso(`⚠️ No se pudo borrar ${p.codigo} en la base. Revisá la conexión y probá de nuevo.`); return; }
+    setPedidos(prev => (prev || []).filter(x => x.codigo !== p.codigo)); setAviso(`✓ ${p.codigo} borrada`);
   };
   const moverEntrada = async () => {
     const por = await quien();
@@ -8147,6 +8197,46 @@ function ModuloTesoreria({ onVolver }) {
     </div>
   );
 
+  const tarjetaRev = (p, yaRevisada) => {
+    const g = tesPago(p); const r = rev[p.codigo]; const cambiada = !yaRevisada && r && g && (Number(g.ts) || 0) > (Number(r.pagoTs) || 0);
+    return (
+      <div key={p.codigo} style={{ ...card, borderColor: yaRevisada ? 'rgba(255,255,255,0.10)' : g ? 'rgba(120,205,190,0.4)' : 'rgba(239,68,68,0.5)' }}>
+        <div style={{ display:'flex', gap:8, alignItems:'flex-start' }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:14, fontWeight:850, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{liqLabel(liqEmail(p))} · {p.cliente?.nombre || p.cliente?.telefono || 'Sin datos'}</div>
+            <div style={{ fontSize:11, color:C.tx3 }}>{p.codigo} · {tesTsTxt(p.ts)}</div>
+          </div>
+          <div style={{ fontSize:16, fontWeight:900, whiteSpace:'nowrap' }}>{tesFmt(tesTotalDef(p))}</div>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginTop:8, fontSize:12.5 }}>
+          {g ? <><ChipPago p={p} /><span style={{ color:C.tx2 }}>Cobrado {tesFmt(g.total)}{g.forma === 'mixto' ? ` (efectivo ${tesFmt(g.efectivo)} · transferencia ${tesFmt(g.transferencia)})` : ''}</span></>
+             : <span style={{ color:'#fca5a5', fontWeight:800 }}>Sin forma de pago</span>}
+        </div>
+        {g && Number(g.diferencia) !== 0 && <div style={{ fontSize:12, color: g.diferencia < 0 ? '#fca5a5' : '#fde68a', marginTop:4 }}>{g.diferencia < 0 ? 'Faltan' : 'Sobran'} {tesFmt(Math.abs(g.diferencia))}{g.nota ? ` · “${g.nota}”` : ''}</div>}
+        {cambiada && <div style={{ fontSize:11.5, color:'#fde68a', marginTop:4 }}>Cambiaron la forma de pago después de tu revisión.</div>}
+        {yaRevisada && r && <div style={{ fontSize:11, color:C.tx3, marginTop:4 }}>Revisada el {tesTsTxt(r.ts)}</div>}
+        {confBorrar === p.codigo ? (
+          <div style={{ marginTop:10, padding:10, borderRadius:12, background:'rgba(239,68,68,0.12)', border:'1px solid rgba(239,68,68,0.45)' }}>
+            <div style={{ fontSize:13, fontWeight:800, color:'#fecaca', marginBottom:8 }}>¿Borrar {p.codigo}? La venta se elimina de toda la app y no se puede deshacer.</div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button disabled={trabajando} onClick={() => borrarVenta(p)} style={btnMini('rgba(239,68,68,0.25)', '#fecaca', 'rgba(239,68,68,0.6)')}>Sí, borrar</button>
+              <button onClick={() => setConfBorrar(null)} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.2)')}>Cancelar</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,minmax(0,1fr))', gap:6, marginTop:10 }}>
+            {yaRevisada
+              ? <button disabled={trabajando} onClick={() => desmarcar(p)} style={btnMini('transparent', '#fde68a', 'rgba(250,204,21,0.4)')}>↩ Desmarcar</button>
+              : <button disabled={trabajando || !g} onClick={() => marcarRevisada(p)} style={{ ...btnMini('rgba(52,211,153,0.16)', '#a7f3d0', 'rgba(52,211,153,0.5)'), opacity: g ? 1 : 0.4, cursor: g ? 'pointer' : 'not-allowed' }}>✓ Revisado</button>}
+            <button onClick={() => setModalPago(p)} style={btnMini('rgba(249,115,22,0.14)', '#fdba74', 'rgba(249,115,22,0.45)')}>{g ? '✏️ Modificar pago' : '💳 Registrar pago'}</button>
+            <button onClick={() => setConfBorrar(p.codigo)} style={btnMini('transparent', '#fca5a5', 'rgba(239,68,68,0.4)')}>🗑 Borrar</button>
+          </div>
+        )}
+        {!yaRevisada && !g && <div style={{ fontSize:11, color:C.tx3, marginTop:6 }}>Para marcarla como revisada, primero registrá la forma de pago.</div>}
+      </div>
+    );
+  };
+
   return (
     <div>
       {modalPago && <ModalFormaPago total={tesTotalDef(modalPago)} inicial={tesPago(modalPago)} titulo={`${modalPago.codigo} · ${modalPago.cliente?.nombre || ''}`} onGuardar={guardarPagoAdmin} onCancelar={() => setModalPago(null)} />}
@@ -8159,13 +8249,21 @@ function ModuloTesoreria({ onVolver }) {
       <AvisoSync nonce={sync} />
       {errTes && <div style={{ ...card, borderColor:'rgba(239,68,68,0.5)', color:'#fca5a5', fontSize:12.5, fontWeight:700 }}>⚠️ No se pudieron leer retiros, feriados y ajustes de Tesorería: {errTes}</div>}
       {aviso && <div onClick={() => setAviso('')} style={{ ...card, padding:'10px 14px', fontSize:13, fontWeight:700, color: aviso.startsWith('⚠️') ? '#fca5a5' : '#a7f3d0', borderColor: aviso.startsWith('⚠️') ? 'rgba(239,68,68,0.5)' : 'rgba(52,211,153,0.4)' }}>{aviso}</div>}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:6, marginBottom:12 }}>
-        {[['financiera','🏦 Financiera'],['efectivo','💵 Efectivo'],['informes','📊 Informes']].map(([k, l]) => (
-          <button key={k} onClick={() => setTab(k)} className="sel-btn" style={{ padding:'11px 6px', borderRadius:12, fontSize:12.5, fontWeight:900, cursor:'pointer', fontFamily:'inherit',
-            background: tab === k ? 'linear-gradient(180deg,rgba(120,205,190,0.24),rgba(120,205,190,0.08))' : 'rgba(255,255,255,0.05)', border: tab === k ? '1px solid rgba(120,205,190,0.6)' : '1px solid rgba(255,255,255,0.12)', color: tab === k ? '#b5e9df' : 'rgba(255,255,255,0.7)' }}>{l}</button>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,minmax(0,1fr))', gap:6, marginBottom:12 }}>
+        {[['revisar','Revisar'],['financiera','Financiera'],['efectivo','Efectivo'],['informes','Informes']].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} className="sel-btn" style={{ position:'relative', padding:'11px 4px', borderRadius:12, fontSize:12, fontWeight:900, cursor:'pointer', fontFamily:'inherit',
+            background: tab === k ? 'linear-gradient(180deg,rgba(120,205,190,0.24),rgba(120,205,190,0.08))' : 'rgba(255,255,255,0.05)', border: tab === k ? '1px solid rgba(120,205,190,0.6)' : '1px solid rgba(255,255,255,0.12)', color: tab === k ? '#b5e9df' : 'rgba(255,255,255,0.7)' }}>{l}{k === 'revisar' && pendRev.length > 0 && <span style={{ position:'absolute', top:-7, right:-5, minWidth:20, height:20, borderRadius:10, background:'#e5484d', color:'#fff', fontSize:11, fontWeight:900, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 5px', boxShadow:'0 0 0 2px #0A0F16' }}>{pendRev.length}</span>}</button>
         ))}
       </div>
       {!pedidos && <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,0.6)' }}>Cargando…</div>}
+
+      {pedidos && tab === 'revisar' && <>
+        <div style={{ fontSize:12.5, color:C.tx2, marginBottom:10, lineHeight:1.45 }}>Cada DEF que confirma un vendedor queda acá hasta que la revisás. Si después cambian la forma de pago, vuelve a aparecer.</div>
+        {pendRev.length === 0 && <div style={{ ...card, textAlign:'center', color:'#86efac', fontWeight:800 }}>✓ No hay ventas para revisar.</div>}
+        {pendRev.map(p => tarjetaRev(p, false))}
+        {revisadas.length > 0 && <button onClick={() => setVerRevisadas(v => !v)} className="sel-btn" style={{ ...s.bS, width:'100%', marginTop:6, marginBottom:10 }}>{verRevisadas ? '▲' : '▼'} Revisadas ({revisadas.length})</button>}
+        {verRevisadas && revisadas.slice(0, 60).map(p => tarjetaRev(p, true))}
+      </>}
 
       {pedidos && tab === 'financiera' && <>
         {abierta && Tab && (
@@ -8269,14 +8367,15 @@ function ModuloTesoreria({ onVolver }) {
               {kpi('A cobrar', tesFmt(T.aCobrar), T.aCobrar >= 0 ? '#86efac' : '#f87171')}
             </div>
             {T.entradas.length === 0 && <div style={{ fontSize:12.5, color:C.tx3, padding:'6px 0' }}>Sin transferencias en esta liquidación.</div>}
+            {T.entradas.length > 0 && <div style={{ fontSize:11.5, color:C.tx3, margin:'2px 0 4px', lineHeight:1.4 }}>Si la financiera te paga una transferencia en otro cobro (por ejemplo, entró después de las 15:30), movela con «Pasar al cobro del…».</div>}
             {T.entradas.map(e => lineaDef(e.p,
               <div style={{ textAlign:'right' }}>
                 <div style={{ fontSize:14, fontWeight:900 }}>{tesFmt(e.neto)}</div>
                 <div style={{ fontSize:10.5, color:C.tx3 }}>de {tesFmt(e.bruto)}{e.movida ? ' · movida' : ''}</div>
               </div>,
               <div style={{ display:'flex', gap:6, marginTop:6, flexWrap:'wrap' }}>
-                {idxVer > 0 && <button onClick={() => setMover({ codigo: e.p.codigo, destino: liqs[idxVer - 1].key, motivo:'' })} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.18)')}>◀ A la anterior</button>}
-                {idxVer < liqs.length - 1 && <button onClick={() => setMover({ codigo: e.p.codigo, destino: liqs[idxVer + 1].key, motivo:'' })} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.18)')}>A la próxima ▶</button>}
+                {idxVer > 0 && <button onClick={() => setMover({ codigo: e.p.codigo, destino: liqs[idxVer - 1].key, motivo:'' })} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.18)')}>◀ Pasar al cobro del {tesDiaTxt(liqs[idxVer - 1].pagoN)}</button>}
+                {idxVer < liqs.length - 1 && <button onClick={() => setMover({ codigo: e.p.codigo, destino: liqs[idxVer + 1].key, motivo:'' })} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.18)')}>Pasar al cobro del {tesDiaTxt(liqs[idxVer + 1].pagoN)} ▶</button>}
                 {e.movida && <button disabled={trabajando} onClick={() => correr(() => tesBorrar('REA-' + e.p.codigo), `${e.p.codigo} volvió a su liquidación por fecha`)} style={btnMini('transparent', '#fde68a', 'rgba(250,204,21,0.4)')}>↩ Por fecha</button>}
                 {mover && mover.codigo === e.p.codigo && (
                   <div style={{ width:'100%', marginTop:4 }}>
@@ -8303,12 +8402,7 @@ function ModuloTesoreria({ onVolver }) {
           </div>
         )}
 
-        {sinPago.length > 0 && (
-          <div style={{ ...card, borderColor:'rgba(239,68,68,0.45)' }}>
-            <div style={s.cTit}>DEF sin forma de pago · {sinPago.length}</div>
-            {sinPago.slice(0, 30).map(p => lineaDef(p, <button onClick={() => setModalPago(p)} style={btnMini('rgba(249,115,22,0.15)', '#fdba74', 'rgba(249,115,22,0.45)')}>Cargar</button>))}
-          </div>
-        )}
+        {sinPago.length > 0 && <div onClick={() => setTab('revisar')} style={{ ...card, cursor:'pointer', borderColor:'rgba(239,68,68,0.45)', fontSize:13, fontWeight:700, color:'#fecaca' }}>⚠️ {sinPago.length} DEF sin forma de pago: no suman en la financiera hasta que se cargue. Tocá para ir a Revisar.</div>}
         {conDif.length > 0 && (
           <div style={card}>
             <div style={s.cTit}>DEF con diferencia de pago · {conDif.length}</div>

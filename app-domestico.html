@@ -8203,42 +8203,51 @@ function ModuloTesoreria({ onVolver, onCambio }) {
     </div>
   );
 
-  const tarjetaRev = (p, yaRevisada) => {
+  // Tesorería simple (Fede 02/11): arriba solo Disponible y A cobrar; una línea por venta que se abre al tocarla.
+  const [abierto, setAbierto] = React.useState(null);
+  const filaBtn = { width:'100%', display:'flex', alignItems:'center', gap:10, padding:'11px 2px', background:'none', border:'none', color:C.tx, fontFamily:'inherit', textAlign:'left', cursor:'pointer' };
+  const filaRev = (p, yaRevisada) => {
     const g = tesPago(p); const r = rev[p.codigo]; const cambiada = !yaRevisada && r && g && (Number(g.ts) || 0) > (Number(r.pagoTs) || 0);
+    const open = abierto === p.codigo;
+    const punto = yaRevisada ? 'rgba(255,255,255,0.22)' : !g ? '#ef4444' : (cambiada || Number(g.diferencia)) ? '#facc15' : '#5eead4';
     return (
-      <div key={p.codigo} style={{ ...card, borderColor: yaRevisada ? 'rgba(255,255,255,0.10)' : g ? 'rgba(120,205,190,0.4)' : 'rgba(239,68,68,0.5)' }}>
-        <div style={{ display:'flex', gap:8, alignItems:'flex-start' }}>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:14, fontWeight:850, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{liqLabel(liqEmail(p))} · {p.cliente?.nombre || p.cliente?.telefono || 'Sin datos'}</div>
-            <div style={{ fontSize:11, color:C.tx3 }}>{p.codigo} · {tesTsTxt(p.ts)}</div>
-          </div>
-          <div style={{ fontSize:16, fontWeight:900, whiteSpace:'nowrap' }}>{tesFmt(tesTotalDef(p))}</div>
-        </div>
-        <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginTop:8, fontSize:12.5 }}>
-          {g ? <><ChipPago p={p} /><span style={{ color:C.tx2 }}>Cobrado {tesFmt(g.total)}{g.forma === 'mixto' ? ` (efectivo ${tesFmt(g.efectivo)} · transferencia ${tesFmt(g.transferencia)})` : ''}</span></>
-             : <span style={{ color:'#fca5a5', fontWeight:800 }}>Sin forma de pago</span>}
-        </div>
-        {g && Number(g.diferencia) !== 0 && <div style={{ fontSize:12, color: g.diferencia < 0 ? '#fca5a5' : '#fde68a', marginTop:4 }}>{g.diferencia < 0 ? 'Faltan' : 'Sobran'} {tesFmt(Math.abs(g.diferencia))}{g.nota ? ` · “${g.nota}”` : ''}</div>}
-        {cambiada && <div style={{ fontSize:11.5, color:'#fde68a', marginTop:4 }}>Cambiaron la forma de pago después de tu revisión.</div>}
-        {yaRevisada && r && <div style={{ fontSize:11, color:C.tx3, marginTop:4 }}>Revisada el {tesTsTxt(r.ts)}</div>}
-        {confBorrar === p.codigo ? (
-          <div style={{ marginTop:10, padding:10, borderRadius:12, background:'rgba(239,68,68,0.12)', border:'1px solid rgba(239,68,68,0.45)' }}>
-            <div style={{ fontSize:13, fontWeight:800, color:'#fecaca', marginBottom:8 }}>¿Borrar {p.codigo}? La venta se elimina de toda la app y no se puede deshacer.</div>
-            <div style={{ display:'flex', gap:8 }}>
-              <button disabled={trabajando} onClick={() => borrarVenta(p)} style={btnMini('rgba(239,68,68,0.25)', '#fecaca', 'rgba(239,68,68,0.6)')}>Sí, borrar</button>
-              <button onClick={() => setConfBorrar(null)} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.2)')}>Cancelar</button>
+      <div key={p.codigo} style={{ borderTop:'1px solid rgba(255,255,255,0.07)' }}>
+        <button onClick={() => { setAbierto(open ? null : p.codigo); setConfBorrar(null); }} style={filaBtn}>
+          <span style={{ width:9, height:9, borderRadius:5, flexShrink:0, background:punto }} />
+          <span style={{ flex:1, minWidth:0 }}>
+            <span style={{ display:'block', fontSize:14, fontWeight:800, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.cliente?.nombre || p.cliente?.telefono || 'Sin datos'}</span>
+            <span style={{ display:'block', fontSize:11.5, color:C.tx3, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{liqLabel(liqEmail(p))} · {tesTsTxt(p.ts)} · {g ? tesFormaTxt(g.forma) : 'sin forma de pago'}</span>
+          </span>
+          <span style={{ fontSize:15, fontWeight:900, whiteSpace:'nowrap' }}>{tesFmt(tesTotalDef(p))}</span>
+        </button>
+        {open && (
+          <div style={{ padding:'0 2px 12px 19px' }}>
+            <div style={{ fontSize:12, color:C.tx2, lineHeight:1.45 }}>
+              {p.codigo}{g ? ` · cobrado ${tesFmt(g.total)}` : ''}{g && g.forma === 'mixto' ? ` (efectivo ${tesFmt(g.efectivo)} · transferencia ${tesFmt(g.transferencia)})` : ''}
             </div>
-          </div>
-        ) : (
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,minmax(0,1fr))', gap:6, marginTop:10 }}>
-            {yaRevisada
-              ? <button disabled={trabajando} onClick={() => desmarcar(p)} style={btnMini('transparent', '#fde68a', 'rgba(250,204,21,0.4)')}>↩ Desmarcar</button>
-              : <button disabled={trabajando || !g} onClick={() => marcarRevisada(p)} style={{ ...btnMini('rgba(52,211,153,0.16)', '#a7f3d0', 'rgba(52,211,153,0.5)'), opacity: g ? 1 : 0.4, cursor: g ? 'pointer' : 'not-allowed' }}>✓ Revisado</button>}
-            <button onClick={() => setModalPago(p)} style={btnMini('rgba(249,115,22,0.14)', '#fdba74', 'rgba(249,115,22,0.45)')}>{g ? '✏️ Modificar pago' : '💳 Registrar pago'}</button>
-            <button onClick={() => setConfBorrar(p.codigo)} style={btnMini('transparent', '#fca5a5', 'rgba(239,68,68,0.4)')}>🗑 Borrar</button>
+            {g && Number(g.diferencia) !== 0 && <div style={{ fontSize:12, color: g.diferencia < 0 ? '#fca5a5' : '#fde68a' }}>{g.diferencia < 0 ? 'Faltan' : 'Sobran'} {tesFmt(Math.abs(g.diferencia))}{g.nota ? ` · “${g.nota}”` : ''}</div>}
+            {cambiada && <div style={{ fontSize:12, color:'#fde68a' }}>Cambiaron la forma de pago después de tu revisión.</div>}
+            {yaRevisada && r && <div style={{ fontSize:11.5, color:C.tx3 }}>Revisada el {tesTsTxt(r.ts)}</div>}
+            {confBorrar === p.codigo ? (
+              <div style={{ marginTop:8, padding:10, borderRadius:12, background:'rgba(239,68,68,0.12)', border:'1px solid rgba(239,68,68,0.45)' }}>
+                <div style={{ fontSize:13, fontWeight:800, color:'#fecaca', marginBottom:8 }}>¿Borrar {p.codigo}? Se elimina de toda la app y no se puede deshacer.</div>
+                <div style={{ display:'flex', gap:8 }}>
+                  <button disabled={trabajando} onClick={() => borrarVenta(p)} style={btnMini('rgba(239,68,68,0.25)', '#fecaca', 'rgba(239,68,68,0.6)')}>Sí, borrar</button>
+                  <button onClick={() => setConfBorrar(null)} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.2)')}>Cancelar</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3,minmax(0,1fr))', gap:6, marginTop:8 }}>
+                {yaRevisada
+                  ? <button disabled={trabajando} onClick={() => desmarcar(p)} style={btnMini('transparent', '#fde68a', 'rgba(250,204,21,0.4)')}>↩ Desmarcar</button>
+                  : <button disabled={trabajando || !g} onClick={() => { setAbierto(null); marcarRevisada(p); }} style={{ ...btnMini('rgba(52,211,153,0.16)', '#a7f3d0', 'rgba(52,211,153,0.5)'), opacity: g ? 1 : 0.4, cursor: g ? 'pointer' : 'not-allowed' }}>✓ Revisado</button>}
+                <button onClick={() => setModalPago(p)} style={btnMini('rgba(249,115,22,0.14)', '#fdba74', 'rgba(249,115,22,0.45)')}>{g ? '✏️ Pago' : '💳 Cargar pago'}</button>
+                <button onClick={() => setConfBorrar(p.codigo)} style={btnMini('transparent', '#fca5a5', 'rgba(239,68,68,0.4)')}>🗑 Borrar</button>
+              </div>
+            )}
+            {!yaRevisada && !g && <div style={{ fontSize:11, color:C.tx3, marginTop:6 }}>Primero cargá la forma de pago para poder marcarla.</div>}
           </div>
         )}
-        {!yaRevisada && !g && <div style={{ fontSize:11, color:C.tx3, marginTop:6 }}>Para marcarla como revisada, primero registrá la forma de pago.</div>}
       </div>
     );
   };
@@ -8255,49 +8264,46 @@ function ModuloTesoreria({ onVolver, onCambio }) {
       <AvisoSync nonce={sync} />
       {errTes && <div style={{ ...card, borderColor:'rgba(239,68,68,0.5)', color:'#fca5a5', fontSize:12.5, fontWeight:700 }}>⚠️ No se pudieron leer retiros, feriados y ajustes de Tesorería: {errTes}</div>}
       {aviso && <div onClick={() => setAviso('')} style={{ ...card, padding:'10px 14px', fontSize:13, fontWeight:700, color: aviso.startsWith('⚠️') ? '#fca5a5' : '#a7f3d0', borderColor: aviso.startsWith('⚠️') ? 'rgba(239,68,68,0.5)' : 'rgba(52,211,153,0.4)' }}>{aviso}</div>}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,minmax(0,1fr))', gap:6, marginBottom:12 }}>
-        {[['revisar','Revisar'],['financiera','Financiera'],['efectivo','Efectivo'],['informes','Informes']].map(([k, l]) => (
-          <button key={k} onClick={() => setTab(k)} className="sel-btn" style={{ position:'relative', padding:'11px 4px', borderRadius:12, fontSize:12, fontWeight:900, cursor:'pointer', fontFamily:'inherit',
-            background: tab === k ? 'linear-gradient(180deg,rgba(120,205,190,0.24),rgba(120,205,190,0.08))' : 'rgba(255,255,255,0.05)', border: tab === k ? '1px solid rgba(120,205,190,0.6)' : '1px solid rgba(255,255,255,0.12)', color: tab === k ? '#b5e9df' : 'rgba(255,255,255,0.7)' }}>{l}{k === 'revisar' && pendRev.length > 0 && <span style={{ position:'absolute', top:-7, right:-5, minWidth:20, height:20, borderRadius:10, background:'#e5484d', color:'#fff', fontSize:11, fontWeight:900, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 5px', boxShadow:'0 0 0 2px #0A0F16' }}>{pendRev.length}</span>}</button>
+      {pedidos && (
+        <div style={{ ...card, borderColor:'rgba(120,205,190,0.45)', background:'linear-gradient(180deg,rgba(120,205,190,0.14),rgba(120,205,190,0.04))' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(2,minmax(0,1fr))', gap:12 }}>
+            <div>
+              <div style={{ fontSize:12, fontWeight:700, color:C.tx2 }}>Disponible</div>
+              <div style={{ fontSize:25, fontWeight:900, letterSpacing:'-0.04em', color:'#b5e9df' }}>{tesFmt(disponible)}</div>
+            </div>
+            {proxima && porTramo[proxima.key] && (
+              <div>
+                <div style={{ fontSize:12, fontWeight:700, color:C.tx2 }}>A cobrar el {tesDiaTxt(proxima.pagoN)}</div>
+                <div style={{ fontSize:25, fontWeight:900, letterSpacing:'-0.04em', color:'#fde68a' }}>{tesFmt(porTramo[proxima.key].aCobrar)}</div>
+                <div style={{ fontSize:11, color:C.tx3 }}>{proxima.corte > ahora ? `corta ${tesTsTxt(proxima.corte)}` : 'cerrado'}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,minmax(0,1fr))', gap:6, marginBottom:12 }}>
+        {[['revisar','Revisar'],['financiera','Movimientos'],['informes','Informes']].map(([k, l]) => (
+          <button key={k} onClick={() => { setTab(k); setAbierto(null); }} className="sel-btn" style={{ position:'relative', padding:'11px 4px', borderRadius:12, fontSize:12.5, fontWeight:900, cursor:'pointer', fontFamily:'inherit',
+            background: tab === k ? 'linear-gradient(180deg,rgba(120,205,190,0.24),rgba(120,205,190,0.08))' : 'rgba(255,255,255,0.05)', border: tab === k ? '1px solid rgba(120,205,190,0.6)' : '1px solid rgba(255,255,255,0.12)', color: tab === k ? '#b5e9df' : 'rgba(255,255,255,0.7)' }}>
+            {l}{k === 'revisar' && pendRev.length > 0 && <span style={{ position:'absolute', top:-7, right:-5, minWidth:20, height:20, borderRadius:10, background:'#e5484d', color:'#fff', fontSize:11, fontWeight:900, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 5px', boxShadow:'0 0 0 2px #0A0F16' }}>{pendRev.length}</span>}
+          </button>
         ))}
       </div>
       {!pedidos && <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,0.6)' }}>Cargando…</div>}
 
       {pedidos && tab === 'revisar' && <>
-        <div style={{ fontSize:12.5, color:C.tx2, marginBottom:10, lineHeight:1.45 }}>Cada DEF que confirma un vendedor queda acá hasta que la revisás. Si después cambian la forma de pago, vuelve a aparecer.</div>
-        {pendRev.length === 0 && <div style={{ ...card, textAlign:'center', color:'#86efac', fontWeight:800 }}>✓ No hay ventas para revisar.</div>}
-        {pendRev.map(p => tarjetaRev(p, false))}
-        {revisadas.length > 0 && <button onClick={() => setVerRevisadas(v => !v)} className="sel-btn" style={{ ...s.bS, width:'100%', marginTop:6, marginBottom:10 }}>{verRevisadas ? '▲' : '▼'} Revisadas ({revisadas.length})</button>}
-        {verRevisadas && revisadas.slice(0, 60).map(p => tarjetaRev(p, true))}
+        {pendRev.length === 0
+          ? <div style={{ ...card, textAlign:'center', color:'#86efac', fontWeight:800 }}>✓ Todo revisado</div>
+          : <div style={{ ...card, padding:'0 14px' }}>{pendRev.map(p => filaRev(p, false))}</div>}
+        {revisadas.length > 0 && <button onClick={() => setVerRevisadas(v => !v)} style={{ display:'block', margin:'0 auto 10px', background:'none', border:'none', color:C.tx3, fontSize:12.5, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>{verRevisadas ? 'Ocultar revisadas' : `Ver revisadas (${revisadas.length})`}</button>}
+        {verRevisadas && revisadas.length > 0 && <div style={{ ...card, padding:'0 14px' }}>{revisadas.slice(0, 60).map(p => filaRev(p, true))}</div>}
       </>}
 
       {pedidos && tab === 'financiera' && <>
-        <div style={{ ...card, borderColor:'rgba(120,205,190,0.45)', background:'linear-gradient(180deg,rgba(120,205,190,0.14),rgba(120,205,190,0.04))' }}>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(2,minmax(0,1fr))', gap:12 }}>
-            <div>
-              <div style={s.cTit}>Disponible</div>
-              <div style={{ fontSize:25, fontWeight:900, letterSpacing:'-0.04em', color:'#b5e9df' }}>{tesFmt(disponible)}</div>
-              <div style={{ fontSize:11.5, color:C.tx3, marginTop:3, lineHeight:1.35 }}>Todo lo que entró y la financiera todavía no te pagó, menos retiros.</div>
-            </div>
-            {proxima && porTramo[proxima.key] && (
-              <div>
-                <div style={s.cTit}>A cobrar el {tesDiaTxt(proxima.pagoN)}</div>
-                <div style={{ fontSize:25, fontWeight:900, letterSpacing:'-0.04em', color:'#fde68a' }}>{tesFmt(porTramo[proxima.key].aCobrar)}</div>
-                <div style={{ fontSize:11.5, color:C.tx3, marginTop:3, lineHeight:1.35 }}>{proxima.corte > ahora ? `Suma lo confirmado hasta el ${tesTsTxt(proxima.corte)}.` : `Cerró el ${tesTsTxt(proxima.corte)}: ya no suma.`}</div>
-              </div>
-            )}
-          </div>
-          {impagas.slice(1).map(l => (
-            <div key={l.key} style={{ display:'flex', justifyContent:'space-between', gap:8, fontSize:12.5, borderTop:'1px solid rgba(255,255,255,0.08)', marginTop:10, paddingTop:8 }}>
-              <span style={{ color:C.tx2 }}>Después del corte · va al cobro del {tesDiaTxt(l.pagoN)}</span><b>{tesFmt(porTramo[l.key].aCobrar)}</b>
-            </div>
-          ))}
+        <div style={{ display:'flex', gap:8, marginBottom:12 }}>
+          <button onClick={() => { const n = Date.now(); setFormRetiro(f => f ? null : { importe:'', motivo:'', fecha: tesIso(tesDNdeTs(n)), hora: arHora(n) }); setVerCal(false); }} style={btnMini('rgba(96,165,250,0.12)', '#bfdbfe', 'rgba(96,165,250,0.4)')}>➖ Retiro virtual</button>
+          <button onClick={() => { setVerCal(v => !v); setFormRetiro(null); }} style={btnMini('rgba(96,165,250,0.12)', '#bfdbfe', 'rgba(96,165,250,0.4)')}>📅 Calendario</button>
         </div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:14 }}>
-          <button onClick={() => { const n = Date.now(); setFormRetiro({ importe:'', motivo:'', fecha: tesIso(tesDNdeTs(n)), hora: arHora(n) }); setVerCal(false); }} className="sel-btn" style={s.bLiq}>➖ Retiro virtual</button>
-          <button onClick={() => { setVerCal(v => !v); setFormRetiro(null); }} className="sel-btn" style={s.bLiq}>📅 Calendario</button>
-        </div>
-
         {formRetiro && (
           <div style={card}>
             <div style={s.cTit}>Nuevo retiro virtual</div>
@@ -8361,87 +8367,62 @@ function ModuloTesoreria({ onVolver, onCambio }) {
         )}
 
         {L && T && (
-          <div style={card}>
-            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-              <button disabled={idxVer <= 0} onClick={() => setIdxTramo(idxVer - 1)} style={{ ...btnMini('rgba(255,255,255,0.06)', '#fff', 'rgba(255,255,255,0.2)'), opacity: idxVer <= 0 ? 0.35 : 1 }}>◀</button>
+          <div style={{ ...card, padding:'12px 14px' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+              <button disabled={idxVer <= 0} onClick={() => { setIdxTramo(idxVer - 1); setAbierto(null); }} style={{ ...btnMini('rgba(255,255,255,0.06)', '#fff', 'rgba(255,255,255,0.2)'), opacity: idxVer <= 0 ? 0.35 : 1 }}>◀</button>
               <div style={{ flex:1, textAlign:'center' }}>
-                <div style={{ fontSize:13.5, fontWeight:900 }}>Liquidación del {tesDiaTxt(L.pagoN)}{idxVer === idxAbierta ? ' · abierta' : L.corte < Date.now() ? ' · cerrada' : ' · próxima'}</div>
+                <div style={{ fontSize:13.5, fontWeight:900 }}>Cobro del {tesDiaTxt(L.pagoN)}{L.corte < Date.now() ? ' · cerrado' : idxVer === idxAbierta ? ' · abierto' : ' · próximo'}</div>
                 <div style={{ fontSize:11, color:C.tx3 }}>{tesTsTxt(L.desde)} → {tesTsTxt(L.corte)}</div>
               </div>
-              <button disabled={idxVer >= liqs.length - 1} onClick={() => setIdxTramo(idxVer + 1)} style={{ ...btnMini('rgba(255,255,255,0.06)', '#fff', 'rgba(255,255,255,0.2)'), opacity: idxVer >= liqs.length - 1 ? 0.35 : 1 }}>▶</button>
+              <button disabled={idxVer >= liqs.length - 1} onClick={() => { setIdxTramo(idxVer + 1); setAbierto(null); }} style={{ ...btnMini('rgba(255,255,255,0.06)', '#fff', 'rgba(255,255,255,0.2)'), opacity: idxVer >= liqs.length - 1 ? 0.35 : 1 }}>▶</button>
             </div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
-              {kpi('Transferido', tesFmt(T.bruto), null, `${T.entradas.length} DEF`)}
-              {kpi('Retención 3,5%', tesFmt(-(T.bruto - T.neto)), '#fca5a5')}
-              {kpi('Retiros', tesFmt(-T.retirado), '#fca5a5', `${T.retiros.length} retiro${T.retiros.length !== 1 ? 's' : ''}`)}
-              {kpi('A cobrar', tesFmt(T.aCobrar), T.aCobrar >= 0 ? '#86efac' : '#f87171')}
-            </div>
-            {T.entradas.length === 0 && <div style={{ fontSize:12.5, color:C.tx3, padding:'6px 0' }}>Sin transferencias en esta liquidación.</div>}
-            {T.entradas.length > 0 && <div style={{ fontSize:11.5, color:C.tx3, margin:'2px 0 4px', lineHeight:1.4 }}>Si la financiera te paga una transferencia en otro cobro (por ejemplo, entró después de las 15:30), movela con «Pasar al cobro del…».</div>}
-            {T.entradas.map(e => lineaDef(e.p,
-              <div style={{ textAlign:'right' }}>
-                <div style={{ fontSize:14, fontWeight:900 }}>{tesFmt(e.neto)}</div>
-                <div style={{ fontSize:10.5, color:C.tx3 }}>de {tesFmt(e.bruto)}{e.movida ? ' · movida' : ''}</div>
-              </div>,
-              <div style={{ display:'flex', gap:6, marginTop:6, flexWrap:'wrap' }}>
-                {idxVer > 0 && <button onClick={() => setMover({ codigo: e.p.codigo, destino: liqs[idxVer - 1].key, motivo:'' })} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.18)')}>◀ Pasar al cobro del {tesDiaTxt(liqs[idxVer - 1].pagoN)}</button>}
-                {idxVer < liqs.length - 1 && <button onClick={() => setMover({ codigo: e.p.codigo, destino: liqs[idxVer + 1].key, motivo:'' })} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.18)')}>Pasar al cobro del {tesDiaTxt(liqs[idxVer + 1].pagoN)} ▶</button>}
-                {e.movida && <button disabled={trabajando} onClick={() => correr(() => tesBorrar('REA-' + e.p.codigo), `${e.p.codigo} volvió a su liquidación por fecha`)} style={btnMini('transparent', '#fde68a', 'rgba(250,204,21,0.4)')}>↩ Por fecha</button>}
-                {mover && mover.codigo === e.p.codigo && (
-                  <div style={{ width:'100%', marginTop:4 }}>
-                    <input value={mover.motivo} onChange={ev => setMover(m => ({ ...m, motivo: ev.target.value }))} placeholder="Motivo (ej.: la financiera lo acreditó en otro tramo)" style={{ ...s.inp, padding:'9px 11px', fontSize:13, marginBottom:6 }} />
-                    <div style={{ display:'flex', gap:6 }}>
-                      <button disabled={trabajando} onClick={moverEntrada} style={btnMini('rgba(52,211,153,0.15)', '#a7f3d0', 'rgba(52,211,153,0.45)')}>Mover a la del {tesDiaTxt(liqs.find(l => l.key === mover.destino).pagoN)}</button>
-                      <button onClick={() => setMover(null)} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.2)')}>Cancelar</button>
+            <div style={{ fontSize:12, color:C.tx2, textAlign:'center', marginBottom:4 }}>Transferido {tesFmt(T.bruto)} · 3,5% {tesFmt(-(T.bruto - T.neto))}{T.retirado ? ` · retiros ${tesFmt(-T.retirado)}` : ''} · <b style={{ color:'#86efac' }}>a cobrar {tesFmt(T.aCobrar)}</b></div>
+            {T.entradas.length === 0 && T.retiros.length === 0 && <div style={{ fontSize:12.5, color:C.tx3, padding:'10px 0', textAlign:'center' }}>Sin movimientos.</div>}
+            {T.entradas.map(e => { const k = 'M-' + e.p.codigo; const open = abierto === k; return (
+              <div key={k} style={{ borderTop:'1px solid rgba(255,255,255,0.07)' }}>
+                <button onClick={() => { setAbierto(open ? null : k); setMover(null); }} style={filaBtn}>
+                  <span style={{ flex:1, minWidth:0 }}>
+                    <span style={{ display:'block', fontSize:14, fontWeight:800, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{e.p.cliente?.nombre || e.p.cliente?.telefono || 'Sin datos'}</span>
+                    <span style={{ display:'block', fontSize:11.5, color:C.tx3 }}>{liqLabel(liqEmail(e.p))} · {tesTsTxt(e.p.ts)}{e.movida ? ' · movida' : ''}</span>
+                  </span>
+                  <span style={{ textAlign:'right' }}>
+                    <span style={{ display:'block', fontSize:14.5, fontWeight:900 }}>{tesFmt(e.neto)}</span>
+                    <span style={{ display:'block', fontSize:10.5, color:C.tx3 }}>de {tesFmt(e.bruto)}</span>
+                  </span>
+                </button>
+                {open && (
+                  <div style={{ padding:'0 2px 12px' }}>
+                    <div style={{ fontSize:11.5, color:C.tx3, marginBottom:6 }}>{e.p.codigo}. Si la financiera te paga esta transferencia en otro cobro, movela:</div>
+                    <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                      {idxVer > 0 && <button onClick={() => setMover({ codigo: e.p.codigo, destino: liqs[idxVer - 1].key, motivo:'' })} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.18)')}>◀ Al cobro del {tesDiaTxt(liqs[idxVer - 1].pagoN)}</button>}
+                      {idxVer < liqs.length - 1 && <button onClick={() => setMover({ codigo: e.p.codigo, destino: liqs[idxVer + 1].key, motivo:'' })} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.18)')}>Al cobro del {tesDiaTxt(liqs[idxVer + 1].pagoN)} ▶</button>}
+                      {e.movida && <button disabled={trabajando} onClick={() => correr(() => tesBorrar('REA-' + e.p.codigo), `${e.p.codigo} volvió a su cobro por fecha`)} style={btnMini('transparent', '#fde68a', 'rgba(250,204,21,0.4)')}>↩ Por fecha</button>}
                     </div>
+                    {mover && mover.codigo === e.p.codigo && (
+                      <div style={{ marginTop:8 }}>
+                        <input value={mover.motivo} onChange={ev => setMover(m => ({ ...m, motivo: ev.target.value }))} placeholder="Motivo (ej.: la financiera lo pagó en otro cobro)" style={{ ...s.inp, padding:'9px 11px', fontSize:13, marginBottom:6 }} />
+                        <div style={{ display:'flex', gap:6 }}>
+                          <button disabled={trabajando} onClick={moverEntrada} style={btnMini('rgba(52,211,153,0.15)', '#a7f3d0', 'rgba(52,211,153,0.45)')}>Mover</button>
+                          <button onClick={() => setMover(null)} style={btnMini('transparent', C.tx2, 'rgba(255,255,255,0.2)')}>Cancelar</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            ))}
-            {T.retiros.length > 0 && <div style={{ ...s.cTit, marginTop:12, marginBottom:4 }}>Retiros virtuales</div>}
+            ); })}
             {T.retiros.map(r => (
-              <div key={r.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
+              <div key={r.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 2px', borderTop:'1px solid rgba(255,255,255,0.07)' }}>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:13.5, fontWeight:800 }}>{r.motivo}</div>
-                  <div style={{ fontSize:11, color:C.tx3 }}>{tesTsTxt(r.ts)}</div>
+                  <div style={{ fontSize:14, fontWeight:800 }}>➖ {r.motivo}</div>
+                  <div style={{ fontSize:11.5, color:C.tx3 }}>Retiro · {tesTsTxt(r.ts)}</div>
                 </div>
-                <div style={{ fontSize:14, fontWeight:900, color:'#fca5a5' }}>{tesFmt(-r.importe)}</div>
+                <div style={{ fontSize:14.5, fontWeight:900, color:'#fca5a5' }}>{tesFmt(-r.importe)}</div>
                 <button disabled={trabajando} onClick={() => correr(() => tesBorrar(r.id), 'Retiro borrado')} style={btnMini('transparent', '#fca5a5', 'rgba(239,68,68,0.4)')}>✕</button>
               </div>
             ))}
           </div>
         )}
-
-        {sinPago.length > 0 && <div onClick={() => setTab('revisar')} style={{ ...card, cursor:'pointer', borderColor:'rgba(239,68,68,0.45)', fontSize:13, fontWeight:700, color:'#fecaca' }}>⚠️ {sinPago.length} DEF sin forma de pago: no suman en la financiera hasta que se cargue. Tocá para ir a Revisar.</div>}
-        {conDif.length > 0 && (
-          <div style={card}>
-            <div style={s.cTit}>DEF con diferencia de pago · {conDif.length}</div>
-            {conDif.slice(0, 30).map(p => { const g = tesPago(p); return lineaDef(p,
-              <div style={{ textAlign:'right' }}>
-                <div style={{ fontSize:13.5, fontWeight:900, color: g.diferencia < 0 ? '#fca5a5' : '#fde68a' }}>{g.diferencia < 0 ? 'Faltan' : 'Sobran'} {tesFmt(Math.abs(g.diferencia))}</div>
-                <button onClick={() => setModalPago(p)} style={{ ...btnMini('transparent', C.tx2, 'rgba(255,255,255,0.18)'), marginTop:4, padding:'4px 8px' }}>Corregir</button>
-              </div>,
-              g.nota ? <div style={{ fontSize:12, color:C.tx2, marginTop:4 }}>“{g.nota}”</div> : null); })}
-          </div>
-        )}
-      </>}
-
-      {pedidos && tab === 'efectivo' && <>
-        <div style={{ fontSize:12.5, color:C.tx2, marginBottom:10, lineHeight:1.45 }}>Solo informativo: lo cobrado en efectivo va a otra caja. No lleva saldo ni control.</div>
-        <TesSelectorPeriodo {...{ per, setPer, mesSel, setMesSel, dISO, setDISO, hISO, setHISO }} />
-        {!inf && <div style={{ fontSize:12.5, color:C.tx3 }}>Elegí el período.</div>}
-        {inf && <>
-          <div style={card}>
-            <div style={s.cTit}>{rango.txt}</div>
-            <div style={{ fontSize:28, fontWeight:900, color:'#a7f3d0' }}>{tesFmt(inf.ef)}</div>
-            <div style={{ fontSize:12, color:C.tx3 }}>cobrado en efectivo</div>
-            {inf.vend.filter(v => v.ef > 0).map(v => <div key={v.v} style={{ display:'flex', justifyContent:'space-between', fontSize:13, padding:'6px 0', borderTop:'1px solid rgba(255,255,255,0.07)', marginTop:6 }}><span>{v.v}</span><b>{tesFmt(v.ef)}</b></div>)}
-          </div>
-          <div style={card}>
-            {inf.conP.filter(p => Number(tesPago(p).efectivo) > 0).length === 0 && <div style={{ fontSize:12.5, color:C.tx3 }}>Sin cobros en efectivo en el período.</div>}
-            {inf.conP.filter(p => Number(tesPago(p).efectivo) > 0).map(p => lineaDef(p, <div style={{ textAlign:'right' }}><div style={{ fontSize:14, fontWeight:900 }}>{tesFmt(tesPago(p).efectivo)}</div><ChipPago p={p} /></div>))}
-          </div>
-        </>}
       </>}
 
       {pedidos && tab === 'informes' && <>

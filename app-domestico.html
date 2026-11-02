@@ -7828,6 +7828,10 @@ const fmtDiaLargo = (ts) => { const { y, m, day } = arParts(ts); const dw = new 
 const TES_RETENCION = 0.035;
 const TES_DESDE = Date.UTC(2026, 10, 2, 3, 0, 0, 0); // 02/11/2026 00:00 AR: desde acá cada DEF lleva forma de pago
 const TES_CORTE_H = 15, TES_CORTE_M = 30;
+// Saldo forzado (Fede 02/11/2026 19:08): la financiera ya tenía saldo a favor antes de que existiera la app.
+// El cobro del mar 03/11 (corte lun 02/11 15:30) queda fijo en el neto que informa la financiera; los DEF
+// de ese tramo se siguen listando pero no suman (ya están dentro del saldo). Desde el corte en adelante, cálculo normal.
+const TES_SALDO_FORZADO = { '2026-11-03': { neto: 1791306, motivo: 'Saldo informado por la financiera al corte del lun 02/11 15:30' } };
 const tesPago = p => (p && p.pago && typeof p.pago === 'object') ? p.pago : null;
 const tesTotalDef = p => Number(p?.totales?.total ?? p?.total ?? 0);
 const tesFormaTxt = f => f === 'transferencia' ? 'Transferencia' : f === 'efectivo' ? 'Efectivo' : f === 'mixto' ? 'Mixto' : 'Sin datos';
@@ -8093,6 +8097,8 @@ function ModuloTesoreria({ onVolver, onCambio }) {
     retiros.forEach(r => { const key = r.tramo && m[r.tramo] ? r.tramo : tesTramoDe(liqs, r.ts)?.key; if (key && m[key]) m[key].retiros.push(r); });
     Object.values(m).forEach(t => { t.entradas.sort((a, b) => a.p.ts - b.p.ts); t.bruto = t.entradas.reduce((a, e) => a + e.bruto, 0); t.neto = t.entradas.reduce((a, e) => a + e.neto, 0);
       t.retirado = t.retiros.reduce((a, r) => a + (Number(r.importe) || 0), 0); t.aCobrar = t.neto - t.retirado; });
+    Object.keys(TES_SALDO_FORZADO).forEach(k => { const t = m[k]; if (!t) return; const f = TES_SALDO_FORZADO[k];
+      t.forzado = f; t.netoCalc = t.neto; t.neto = f.neto; t.aCobrar = f.neto - t.retirado; });
     return m;
   }, [liqs, defsConPago, reasig, retiros]);
 
@@ -8376,14 +8382,16 @@ function ModuloTesoreria({ onVolver, onCambio }) {
               </div>
               <button disabled={idxVer >= liqs.length - 1} onClick={() => { setIdxTramo(idxVer + 1); setAbierto(null); }} style={{ ...btnMini('rgba(255,255,255,0.06)', '#fff', 'rgba(255,255,255,0.2)'), opacity: idxVer >= liqs.length - 1 ? 0.35 : 1 }}>▶</button>
             </div>
-            <div style={{ fontSize:12, color:C.tx2, textAlign:'center', marginBottom:4 }}>Transferido {tesFmt(T.bruto)} · 3,5% {tesFmt(-(T.bruto - T.neto))}{T.retirado ? ` · retiros ${tesFmt(-T.retirado)}` : ''} · <b style={{ color:'#86efac' }}>a cobrar {tesFmt(T.aCobrar)}</b></div>
+            {T.forzado && <div style={{ fontSize:12, color:'#fde68a', textAlign:'center', marginBottom:6, padding:'8px 10px', borderRadius:10, background:'rgba(250,204,21,0.08)', border:'1px solid rgba(250,204,21,0.35)' }}>📌 Saldo fijado en {tesFmt(T.forzado.neto)} · {T.forzado.motivo}. Las ventas de abajo ya están incluidas y no se suman.</div>}
+            {!T.forzado && <div style={{ fontSize:12, color:C.tx2, textAlign:'center', marginBottom:4 }}>Transferido {tesFmt(T.bruto)} · 3,5% {tesFmt(-(T.bruto - T.neto))}{T.retirado ? ` · retiros ${tesFmt(-T.retirado)}` : ''} · <b style={{ color:'#86efac' }}>a cobrar {tesFmt(T.aCobrar)}</b></div>}
+            {T.forzado && <div style={{ fontSize:12, color:C.tx2, textAlign:'center', marginBottom:4 }}>Saldo {tesFmt(T.neto)}{T.retirado ? ` · retiros ${tesFmt(-T.retirado)}` : ''} · <b style={{ color:'#86efac' }}>a cobrar {tesFmt(T.aCobrar)}</b></div>}
             {T.entradas.length === 0 && T.retiros.length === 0 && <div style={{ fontSize:12.5, color:C.tx3, padding:'10px 0', textAlign:'center' }}>Sin movimientos.</div>}
             {T.entradas.map(e => { const k = 'M-' + e.p.codigo; const open = abierto === k; return (
               <div key={k} style={{ borderTop:'1px solid rgba(255,255,255,0.07)' }}>
                 <button onClick={() => { setAbierto(open ? null : k); setMover(null); }} style={filaBtn}>
                   <span style={{ flex:1, minWidth:0 }}>
                     <span style={{ display:'block', fontSize:14, fontWeight:800, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{e.p.cliente?.nombre || e.p.cliente?.telefono || 'Sin datos'}</span>
-                    <span style={{ display:'block', fontSize:11.5, color:C.tx3 }}>{liqLabel(liqEmail(e.p))} · {tesTsTxt(e.p.ts)}{e.movida ? ' · movida' : ''}</span>
+                    <span style={{ display:'block', fontSize:11.5, color:C.tx3 }}>{liqLabel(liqEmail(e.p))} · {tesTsTxt(e.p.ts)}{e.movida ? ' · movida' : ''}{T.forzado ? ' · incluida en el saldo' : ''}</span>
                   </span>
                   <span style={{ textAlign:'right' }}>
                     <span style={{ display:'block', fontSize:14.5, fontWeight:900 }}>{tesFmt(e.neto)}</span>

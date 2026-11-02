@@ -8099,6 +8099,12 @@ function ModuloTesoreria({ onVolver, onCambio }) {
   const L = liqs[idxVer]; const T = L ? porTramo[L.key] : null;
   const abierta = liqs[idxAbierta]; const Tab = abierta ? porTramo[abierta.key] : null;
   const cerradaSinCobrar = liqs.filter(l => l.corte < Date.now() && l.pagoN >= hoyN);
+  // Dos lecturas (Fede 02/11): DISPONIBLE = todo lo neto que entró y la financiera todavía no pagó, menos retiros;
+  // A COBRAR = solo lo que entra en el próximo cobro (confirmado hasta el corte de las 15:30 del día hábil anterior).
+  const ahora = Date.now();
+  const impagas = liqs.filter(l => l.pagoN >= hoyN && l.desde < ahora);
+  const proxima = impagas[0] || null;
+  const disponible = impagas.reduce((a, l) => a + ((porTramo[l.key] && porTramo[l.key].aCobrar) || 0), 0);
 
   const correr = async (fn, ok) => { setTrabajando(true); setAviso(''); const err = await fn(); setTrabajando(false); if (err) { setAviso(`⚠️ No se pudo guardar: ${err}`); return false; } if (ok) setAviso(ok); await cargar(); return true; };
   const quien = async () => { try { const { data } = await supaClient.auth.getSession(); return (data?.session?.user?.email || '').toLowerCase(); } catch (_) { return ''; } };
@@ -8266,23 +8272,27 @@ function ModuloTesoreria({ onVolver, onCambio }) {
       </>}
 
       {pedidos && tab === 'financiera' && <>
-        {abierta && Tab && (
-          <div style={{ ...card, borderColor:'rgba(120,205,190,0.45)', background:'linear-gradient(180deg,rgba(120,205,190,0.14),rgba(120,205,190,0.04))' }}>
-            <div style={s.cTit}>Disponible en la financiera</div>
-            <div style={{ fontSize:30, fontWeight:900, letterSpacing:'-0.04em', color:'#b5e9df' }}>{tesFmt(Tab.aCobrar)}</div>
-            <div style={{ fontSize:12.5, color:C.tx2, marginTop:4 }}>Liquidación abierta · corta el {tesTsTxt(abierta.corte)} · se cobra el {tesDiaTxt(abierta.pagoN)}</div>
-            <div style={{ fontSize:12, color:C.tx3, marginTop:2 }}>Neto {tesFmt(Tab.neto)} (bruto {tesFmt(Tab.bruto)} − 3,5%){Tab.retirado ? ` − retiros ${tesFmt(Tab.retirado)}` : ''}</div>
-          </div>
-        )}
-        {cerradaSinCobrar.map(l => { const t = porTramo[l.key]; return (
-          <div key={l.key} style={{ ...card, borderColor:'rgba(250,204,21,0.45)' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', gap:8, alignItems:'baseline' }}>
-              <div style={{ fontSize:13, fontWeight:800, color:'#fde68a' }}>Cerrada · se cobra el {tesDiaTxt(l.pagoN)}</div>
-              <div style={{ fontSize:20, fontWeight:900 }}>{tesFmt(t.aCobrar)}</div>
+        <div style={{ ...card, borderColor:'rgba(120,205,190,0.45)', background:'linear-gradient(180deg,rgba(120,205,190,0.14),rgba(120,205,190,0.04))' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(2,minmax(0,1fr))', gap:12 }}>
+            <div>
+              <div style={s.cTit}>Disponible</div>
+              <div style={{ fontSize:25, fontWeight:900, letterSpacing:'-0.04em', color:'#b5e9df' }}>{tesFmt(disponible)}</div>
+              <div style={{ fontSize:11.5, color:C.tx3, marginTop:3, lineHeight:1.35 }}>Todo lo que entró y la financiera todavía no te pagó, menos retiros.</div>
             </div>
-            <div style={{ fontSize:11.5, color:C.tx3 }}>Cortó el {tesTsTxt(l.corte)}</div>
+            {proxima && porTramo[proxima.key] && (
+              <div>
+                <div style={s.cTit}>A cobrar el {tesDiaTxt(proxima.pagoN)}</div>
+                <div style={{ fontSize:25, fontWeight:900, letterSpacing:'-0.04em', color:'#fde68a' }}>{tesFmt(porTramo[proxima.key].aCobrar)}</div>
+                <div style={{ fontSize:11.5, color:C.tx3, marginTop:3, lineHeight:1.35 }}>{proxima.corte > ahora ? `Suma lo confirmado hasta el ${tesTsTxt(proxima.corte)}.` : `Cerró el ${tesTsTxt(proxima.corte)}: ya no suma.`}</div>
+              </div>
+            )}
           </div>
-        ); })}
+          {impagas.slice(1).map(l => (
+            <div key={l.key} style={{ display:'flex', justifyContent:'space-between', gap:8, fontSize:12.5, borderTop:'1px solid rgba(255,255,255,0.08)', marginTop:10, paddingTop:8 }}>
+              <span style={{ color:C.tx2 }}>Después del corte · va al cobro del {tesDiaTxt(l.pagoN)}</span><b>{tesFmt(porTramo[l.key].aCobrar)}</b>
+            </div>
+          ))}
+        </div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:14 }}>
           <button onClick={() => { const n = Date.now(); setFormRetiro({ importe:'', motivo:'', fecha: tesIso(tesDNdeTs(n)), hora: arHora(n) }); setVerCal(false); }} className="sel-btn" style={s.bLiq}>➖ Retiro virtual</button>
           <button onClick={() => { setVerCal(v => !v); setFormRetiro(null); }} className="sel-btn" style={s.bLiq}>📅 Calendario</button>

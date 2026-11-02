@@ -7771,17 +7771,17 @@ function ModuloAsignarVentas({ onVolver, onCambio }) {
       {error && <div style={{ ...card, border:'1px solid rgba(239,68,68,0.5)', color:'#fca5a5', fontWeight:700, fontSize:13 }}>⚠️ {error}</div>}
       {!pedidos && <div style={{ color:C.tx3, padding:'30px 0', textAlign:'center' }}>⏳ Buscando ventas…</div>}
       {pedidos && pendientes.length === 0 && <div style={{ ...card, textAlign:'center', color:'#86efac', fontWeight:800 }}>✓ No hay ventas pendientes de asignar.</div>}
-      {pendientes.map(({ pedido: p, duenos, motivos }) => (
+      {pendientes.map(({ pedido: p, duenos, motivos, preCodigo }) => (
         <div key={p.codigo} style={card}>
           <div style={{ display:'flex', justifyContent:'space-between', gap:8, marginBottom:6 }}>
             <div style={{ minWidth:0 }}>
-              <div style={{ fontSize:10.5, color:C.tx3, fontFamily:'monospace' }}>{p.codigo} · {fmtFechaDDMMAAAA(p.ts)} {arHora(p.ts)}</div>
+              <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap', marginBottom:3 }}><span style={{ fontSize:12.5, fontWeight:900, color:'#fdba74', background:'rgba(249,115,22,0.14)', border:'1px solid rgba(249,115,22,0.4)', borderRadius:7, padding:'1px 7px', letterSpacing:0.3 }}>{p.codigo}</span><span style={{ fontSize:11, color:C.tx3 }}>{fmtFechaDDMMAAAA(p.ts)} {arHora(p.ts)}</span></div>
               <div style={{ fontSize:15, fontWeight:800, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.cliente?.nombre || p.cliente?.telefono || 'Sin datos'}</div>
             </div>
             <div style={{ fontSize:16, fontWeight:900, color:'#4ade80', whiteSpace:'nowrap' }}>{fmtM(p.totales?.total ?? p.total)}</div>
           </div>
           <div style={{ fontSize:12.5, color:C.tx2, marginBottom:4 }}>Confirmó el DEF: <b style={{ color:'#fff' }}>{liqLabel(liqEmail(p))}</b></div>
-          {duenos.map(em => <div key={em} style={{ fontSize:12.5, color:'#fde68a', marginBottom:2 }}>Cliente de <b>{liqLabel(em)}</b>: {motivoTxt(motivos[em])}</div>)}
+          {duenos.map(em => <div key={em} style={{ fontSize:12.5, color:'#fde68a', marginBottom:2 }}>Cliente de <b>{liqLabel(em)}</b>: {motivoTxt(motivos[em])}{motivos[em].includes('PRE') && preCodigo ? ` (${preCodigo})` : ''}</div>)}
           <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:10 }}>
             {duenos.map(em => <button key={em} disabled={trabajando === p.codigo} onClick={() => decidir(p, { estado:'asignada', a: em, origen:'bandeja', motivo: motivos[em].join('+') })} style={btn('rgba(34,197,94,0.15)', '#86efac', 'rgba(34,197,94,0.45)')}>✅ Asignar a {liqLabel(em)}</button>)}
             <button disabled={trabajando === p.codigo} onClick={() => decidir(p, { estado:'descartada', a: null, origen:'bandeja' })} style={btn('rgba(255,255,255,0.06)', '#cbd5e1', 'rgba(255,255,255,0.2)')}>❌ Dejar para {liqLabel(liqEmail(p))}</button>
@@ -7796,7 +7796,7 @@ function ModuloAsignarVentas({ onVolver, onCambio }) {
             <div key={codigo} style={{ ...card, marginTop:8, opacity:0.9 }}>
               <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}>
                 <div style={{ minWidth:0 }}>
-                  <div style={{ fontSize:10.5, color:C.tx3, fontFamily:'monospace' }}>{codigo} · {fmtFechaDDMMAAAA(p.ts)}</div>
+                  <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap', marginBottom:3 }}><span style={{ fontSize:12.5, fontWeight:900, color:'#fdba74', background:'rgba(249,115,22,0.14)', border:'1px solid rgba(249,115,22,0.4)', borderRadius:7, padding:'1px 7px', letterSpacing:0.3 }}>{codigo}</span><span style={{ fontSize:11, color:C.tx3 }}>{fmtFechaDDMMAAAA(p.ts)} {arHora(p.ts)}</span></div>
                   <div style={{ fontSize:14, fontWeight:800 }}>{p.cliente?.nombre || p.cliente?.telefono || 'Sin datos'} · {fmtM(p.totales?.total ?? p.total)}</div>
                   <div style={{ fontSize:12, color: a.estado === 'asignada' ? '#86efac' : '#cbd5e1', marginTop:2 }}>{a.estado === 'asignada' ? `Asignada a ${liqLabel(a.a)}` : `Quedó para ${liqLabel(liqEmail(p))}`}{a.origen === 'manual' ? ' (desde Liquidaciones)' : ''}{a.ts ? ` · ${fmtFechaDDMMAAAA(a.ts)}` : ''}</div>
                 </div>

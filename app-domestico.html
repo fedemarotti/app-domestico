@@ -8110,6 +8110,7 @@ function ModuloTesoreria({ onVolver, onCambio }) {
   const ahora = Date.now();
   const impagas = liqs.filter(l => l.pagoN >= hoyN && l.desde < ahora);
   const proxima = impagas[0] || null;
+  const cobroCerrado = impagas.find(l => l.corte < ahora) || null; // liquidado y todavía no cobrado
   const disponible = impagas.reduce((a, l) => a + ((porTramo[l.key] && porTramo[l.key].aCobrar) || 0), 0);
 
   const correr = async (fn, ok) => { setTrabajando(true); setAviso(''); const err = await fn(); setTrabajando(false); if (err) { setAviso(`⚠️ No se pudo guardar: ${err}`); return false; } if (ok) setAviso(ok); await cargar(); return true; };
@@ -8273,15 +8274,19 @@ function ModuloTesoreria({ onVolver, onCambio }) {
       {pedidos && (
         <div style={{ ...card, borderColor:'rgba(120,205,190,0.45)', background:'linear-gradient(180deg,rgba(120,205,190,0.14),rgba(120,205,190,0.04))' }}>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(2,minmax(0,1fr))', gap:12 }}>
-            <div>
-              <div style={{ fontSize:12, fontWeight:700, color:C.tx2 }}>Disponible</div>
-              <div style={{ fontSize:25, fontWeight:900, letterSpacing:'-0.04em', color:'#b5e9df' }}>{tesFmt(disponible)}</div>
-            </div>
-            {proxima && porTramo[proxima.key] && (
+            {/* Fede 02/11 19:32: no se suman. Cobro cerrado (ya liquidado, se cobra en el próximo pago) y cuenta corriente abierta (hasta el próximo corte). */}
+            {cobroCerrado && porTramo[cobroCerrado.key] && (
               <div>
-                <div style={{ fontSize:12, fontWeight:700, color:C.tx2 }}>A cobrar el {tesDiaTxt(proxima.pagoN)}</div>
-                <div style={{ fontSize:25, fontWeight:900, letterSpacing:'-0.04em', color:'#fde68a' }}>{tesFmt(porTramo[proxima.key].aCobrar)}</div>
-                <div style={{ fontSize:11, color:C.tx3 }}>{proxima.corte > ahora ? `corta ${tesTsTxt(proxima.corte)}` : 'cerrado'}</div>
+                <div style={{ fontSize:12, fontWeight:700, color:C.tx2 }}>Cobro del {tesDiaTxt(cobroCerrado.pagoN)}</div>
+                <div style={{ fontSize:25, fontWeight:900, letterSpacing:'-0.04em', color:'#fde68a' }}>{tesFmt(porTramo[cobroCerrado.key].aCobrar)}</div>
+                <div style={{ fontSize:11, color:C.tx3 }}>cerrado {tesTsTxt(cobroCerrado.corte)}</div>
+              </div>
+            )}
+            {abierta && Tab && (
+              <div style={{ gridColumn: cobroCerrado ? 'auto' : '1 / -1' }}>
+                <div style={{ fontSize:12, fontWeight:700, color:C.tx2 }}>Cuenta corriente · cobro del {tesDiaTxt(abierta.pagoN)}</div>
+                <div style={{ fontSize:25, fontWeight:900, letterSpacing:'-0.04em', color:'#b5e9df' }}>{tesFmt(Tab.aCobrar)}</div>
+                <div style={{ fontSize:11, color:C.tx3 }}>corta {tesTsTxt(abierta.corte)}</div>
               </div>
             )}
           </div>

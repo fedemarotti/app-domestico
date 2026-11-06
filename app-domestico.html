@@ -9035,6 +9035,108 @@ function CardMetrica({ titulo, children, destacada }) {
 }
 
 // Tabla imprimible del informe de liquidación
+// ═══ INFORME → PDF para compartir (WhatsApp / Archivos) — 05/11/2026 ═══
+// Arma un PDF A4 del bloque .liq-print-area (cortando entre filas, nunca a mitad de una fila)
+// y abre el menú de compartir del celular. En la compu, lo descarga.
+const pdfCargarScript = (src) => new Promise((res, rej) => {
+  const s = document.createElement('script'); s.src = src; s.async = true;
+  s.onload = () => res(); s.onerror = () => rej(new Error('No se pudo cargar el generador de PDF. Revisá la conexión.'));
+  document.head.appendChild(s);
+});
+const pdfNombreArchivo = (t) => (String(t || 'informe').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'informe') + '.pdf';
+async function pdfGenerarInforme(el) {
+  if (!window.html2canvas) await pdfCargarScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+  if (!window.jspdf) await pdfCargarScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  const ANCHO = 1000, MARGEN = 8; // px de diseño / mm de margen
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-20000px;top:0;background:#fff;';
+  const ventana = document.createElement('div');
+  ventana.style.cssText = 'overflow:hidden;background:#fff;';
+  const clon = el.cloneNode(true);
+  clon.querySelectorAll('.no-print').forEach(n => n.remove());
+  clon.style.overflow = 'visible'; clon.style.borderRadius = '0'; clon.style.boxSizing = 'border-box'; clon.style.width = ANCHO + 'px'; clon.style.margin = '0';
+  ventana.appendChild(clon); host.appendChild(ventana); document.body.appendChild(host);
+  try {
+    clon.querySelectorAll('*').forEach(n => { const cs = getComputedStyle(n); if (cs.overflowX === 'auto' || cs.overflowX === 'scroll') n.style.overflowX = 'visible'; });
+    const W = Math.max(ANCHO, clon.scrollWidth);
+    clon.style.width = W + 'px'; ventana.style.width = W + 'px';
+    await new Promise(r => setTimeout(r, 60));
+    const H = clon.scrollHeight;
+    const top0 = clon.getBoundingClientRect().top;
+    const cortes = [];
+    clon.querySelectorAll('tr').forEach(tr => cortes.push(Math.round(tr.getBoundingClientRect().bottom - top0)));
+    Array.from(clon.children).forEach(c => { cortes.push(Math.round(c.getBoundingClientRect().bottom - top0)); Array.from(c.children).forEach(cc => cortes.push(Math.round(cc.getBoundingClientRect().bottom - top0))); });
+    cortes.sort((a, b) => a - b);
+    const anchoMM = 210 - 2 * MARGEN, altoMM = 297 - 2 * MARGEN - 6; // 6 mm para el pie de página
+    const altoPag = Math.floor(W * altoMM / anchoMM);
+    const tramos = []; let ini = 0;
+    while (ini < H - 2) {
+      const lim = ini + altoPag;
+      let fin = H <= lim ? H : 0;
+      if (!fin) { for (const c of cortes) { if (c > ini + altoPag * 0.4 && c <= lim) fin = c; } }
+      if (!fin) fin = lim;
+      tramos.push([ini, fin]); ini = fin;
+    }
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const escala = Math.min(2, 4000000 / (W * altoPag)) || 1; // tope de memoria del iPhone
+    for (let i = 0; i < tramos.length; i++) {
+      const [a, b] = tramos[i];
+      ventana.style.height = (b - a) + 'px'; clon.style.marginTop = (-a) + 'px';
+      const canvas = await window.html2canvas(ventana, { scale: escala, backgroundColor: '#ffffff', useCORS: true, logging: false, width: W, height: b - a, windowWidth: W });
+      if (i > 0) pdf.addPage();
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.9), 'JPEG', MARGEN, MARGEN, anchoMM, (b - a) * anchoMM / W);
+      pdf.setFontSize(8); pdf.setTextColor(120);
+      pdf.text('Doméstico · Página ' + (i + 1) + ' de ' + tramos.length, 210 - MARGEN, 297 - MARGEN + 2, { align: 'right' });
+      canvas.width = canvas.height = 0;
+    }
+    return pdf.output('blob');
+  } finally { host.remove(); }
+}
+async function pdfCompartir(file) {
+  if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+    await navigator.share({ files: [file], title: file.name.replace(/\.pdf$/, '') });
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a'); a.href = url; a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+function BotonPDF({ titulo, colores }) {
+  const [estado, setEstado] = React.useState('listo'); // listo | generando | enviar | error
+  const [archivo, setArchivo] = React.useState(null);
+  const [error, setError] = React.useState('');
+  const enviar = async (f) => {
+    try { await pdfCompartir(f); setEstado('listo'); setArchivo(null); }
+    catch (e) {
+      if (e && e.name === 'AbortError') { setEstado('listo'); setArchivo(null); return; }
+      // iPhone a veces exige un segundo toque después de generar el PDF
+      if (e && e.name === 'NotAllowedError') { setArchivo(f); setEstado('enviar'); return; }
+      setError(e?.message || 'No se pudo compartir'); setEstado('error');
+    }
+  };
+  const onClick = async () => {
+    if (estado === 'generando') return;
+    if (estado === 'enviar' && archivo) return enviar(archivo);
+    const el = document.querySelector('.liq-print-area');
+    if (!el) { setError('No encuentro el informe en pantalla'); setEstado('error'); return; }
+    setEstado('generando'); setError('');
+    try {
+      const blob = await pdfGenerarInforme(el);
+      const f = new File([blob], pdfNombreArchivo(titulo), { type: 'application/pdf' });
+      await enviar(f);
+    } catch (e) { setError(e?.message || 'No se pudo generar el PDF'); setEstado('error'); }
+  };
+  const txt = estado === 'generando' ? '⏳ Generando PDF…' : estado === 'enviar' ? '📤 Enviar PDF' : '📄 PDF / WhatsApp';
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+      <button onClick={onClick} disabled={estado === 'generando'} style={{ padding:'10px 16px', background: estado === 'enviar' ? 'linear-gradient(135deg,#86efac,#22c55e)' : (colores?.bg || 'linear-gradient(135deg,#bbf7d0,#4ade80)'), color: colores?.fg || '#14532d', border:'none', borderRadius:8, fontWeight:800, fontSize:13, cursor: estado === 'generando' ? 'wait' : 'pointer', opacity: estado === 'generando' ? 0.75 : 1 }}>{txt}</button>
+      {estado === 'error' && <div style={{ fontSize:11, color:'#fca5a5', maxWidth:260 }}>{error}</div>}
+    </div>
+  );
+}
+
 function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrarVendedor, resumen, onCerrar }) {
   const fmtM = v => '$' + Math.round(v || 0).toLocaleString('es-AR');
   const maxImporteDia = resumen ? Math.max(...resumen.dias.map(d => d.importe)) : 0;
@@ -9045,6 +9147,7 @@ function InformeLiquidacion({ rolLabel, etiquetaPeriodo, filas, totales, mostrar
       <div className="no-print" style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
         <button onClick={onCerrar} style={{ padding:'10px 16px', background:'rgba(255,255,255,0.08)', color:'#fff', border:'1px solid rgba(255,255,255,0.18)', borderRadius:8, fontWeight:700, fontSize:13, cursor:'pointer' }}>← Volver a la lista</button>
         <button onClick={()=>window.print()} style={{ padding:'10px 16px', background:'linear-gradient(135deg,#bae6fd,#7dd3fc)', color:'#1d4ed8', border:'none', borderRadius:8, fontWeight:800, fontSize:13, cursor:'pointer' }}>🖨️ Imprimir</button>
+        <BotonPDF titulo={'Liquidacion ' + rolLabel + ' ' + etiquetaPeriodo} />
       </div>
 
       <div className="liq-print-area" style={{ background:'#fff', color:'#0f172a', borderRadius:12, padding:20, overflowX:'auto' }}>
@@ -9670,6 +9773,7 @@ function InformeFlex({ etiquetaPeriodo, filas, totales, porZona, onCerrar }) {
       <div className="no-print" style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
         <button onClick={onCerrar} style={{ padding:'10px 16px', background:'rgba(255,255,255,0.08)', color:'#fff', border:'1px solid rgba(255,255,255,0.18)', borderRadius:8, fontWeight:700, fontSize:13, cursor:'pointer' }}>← Volver a la lista</button>
         <button onClick={()=>window.print()} style={{ padding:'10px 16px', background:'linear-gradient(135deg,#fed7aa,#fb923c)', color:'#7c2d12', border:'none', borderRadius:8, fontWeight:800, fontSize:13, cursor:'pointer' }}>🖨️ Imprimir</button>
+        <BotonPDF titulo={'Liquidacion Flex ' + etiquetaPeriodo} />
       </div>
 
       <div className="liq-print-area" style={{ background:'#fff', color:'#0f172a', borderRadius:12, padding:20, overflowX:'auto' }}>

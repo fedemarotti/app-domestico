@@ -425,6 +425,7 @@ const saveLS = async (p) => {
     all[p.codigo]=p;
     cacheSet('dom9_pedidos', all);
   } catch{}
+  try { if (__ped.mapa && p && p.codigo) __ped.mapa[p.codigo] = pedClonar(p); } catch{}
   if (supaClient) {
     try {
       const { error } = await supaClient.from('pedidos').upsert({ codigo: p.codigo, data: p, ts: p.ts || Date.now() });
@@ -480,31 +481,104 @@ const supaTraerTodo = async (armarQuery, porPagina = 1000, timeoutMs = 20000) =>
   }
   return out;
 };
+// ── CACHÉ DE PEDIDOS CON SINCRONIZACIÓN INCREMENTAL (10/11/2026) ─────────────
+// Motivo: cada pantalla (Liquidaciones, Tesorería, Ventas, globito de entregas…) pedía la lista
+// COMPLETA de pedidos cada 30-120 s, aun con la pestaña en segundo plano. Eso llevó el tráfico de
+// Supabase a 10,9 GB contra 5 GB del plan gratis. Ahora:
+//  · La primera lectura trae todo (igual que antes). Cada 30 min se repite una lectura completa de control.
+//  · En el medio trae solo lo creado/modificado (columna updated_at, la completa la base con un trigger).
+//    Si la columna todavía no existe, sigue funcionando como antes (lectura completa).
+//  · Borrados: pide solo el CONTEO de filas (no baja datos); si no coincide, baja la lista de códigos.
+//  · Con la pestaña oculta no va a la nube: devuelve lo que ya tiene. Al volver, las pantallas recargan.
+//  · Si varias pantallas piden a la vez, comparten una sola consulta (y no más de una cada 5 s).
+const PED_SOLAPE_MS = 15000;
+const PED_COMPLETA_CADA_MS = 30 * 60000;
+const PED_MIN_ENTRE_MS = 5000;
+const __ped = { mapa: null, maxUpd: 0, ultCompleta: 0, ultSync: 0, enCurso: null, sinUpd: false };
+const pedClonar = (x) => { try { return typeof structuredClone === 'function' ? structuredClone(x) : JSON.parse(JSON.stringify(x)); } catch { return JSON.parse(JSON.stringify(x)); } };
+const pedOrdenados = () => pedClonar(Object.values(__ped.mapa || {}).filter(Boolean)
+  .sort((a, b) => ((b.ts || 0) - (a.ts || 0)) || String(a.codigo || '').localeCompare(String(b.codigo || ''))));
+const pedSyncNube = async (forzarCompleta = false) => {
+  const ahora = Date.now();
+  const completa = forzarCompleta || !__ped.mapa || __ped.sinUpd || !__ped.maxUpd || (ahora - __ped.ultCompleta) > PED_COMPLETA_CADA_MS;
+  if (completa) {
+    let data;
+    try {
+      data = await supaTraerTodo(() => supaClient.from('pedidos').select(__ped.sinUpd ? 'codigo,data' : 'codigo,data,updated_at').order('ts', { ascending: false }).order('codigo', { ascending: true }));
+    } catch (e) {
+      if (!__ped.sinUpd && /updated_at/i.test(String((e && (e.message || e.details || e.hint)) || ''))) { __ped.sinUpd = true; return pedSyncNube(true); }
+      throw e;
+    }
+    if (!data || data.length === 0) return { vacio: true };
+    const mapa = {}; let maxU = 0;
+    data.forEach(r => {
+      const c = r.codigo || r.data?.codigo;
+      if (c && r.data) mapa[c] = r.data;
+      const u = r.updated_at ? Date.parse(r.updated_at) : 0;
+      if (u > maxU) maxU = u;
+    });
+    __ped.mapa = mapa; __ped.maxUpd = maxU; __ped.ultCompleta = ahora;
+    return { cambio: true };
+  }
+  let cambio = false;
+  const desde = new Date(__ped.maxUpd - PED_SOLAPE_MS).toISOString();
+  const nuevos = await supaTraerTodo(() => supaClient.from('pedidos').select('codigo,data,updated_at').gt('updated_at', desde).order('updated_at', { ascending: true }).order('codigo', { ascending: true }));
+  nuevos.forEach(r => {
+    const c = r.codigo || r.data?.codigo;
+    const u = r.updated_at ? Date.parse(r.updated_at) : 0;
+    if (u > __ped.maxUpd) __ped.maxUpd = u;
+    if (!c || !r.data) return;
+    const prev = __ped.mapa[c];
+    if (!prev || JSON.stringify(prev) !== JSON.stringify(r.data)) { __ped.mapa[c] = r.data; cambio = true; }
+  });
+  // Borrados: solo el conteo (respuesta sin datos)
+  const { count, error } = await supaClient.from('pedidos').select('codigo', { count: 'exact', head: true });
+  if (error) throw error;
+  const n = Object.keys(__ped.mapa).length;
+  if (typeof count === 'number' && count !== n) {
+    if (count === 0) return pedSyncNube(true); // ¿sesión vencida? la lectura completa lo decide
+    const filas = await supaTraerTodo(() => supaClient.from('pedidos').select('codigo').order('codigo', { ascending: true }));
+    const vivos = new Set(filas.map(f => f.codigo));
+    Object.keys(__ped.mapa).forEach(c => { if (!vivos.has(c)) { delete __ped.mapa[c]; cambio = true; } });
+    if (filas.some(f => !__ped.mapa[f.codigo])) return pedSyncNube(true);
+  }
+  return { cambio };
+};
 const listLS = async () => {
   if (supaClient) {
-    try {
-      const data = await supaTraerTodo(() => supaClient.from('pedidos').select('data').order('ts', { ascending: false }).order('codigo', { ascending: true }));
-      if (data && data.length > 0) {
-        const all = {};
-        data.forEach(r => { if (r.data?.codigo) all[r.data.codigo] = r.data; });
-        cacheSet('dom9_pedidos', all);
-        window.__LIST_SYNC = { fuente: 'nube', ts: Date.now() };
-        return data.map(r => r.data).filter(Boolean);
-      }
-      // 0 filas: o la base está realmente vacía, o la sesión se cayó y RLS filtra todo
-      let sinSesion = false;
-      try { const { data: s } = await supaClient.auth.getSession(); sinSesion = !(s && s.session); } catch {}
-      if (!sinSesion) { window.__LIST_SYNC = { fuente: 'nube', ts: Date.now() }; return []; }
-      window.__LIST_SYNC = { fuente: 'sin-sesion', ts: Date.now() };
-    } catch(e) {
-      window.__LIST_SYNC = { fuente: 'local', ts: Date.now() };
+    const oculto = typeof document !== 'undefined' && document.hidden;
+    if (__ped.mapa && (oculto || (Date.now() - __ped.ultSync) < PED_MIN_ENTRE_MS) && (window.__LIST_SYNC || {}).fuente === 'nube') return pedOrdenados();
+    if (!__ped.enCurso) {
+      __ped.enCurso = (async () => {
+        try {
+          const r = await pedSyncNube();
+          if (r.vacio) {
+            // 0 filas: o la base está realmente vacía, o la sesión se cayó y RLS filtra todo
+            let sinSesion = false;
+            try { const { data: s } = await supaClient.auth.getSession(); sinSesion = !(s && s.session); } catch {}
+            if (!sinSesion) { __ped.mapa = {}; __ped.maxUpd = 0; __ped.ultCompleta = Date.now(); __ped.ultSync = Date.now(); window.__LIST_SYNC = { fuente: 'nube', ts: Date.now() }; return []; }
+            window.__LIST_SYNC = { fuente: 'sin-sesion', ts: Date.now() };
+            return null;
+          }
+          if (r.cambio) cacheSet('dom9_pedidos', __ped.mapa);
+          __ped.ultSync = Date.now();
+          window.__LIST_SYNC = { fuente: 'nube', ts: Date.now() };
+          return pedOrdenados();
+        } catch (e) {
+          window.__LIST_SYNC = { fuente: 'local', ts: Date.now() };
+          return null;
+        } finally { __ped.enCurso = null; }
+      })();
     }
+    const res = await __ped.enCurso;
+    if (res) return res;
   }
   try { return Object.values(JSON.parse(localStorage.getItem('dom9_pedidos')||'{}')).sort((a,b)=>(b.ts||0)-(a.ts||0)); } catch { return []; }
 };
 const deleteLS = async (codigo) => {
   // Devuelve true solo si el borrado quedó confirmado en la base de datos.
   try { const all = JSON.parse(localStorage.getItem('dom9_pedidos')||'{}'); delete all[codigo]; cacheSet('dom9_pedidos', all); } catch{}
+  try { if (__ped.mapa) delete __ped.mapa[codigo]; } catch{}
   if (!supaClient) return true; // modo local puro: no hay base contra la cual fallar
   try {
     const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
@@ -7000,15 +7074,10 @@ const entAvisos = (defs, email, now) => (defs || [])
   .sort((a, b) => b.atraso - a.atraso || a.p.ts - b.p.ts);
 // Trae solo los DEF desde el arranque (consulta liviana: sirve para el globito cada minuto).
 const entCargarDefs = async () => {
-  if (supaClient) {
-    try {
-      const data = await supaTraerTodo(() => supaClient.from('pedidos').select('data').gte('ts', ENTREGAS_DESDE).like('codigo', 'DEF%').order('ts', { ascending: true }).order('codigo', { ascending: true }));
-      return { ok: true, defs: data.map(r => r.data).filter(p => p && p.tipo === 'DEF') };
-    } catch (e) { console.warn('entregas: sin nube, uso datos locales', e); }
-  }
-  let arr = [];
-  try { arr = Object.values(JSON.parse(localStorage.getItem('dom9_pedidos') || '{}')); } catch {}
-  return { ok: false, defs: arr.filter(p => p && p.tipo === 'DEF' && typeof p.ts === 'number' && p.ts >= ENTREGAS_DESDE) };
+  // 10/11/2026: usa el caché compartido de pedidos (listLS) en vez de su propia consulta cada minuto.
+  const arr = await listLS();
+  const ok = !!supaClient && (window.__LIST_SYNC || {}).fuente === 'nube';
+  return { ok, defs: (Array.isArray(arr) ? arr : []).filter(p => p && p.tipo === 'DEF' && String(p.codigo || '').startsWith('DEF') && typeof p.ts === 'number' && p.ts >= ENTREGAS_DESDE) };
 };
 const entContarNoLeidos = async (email) => {
   try { const r = await entCargarDefs(); return entAvisos(r.defs, email, Date.now()).filter(a => !a.leido).length; } catch { return 0; }

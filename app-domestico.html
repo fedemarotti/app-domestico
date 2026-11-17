@@ -2767,6 +2767,25 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
     null
   );
 
+  // Tipo de cliente: 'existente' (ya era cliente) | 'nuevo' (habla por primera vez). Obligatorio para confirmar.
+  // Si el teléfono ya está en la base de clientes o en un DEF anterior, se marca solo como 'existente'.
+  const [tipoCliente, setTipoCliente] = useState(null);
+  const [telsConocidos, setTelsConocidos] = useState(null); // { claveTel: nombre }
+  useEffect(() => {
+    let vivo = true;
+    Promise.all([listClientes().catch(() => []), listLS().catch(() => [])]).then(([cls, peds]) => {
+      if (!vivo) return;
+      const mapa = {};
+      (Array.isArray(cls) ? cls : []).forEach(c => { const k = mkClaveTel(c); if (k && k[0] === 'T') mapa[k] = c.nombre || ''; });
+      (Array.isArray(peds) ? peds : []).forEach(p => { if (p.tipo !== 'DEF' || p.codigo === codigo) return; const k = mkClaveTel(p.cliente); if (k && k[0] === 'T' && !(k in mapa)) mapa[k] = p.cliente?.nombre || ''; });
+      setTelsConocidos(mapa);
+    });
+    return () => { vivo = false; };
+  }, []);
+  const claveTelCli = mkClaveTel({ telefono: cliente.telefono });
+  const clienteConocido = (claveTelCli && claveTelCli[0] === 'T' && telsConocidos && (claveTelCli in telsConocidos)) ? { nombre: telsConocidos[claveTelCli] } : null;
+  useEffect(() => { if (clienteConocido) setTipoCliente('existente'); }, [!!clienteConocido, claveTelCli]);
+
   const zonaCliente = detectarZona(cliente.localidad);
   const todosCompletos = detalles.length > 0 && detalles.every(d => d !== null);
 
@@ -2865,6 +2884,8 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
         totales:{ productos:totalProd, envases:totalEnv, agregados:totalAgr, envio:totalEnvio, total },
         zonaEnvio:zona, estado: pedidoFinal ? pedidoFinal.estado : 'pendiente',
         creadoPor: pedidoFinal ? pedidoFinal.creadoPor : (usuarioActual?.email || null),
+        tipoCliente: tipoCliente || null,
+        ...(clienteConocido ? { tipoClienteAuto: true } : {}),
         ...(pedidoFinal && pedidoFinal.pago ? { pago: pedidoFinal.pago } : {})
       };
       saveLS(p);
@@ -3038,6 +3059,23 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
                     <div><label style={s.lbl}>Teléfono / WhatsApp{req('telefono')}</label>
                       <input type="tel" value={cliente.telefono} onChange={e=>setCliente({...cliente,telefono:e.target.value.toUpperCase()})} style={s.inp} placeholder="11 1234-5678" /></div>
 
+                    {/* 2b. Tipo de cliente (para medir captación en Marketing) */}
+                    <div>
+                      <label style={s.lbl}>¿Ya era cliente? *</label>
+                      {clienteConocido && <div style={{ fontSize:11.5, color:'#93c5fd', marginTop:-2, marginBottom:6 }}>✓ Este teléfono ya está en la base{clienteConocido.nombre ? ` (${clienteConocido.nombre})` : ''}: queda marcado como cliente que ya compraba.</div>}
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                        {[['existente','🔁 Ya era cliente','Ya nos compró antes','#60a5fa'],['nuevo','🆕 Primer contacto','Habla por primera vez','#4ade80']].map(([k, t, sub, col]) => {
+                          const on = tipoCliente === k; const bloq = k === 'nuevo' && !!clienteConocido;
+                          return (
+                            <button key={k} type="button" disabled={bloq} onClick={() => setTipoCliente(k)} style={{ textAlign:'left', padding:'10px 12px', borderRadius:10, cursor: bloq ? 'not-allowed' : 'pointer', opacity: bloq ? 0.35 : 1, fontFamily:'inherit',
+                              background: on ? col + '26' : 'rgba(255,255,255,0.05)', border:`1.5px solid ${on ? col : 'rgba(255,255,255,0.14)'}`, color:'#fff' }}>
+                              <div style={{ fontWeight:800, fontSize:13, color: on ? col : '#fff' }}>{t}</div>
+                              <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)', marginTop:2 }}>{sub}</div>
+                            </button>);
+                        })}
+                      </div>
+                    </div>
+
                     {/* 3. DNI */}
                     <div><label style={s.lbl}>DNI{req('dni')}</label>
                       <input type="text" value={cliente.dni||''} onChange={e=>setCliente({...cliente,dni:e.target.value})} style={s.inp} placeholder="Número de documento" /></div>
@@ -3074,7 +3112,7 @@ const PedidoDefinitivo = ({ onVolver, codigoPRE, clientePreload, modalidadPreloa
                 const esLocal = modalidadEntrega==='local';
                 const esInteriorActual = extras.esInterior;
                 let ok = false;
-                ok = !!(cliente.nombre && cliente.telefono);
+                ok = !!(cliente.nombre && cliente.telefono && tipoCliente);
                 return (
                   <button onClick={()=>{ const esRetiro = modalidadEntrega==='local'; const extrasNew = {...extras, localidad:cliente.localidad, retiraLocal:esRetiro, esInterior: !esRetiro && (extras.esInterior || modalidadPreload==='interior')}; setExtras(extrasNew); if(esRetiro){ confirmarPedidoCon(extrasNew); } else { setPaso('extras'); } }}
                     disabled={!ok || confirmando} style={{...s.bP, opacity:(ok && !confirmando)?1:0.45, cursor:(ok && !confirmando)?'pointer':'not-allowed'}}>
@@ -3344,10 +3382,17 @@ const VistaDetallePedidoDEF = ({ pedido, onVolver, onNuevoPedido, onPedidoActual
   const [estadoPedido, setEstadoPedido] = React.useState(pedido.estado || 'pendiente');
   const [modalEntregado, setModalEntregado] = React.useState(false);
   const [copiadoEntregado, setCopiadoEntregado] = React.useState(false);
+  const [tipoCli, setTipoCli] = React.useState(pedido.tipoCliente || null);
+  const cambiarTipoCli = async (k) => {
+    setTipoCli(k);
+    const pedidoActualizado = { ...pedido, cliente: cl, extras: ex, estado: estadoPedido, tipoCliente: k };
+    await saveLS(pedidoActualizado);
+    if (onPedidoActualizado) onPedidoActualizado(pedidoActualizado);
+  };
 
   const guardarCambios = async (nuevoCliente, nuevosExtras) => {
     setGuardando(true);
-    const pedidoActualizado = { ...pedido, cliente: nuevoCliente || cl, extras: nuevosExtras || ex };
+    const pedidoActualizado = { ...pedido, cliente: nuevoCliente || cl, extras: nuevosExtras || ex, tipoCliente: tipoCli };
     await saveLS(pedidoActualizado);
     if (onPedidoActualizado) onPedidoActualizado(pedidoActualizado);
     setGuardando(false);
@@ -3356,7 +3401,7 @@ const VistaDetallePedidoDEF = ({ pedido, onVolver, onNuevoPedido, onPedidoActual
   };
 
   const marcarEntregado = async () => {
-    const pedidoActualizado = { ...pedido, cliente: cl, extras: ex, estado: 'entregado', fechaEntrega: new Date().toLocaleString('es-AR'), tsEntrega: Date.now() };
+    const pedidoActualizado = { ...pedido, cliente: cl, extras: ex, tipoCliente: tipoCli, estado: 'entregado', fechaEntrega: new Date().toLocaleString('es-AR'), tsEntrega: Date.now() };
     await saveLS(pedidoActualizado);
     if (onPedidoActualizado) onPedidoActualizado(pedidoActualizado);
     setEstadoPedido('entregado');
@@ -3513,6 +3558,15 @@ _Doméstico · Moreno, Bs. As._`
           <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', marginTop:2 }}>{fecha}</div>
         </div>
         <div style={{ marginLeft:'auto', fontWeight:900, fontSize:18, color:'#f97316' }}>{fmt(tot.total)}</div>
+      </div>
+
+      {/* Tipo de cliente (marketing) */}
+      <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12, padding:'10px 14px', marginBottom:12 }}>
+        <span style={{ fontWeight:800, fontSize:11.5, color:'rgba(255,255,255,0.55)', textTransform:'uppercase', letterSpacing:0.8, marginRight:4 }}>Tipo de cliente</span>
+        {[['existente','🔁 Ya era cliente','#60a5fa'],['nuevo','🆕 Primer contacto','#4ade80']].map(([k, t, col]) => (
+          <button key={k} onClick={() => { if (tipoCli !== k) cambiarTipoCli(k); }} style={{ padding:'5px 10px', borderRadius:16, fontSize:11.5, fontWeight:800, cursor:'pointer', fontFamily:'inherit',
+            background: tipoCli === k ? col + '26' : 'transparent', color: tipoCli === k ? col : 'rgba(255,255,255,0.45)', border:`1px solid ${tipoCli === k ? col : 'rgba(255,255,255,0.15)'}` }}>{t}</button>))}
+        {!tipoCli && <span style={{ fontSize:11, color:'#fbbf24', fontWeight:700 }}>sin marcar</span>}
       </div>
 
       {/* Datos del cliente */}
@@ -4813,6 +4867,38 @@ const mkProvincia = p => {
 };
 
 const mkNeto = p => Math.max(0, gTotal(p) - gEnvio(p));
+
+// ── Tipo de cliente (desde 17/11/2026 lo marca quien carga el DEF) ──
+//    'nuevo' = habla con la vendedora por primera vez · 'existente' = ya era cliente.
+//    Si el mismo teléfono ya tiene un DEF anterior en la app, la venta cuenta como 'existente' aunque no esté marcada.
+//    Ventas viejas sin marca y sin compra previa en la app quedan como 'sin' (no se inventa el dato).
+const MK_TIPOS = [
+  { k:'nuevo',     lbl:'Primer contacto', ico:'🆕', color:'#4ade80' },
+  { k:'existente', lbl:'Ya era cliente',  ico:'🔁', color:'#60a5fa' },
+  { k:'sin',       lbl:'Sin marcar',      ico:'❔', color:'#94a3b8' },
+];
+const mkTipoInfo = k => MK_TIPOS.find(t => t.k === k) || MK_TIPOS[2];
+// Clave del cliente por teléfono (últimos 8 dígitos: tolera 54/9/0/15 adelante). Sin teléfono, por nombre.
+const mkClaveTel = c => { const t = String(c?.telefono ?? '').replace(/\D/g, ''); if (t.length >= 8) return 'T' + t.slice(-8); const n = String(c?.nombre ?? '').trim().toLowerCase(); return n ? 'N' + n : null; };
+const mkClasificarClientes = (defsAll) => {
+  const res = {}; const cuenta = {};
+  [...defsAll].sort((a, b) => (a.ts || 0) - (b.ts || 0)).forEach(p => {
+    const k = mkClaveTel(p.cliente); let n = null;
+    if (k) { cuenta[k] = (cuenta[k] || 0) + 1; n = cuenta[k]; }
+    const t = (n && n > 1) ? 'existente' : p.tipoCliente === 'nuevo' ? 'nuevo' : p.tipoCliente === 'existente' ? 'existente' : 'sin';
+    res[p.codigo] = { t, n };
+  });
+  return res;
+};
+const mkSplitTipo = (defs, tipoDe) => {
+  const o = {}; MK_TIPOS.forEach(x => { o[x.k] = { n: 0, f: 0, cli: new Set() }; });
+  defs.forEach(p => { const t = (tipoDe[p.codigo] || {}).t || 'sin'; o[t].n += 1; o[t].f += mkNeto(p); const k = mkClaveTel(p.cliente); if (k) o[t].cli.add(k); });
+  MK_TIPOS.forEach(x => { o[x.k].ticket = o[x.k].n ? o[x.k].f / o[x.k].n : null; o[x.k].clientes = o[x.k].cli.size; });
+  return o;
+};
+const MkBadgeTipo = ({ info, chico }) => { if (!info) return null; const t = mkTipoInfo(info.t);
+  const txt = info.t === 'existente' && info.n > 1 ? `${t.ico} ${info.n}ª compra` : `${t.ico} ${t.lbl}`;
+  return <span style={{ display:'inline-block', padding: chico ? '1px 6px' : '2px 8px', borderRadius:10, fontSize: chico ? 9.5 : 10.5, fontWeight:800, color:t.color, background:t.color + '1f', border:`1px solid ${t.color}55`, whiteSpace:'nowrap' }}>{txt}</span>; };
 const mkCreacionPRE = p => (typeof p.tsCreacion === 'number' ? p.tsCreacion : p.ts);
 const mkDur = (ms) => {
   if (ms == null || !isFinite(ms)) return '—';
@@ -4867,6 +4953,7 @@ const ModuloMarketing = ({ esAdmin = false }) => {
   const [mapaMet, setMapaMet] = useState('ventas'); // 'ventas' | 'fact'
   const [provSel, setProvSel] = useState(null);
   const [abierto, setAbierto] = useState(null); // código DEF desplegado en la solapa Ventas
+  const [colorPor, setColorPor] = useState('usuario'); // gráfico de facturación: 'usuario' | 'tipo' (primer contacto / ya era cliente)
   // Solapa PRE vs DEF (evolución)
   const [evoVer, setEvoVer] = useState('ambos');   // 'pre' | 'def' | 'ambos'
   const [evoMed, setEvoMed] = useState('plata');   // 'plata' | 'cant'
@@ -4918,8 +5005,12 @@ const ModuloMarketing = ({ esAdmin = false }) => {
     const presPrev = presU.filter(p => enP(mkCreacionPRE(p)));
     const tot = mkStats(defs, presR, defDePre, preByCod);
     const totPrev = mkStats(defsPrev, presPrev, defDePre, preByCod);
+    const tipoDe = mkClasificarClientes(defsAll);
+    const tp = mkSplitTipo(defs, tipoDe);
+    const tpPrev = mkSplitTipo(defsPrev, tipoDe);
     const porUser = MK_USERS.filter(u => selSet.has(u.k) && usuariosConDatos.has(u.k)).map(u => ({
       k: u.k, color: u.color,
+      tp: mkSplitTipo(defs.filter(p => mkUser(p) === u.k), tipoDe),
       st: mkStats(defs.filter(p => mkUser(p) === u.k), presR.filter(p => mkUser(p) === u.k), defDePre, preByCod),
       stPrev: mkStats(defsPrev.filter(p => mkUser(p) === u.k), presPrev.filter(p => mkUser(p) === u.k), defDePre, preByCod),
     }));
@@ -4930,8 +5021,8 @@ const ModuloMarketing = ({ esAdmin = false }) => {
     const bKey = t => porSemana ? arInicioDeDia(t) - ((new Date(t - AR_OFFSET_MS).getUTCDay() + 6) % 7) * 86400000 : arInicioDeDia(t);
     const evo = {};
     for (let t = bKey(rango.desde); t <= Math.min(rango.hasta, now); t += (porSemana ? 7 : 1) * 86400000) evo[t] = {};
-    defs.forEach(p => { const k = bKey(p.ts); if (!evo[k]) evo[k] = {}; const u = mkUser(p); evo[k][u] = (evo[k][u] || 0) + mkNeto(p); });
-    const evoArr = Object.entries(evo).map(([t, v]) => ({ t: Number(t), v, tot: Object.values(v).reduce((a, b) => a + b, 0) })).sort((a, b) => a.t - b.t);
+    defs.forEach(p => { const k = bKey(p.ts); if (!evo[k]) evo[k] = {}; const u = mkUser(p); evo[k][u] = (evo[k][u] || 0) + mkNeto(p); const tk = 'T:' + ((tipoDe[p.codigo] || {}).t || 'sin'); evo[k][tk] = (evo[k][tk] || 0) + mkNeto(p); });
+    const evoArr = Object.entries(evo).map(([t, v]) => ({ t: Number(t), v, tot: Object.entries(v).filter(([kk]) => !kk.startsWith('T:')).reduce((a, [, b]) => a + b, 0) })).sort((a, b) => a.t - b.t);
     const evoMax = Math.max(1, ...evoArr.map(x => x.tot));
 
     // PRE sin convertir
@@ -4973,7 +5064,8 @@ const ModuloMarketing = ({ esAdmin = false }) => {
 
     return { now, defs, defsPrev, presR, presPrev, defDePre, tot, totPrev, porUser, evoArr, evoMax, porSemana, abiertas, abiertasR, provArr, estimadas,
       topProd, porCal, porFmt, fCombo, fIndiv, fManual, litros, nuevos, recurrentes: clavesR.size - nuevos, clientesTot: todos.length, conRecompra,
-      tasaRecompra: todos.length ? Math.round(conRecompra / todos.length * 100) : null, inactivos, heat, heatMax, porDiaSem, porMod, usuariosConDatos, preByCod };
+      tasaRecompra: todos.length ? Math.round(conRecompra / todos.length * 100) : null, inactivos, heat, heatMax, porDiaSem, porMod, usuariosConDatos, preByCod,
+      tipoDe, tp, tpPrev };
   }, [pedidos, rango, sync, sel, diasInactivo]);
 
   // ── Operación (antes en GESTIÓN): pendientes de entrega de los usuarios elegidos, DEF desde el 28/09/2026 ──
@@ -5090,8 +5182,11 @@ const ModuloMarketing = ({ esAdmin = false }) => {
       ['PRE creadas', x => x.pre], ['DEF (ventas)', x => x.def], ['Conversión', x => x.tasa === null ? '—' : `${x.tasa}%`],
       ['Facturación', x => fmt(x.fact)], ['Ticket prom.', x => x.ticket === null ? '—' : fmt(x.ticket)],
       ['Tiempo PRE→DEF', x => mkDur(x.medConv)], ['Cierra en 48 h', x => x.dentro48 === null ? '—' : `${x.dentro48}%`], ['Ventas directas', x => x.directas],
+      ['🆕 Ventas primer contacto', (x, c) => c.tp.nuevo.n], ['🆕 Fact. primer contacto', (x, c) => fmt(c.tp.nuevo.f)],
+      ['🔁 Ventas ya eran clientes', (x, c) => c.tp.existente.n], ['🔁 Fact. ya eran clientes', (x, c) => fmt(c.tp.existente.f)],
+      ['❔ Ventas sin marcar', (x, c) => c.tp.sin.n],
     ];
-    const cols = [...m.porUser.map(u => ({ k: u.k, color: u.color, st: u.st })), { k: 'TOTAL', color: '#fff', st: m.tot }];
+    const cols = [...m.porUser.map(u => ({ k: u.k, color: u.color, st: u.st, tp: u.tp })), { k: 'TOTAL', color: '#fff', st: m.tot, tp: m.tp }];
     return (
       <div style={{ ...card, overflowX:'auto' }}>
         {cols.length > 3 && <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', marginBottom:6 }}>Deslizá la tabla hacia el costado para ver todos →</div>}
@@ -5103,10 +5198,10 @@ const ModuloMarketing = ({ esAdmin = false }) => {
           <tbody>{filas.map(([lbl, f]) => (
             <tr key={lbl} style={{ borderTop:'1px solid rgba(255,255,255,0.08)' }}>
               <td style={{ padding:'7px 2px', fontWeight:700, color:'rgba(255,255,255,0.75)', whiteSpace:'nowrap' }}>{lbl}</td>
-              {cols.map(c => <td key={c.k} style={{ textAlign:'right', padding:'7px 3px', fontWeight: c.k === 'TOTAL' ? 900 : 700, whiteSpace:'nowrap' }}>{f(c.st)}</td>)}
+              {cols.map(c => <td key={c.k} style={{ textAlign:'right', padding:'7px 3px', fontWeight: c.k === 'TOTAL' ? 900 : 700, whiteSpace:'nowrap' }}>{f(c.st, c)}</td>)}
             </tr>))}</tbody>
         </table>
-        <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:8 }}>Facturación = lo que pagó el cliente sin el envío. Tiempo PRE→DEF = mediana.</div>
+        <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:8 }}>Facturación = lo que pagó el cliente sin el envío. Tiempo PRE→DEF = mediana. 🆕 Primer contacto = habla con la vendedora por primera vez · 🔁 Ya era cliente · ❔ ventas anteriores a la marca, sin compra previa en la app.</div>
       </div>
     );
   };
@@ -5152,7 +5247,7 @@ const ModuloMarketing = ({ esAdmin = false }) => {
         ventas:'Cada venta DEF del período, con su detalle.',
         mapa:'De qué provincias vienen las ventas.',
         productos:'Qué productos, calidades y formatos se venden.',
-        clientes:'Clientes nuevos, recompra e inactivos para recontactar.',
+        clientes:'Clientes de primer contacto vs los que ya eran clientes, recompra e inactivos para recontactar.',
         cuando:'Qué días y en qué horarios se vende más.',
         operacion:'Pedidos pendientes de entrega y atrasos (DEF desde el 28/09/2026). Antes estaba en Gestión.',
         interno:'Solo administrador: cobrado con envío, envíos y comisiones por usuario (el equipo de marketing no ve esta solapa).',
@@ -5177,20 +5272,54 @@ const ModuloMarketing = ({ esAdmin = false }) => {
           )}
 
           <div style={card}>
-            <div style={cTit}><span>📊 Facturación {m.porSemana ? 'por semana' : 'por día'}</span></div>
+            <div style={cTit}><span>🆕 Primer contacto vs 🔁 ya eran clientes</span></div>
+            {m.defs.length === 0 ? vacio('Sin ventas en el período.') : (() => {
+              const totF = MK_TIPOS.reduce((a, t) => a + m.tp[t.k].f, 0) || 1;
+              return (
+                <div>
+                  <div style={{ display:'flex', height:14, borderRadius:7, overflow:'hidden', background:'rgba(255,255,255,0.06)', marginBottom:10 }}>
+                    {MK_TIPOS.map(t => m.tp[t.k].f > 0 ? <div key={t.k} title={`${t.lbl}: ${fmt(m.tp[t.k].f)}`} style={{ width:`${m.tp[t.k].f / totF * 100}%`, background:t.color }} /> : null)}
+                  </div>
+                  {MK_TIPOS.filter(t => t.k !== 'sin' || m.tp.sin.n > 0).map(t => { const x = m.tp[t.k], xp = m.tpPrev[t.k]; const c = cmpTxt(x.n, xp.n);
+                    return (
+                      <div key={t.k} style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:8, padding:'7px 0', borderTop:'1px solid rgba(255,255,255,0.07)' }}>
+                        <div style={{ minWidth:0 }}>
+                          <div style={{ fontSize:12.5, fontWeight:900, color:t.color }}>{t.ico} {t.lbl}</div>
+                          <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.5)' }}>{x.n} venta{x.n !== 1 ? 's' : ''} · {x.clientes} cliente{x.clientes !== 1 ? 's' : ''} · ticket {x.ticket === null ? '—' : fmt(x.ticket)}{c !== null ? ` · ${c > 0 ? '▲' : c < 0 ? '▼' : '='} ${Math.abs(c)}% ventas ${rango.prevEtiqueta}` : ''}</div>
+                        </div>
+                        <div style={{ textAlign:'right', whiteSpace:'nowrap' }}>
+                          <div style={{ fontSize:13.5, fontWeight:900 }}>{fmt(x.f)}</div>
+                          <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.5)', fontWeight:800 }}>{Math.round(x.f / totF * 100)}%</div>
+                        </div>
+                      </div>); })}
+                  <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:6, lineHeight:1.4 }}>Lo marca quien carga el DEF (desde el 17/11/2026). Si el teléfono ya compró antes en la app, cuenta como 🔁 aunque no esté marcado.{m.tp.sin.n > 0 ? ' ❔ Sin marcar = ventas anteriores a la marca sin compra previa en la app: no se sabe si ya eran clientes.' : ''}</div>
+                </div>);
+            })()}
+          </div>
+
+          <div style={card}>
+            <div style={cTit}><span>📊 Facturación {m.porSemana ? 'por semana' : 'por día'}</span>
+              <span style={{ display:'flex', gap:4 }}>
+                <button onClick={() => setColorPor('usuario')} style={pill(colorPor === 'usuario')}>Por usuario</button>
+                <button onClick={() => setColorPor('tipo')} style={pill(colorPor === 'tipo')}>Por tipo de cliente</button>
+              </span></div>
             {m.defs.length === 0 ? vacio('Sin ventas en el período.') : (
               <div>
                 <div style={{ display:'flex', alignItems:'flex-end', gap:2, height:130, borderBottom:'1px solid rgba(255,255,255,0.12)' }}>
                   {m.evoArr.map(b => (
                     <div key={b.t} title={`${fmtFechaDDMMAAAA(b.t)}: ${fmt(b.tot)}`} style={{ flex:1, minWidth:3, height:'100%', display:'flex', flexDirection:'column-reverse' }}>
-                      {m.porUser.map(u => b.v[u.k] ? <div key={u.k} style={{ height:`${b.v[u.k] / m.evoMax * 100}%`, background:u.color, opacity:0.9 }} /> : null)}
+                      {colorPor === 'tipo'
+                        ? MK_TIPOS.map(t => b.v['T:' + t.k] ? <div key={t.k} style={{ height:`${b.v['T:' + t.k] / m.evoMax * 100}%`, background:t.color, opacity:0.9 }} /> : null)
+                        : m.porUser.map(u => b.v[u.k] ? <div key={u.k} style={{ height:`${b.v[u.k] / m.evoMax * 100}%`, background:u.color, opacity:0.9 }} /> : null)}
                     </div>
                   ))}
                 </div>
                 <div style={{ display:'flex', justifyContent:'space-between', fontSize:9.5, color:'rgba(255,255,255,0.4)', marginTop:4 }}>
                   <span>{fmtFechaDDMMAAAA(m.evoArr[0].t).slice(0, 5)}</span><span>máx. {fmt(m.evoMax)}</span><span>{fmtFechaDDMMAAAA(m.evoArr[m.evoArr.length - 1].t).slice(0, 5)}</span>
                 </div>
-                <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginTop:8 }}>{m.porUser.map(u => <span key={u.k} style={{ fontSize:10.5, fontWeight:800, color:u.color }}>■ {u.k}</span>)}</div>
+                <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginTop:8 }}>{colorPor === 'tipo'
+                  ? MK_TIPOS.filter(t => t.k !== 'sin' || m.tp.sin.n > 0).map(t => <span key={t.k} style={{ fontSize:10.5, fontWeight:800, color:t.color }}>■ {t.ico} {t.lbl}</span>)
+                  : m.porUser.map(u => <span key={u.k} style={{ fontSize:10.5, fontWeight:800, color:u.color }}>■ {u.k}</span>)}</div>
               </div>
             )}
           </div>
@@ -5198,7 +5327,7 @@ const ModuloMarketing = ({ esAdmin = false }) => {
           <div style={card}>
             <div style={cTit}><span>🧑‍💼 Participación por usuario</span></div>
             {m.porUser.length === 0 ? vacio('Sin datos.') : m.porUser.map(u => (
-              <Barra key={u.k} nombre={`${u.k} · ${u.st.def} ventas · conv. ${u.st.tasa === null ? '—' : u.st.tasa + '%'}`} pct={m.tot.fact ? u.st.fact / m.tot.fact * 100 : 0}
+              <Barra key={u.k} nombre={`${u.k} · ${u.st.def} ventas (🆕 ${u.tp.nuevo.n} · 🔁 ${u.tp.existente.n}${u.tp.sin.n ? ` · ❔ ${u.tp.sin.n}` : ''}) · conv. ${u.st.tasa === null ? '—' : u.st.tasa + '%'}`} pct={m.tot.fact ? u.st.fact / m.tot.fact * 100 : 0}
                 val={`${fmt(u.st.fact)} · ${m.tot.fact ? Math.round(u.st.fact / m.tot.fact * 100) : 0}%`} color={u.color} />
             ))}
           </div>
@@ -5613,9 +5742,9 @@ const ModuloMarketing = ({ esAdmin = false }) => {
       {/* ═══ VENTAS (detalle por usuario, sin comisiones) ═══ */}
       {!cargando && rango && tab === 'ventas' && (
         <div>
-          <button onClick={() => mkCsv(`ventas-${hoyTxt()}.csv`, ['Usuario','Código DEF','Fecha','Hora','Modalidad','Localidad','Provincia','Cliente','Teléfono','Productos','Cobrado','Envío','Importe sin envío','Viene de PRE','Tiempo PRE→DEF (h)'],
+          <button onClick={() => mkCsv(`ventas-${hoyTxt()}.csv`, ['Usuario','Código DEF','Fecha','Hora','Modalidad','Localidad','Provincia','Cliente','Teléfono','Tipo de cliente','N° compra en la app','Productos','Cobrado','Envío','Importe sin envío','Viene de PRE','Tiempo PRE→DEF (h)'],
             [...m.defs].sort((a, b) => a.ts - b.ts).map(p => { const pre = p.codigoPRE && m.preByCod[p.codigoPRE]; const t = pre ? (p.ts - mkCreacionPRE(pre)) / 3600000 : null;
-              return [mkUser(p), p.codigo, fmtFechaDDMMAAAA(p.ts), arHora(p.ts), gModalidad(p), mkLocalidad(p), mkProvincia(p).prov, p.cliente?.nombre || '', p.cliente?.telefono || '', mkItemsTxt(p), Math.round(gTotal(p)), Math.round(gEnvio(p)), Math.round(mkNeto(p)), pre ? p.codigoPRE : 'directa', t != null && t >= 0 ? t.toFixed(1).replace('.', ',') : '']; }))}
+              return [mkUser(p), p.codigo, fmtFechaDDMMAAAA(p.ts), arHora(p.ts), gModalidad(p), mkLocalidad(p), mkProvincia(p).prov, p.cliente?.nombre || '', p.cliente?.telefono || '', mkTipoInfo((m.tipoDe[p.codigo] || {}).t).lbl, (m.tipoDe[p.codigo] || {}).n || '', mkItemsTxt(p), Math.round(gTotal(p)), Math.round(gEnvio(p)), Math.round(mkNeto(p)), pre ? p.codigoPRE : 'directa', t != null && t >= 0 ? t.toFixed(1).replace('.', ',') : '']; }))}
             disabled={!m.defs.length} style={{ ...glassBtn(RGB.vd, { pad:'11px 16px', size:13, weight:750 }), marginBottom:12, opacity: m.defs.length ? 1 : 0.5 }}>⬇ Descargar ventas del período (Excel)</button>
           {m.porUser.length === 0 && vacio('Sin ventas en el período.')}
           {m.porUser.map(u => {
@@ -5625,7 +5754,7 @@ const ModuloMarketing = ({ esAdmin = false }) => {
               <div key={u.k} style={{ ...card, borderColor: u.color + '66' }}>
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
                   <div style={{ fontWeight:900, fontSize:15, color:u.color }}>{u.k}</div>
-                  <div style={{ fontSize:11, color:'rgba(255,255,255,0.55)', fontWeight:700 }}>{lista.length} venta{lista.length !== 1 ? 's' : ''}</div>
+                  <div style={{ fontSize:11, color:'rgba(255,255,255,0.55)', fontWeight:700, textAlign:'right' }}>{lista.length} venta{lista.length !== 1 ? 's' : ''}<br/><span style={{ fontSize:10.5 }}>🆕 {u.tp.nuevo.n} · 🔁 {u.tp.existente.n}{u.tp.sin.n ? ` · ❔ ${u.tp.sin.n}` : ''}</span></div>
                 </div>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6, marginBottom:10 }}>
                   {[['Cobrado', cobrado], ['Envíos', envio], ['Sin envío', cobrado - envio]].map(([l, v]) => (
@@ -5640,6 +5769,7 @@ const ModuloMarketing = ({ esAdmin = false }) => {
                       <span style={{ fontWeight:800, minWidth:0, overflowWrap:'anywhere' }}>{p.codigo}{p.cliente?.nombre ? ' · ' + p.cliente.nombre : ''}</span>
                       <span style={{ fontWeight:900, whiteSpace:'nowrap' }}>{fmt(gTotal(p))}</span>
                     </div>
+                    <div style={{ marginTop:4 }}><MkBadgeTipo info={m.tipoDe[p.codigo]} chico /></div>
                     <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.5)', marginTop:2 }}>{fmtFechaDDMMAAAA(p.ts)} {arHora(p.ts)} · {gModalidad(p)} · {mkLocalidad(p)} ({mkProvincia(p).prov}){gEnvio(p) ? ` · envío ${fmt(gEnvio(p))}` : ''}</div>
                     {abierto === p.codigo && <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.8)', marginTop:6, paddingTop:6, borderTop:'1px solid rgba(255,255,255,0.08)' }}>
                       🧴 {mkItemsTxt(p) || 'Sin detalle'}{p.cliente?.telefono ? <><br/>📞 {p.cliente.telefono}</> : null}{p.codigoPRE ? <><br/>📝 Viene de {p.codigoPRE}</> : null}
@@ -5748,8 +5878,8 @@ const ModuloMarketing = ({ esAdmin = false }) => {
       {!cargando && rango && tab === 'clientes' && (
         <div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
-            <Kpi lbl="Clientes nuevos" val={m.nuevos} sub="primera compra en el período" />
-            <Kpi lbl="Clientes que volvieron" val={m.recurrentes} sub="ya habían comprado antes" />
+            <Kpi lbl="🆕 Primer contacto" val={m.tp.nuevo.clientes} cmp={cmpTxt(m.tp.nuevo.clientes, m.tpPrev.nuevo.clientes)} sub={`hablaron por primera vez · ${fmt(m.tp.nuevo.f)}`} />
+            <Kpi lbl="🔁 Ya eran clientes" val={m.tp.existente.clientes} cmp={cmpTxt(m.tp.existente.clientes, m.tpPrev.existente.clientes)} sub={`volvieron a comprar · ${fmt(m.tp.existente.f)}${m.tp.sin.clientes ? ` · ❔ ${m.tp.sin.clientes} sin marcar` : ''}`} />
             <Kpi lbl="Tasa de recompra" val={m.tasaRecompra === null ? '—' : `${m.tasaRecompra}%`} sub={`${m.conRecompra} de ${m.clientesTot} compraron 2+ veces (histórico)`} />
             <Kpi lbl="Inactivos" val={m.inactivos.length} sub={`sin comprar hace +${diasInactivo} días`} />
           </div>

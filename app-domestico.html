@@ -4931,6 +4931,7 @@ const ModuloMarketing = ({ esAdmin = false }) => {
   const [segFiltro, setSegFiltro] = useState('todos'); // solapa Clientes: 'todos' | 'nuevo' | 'recurrente'
   const [segOrden, setSegOrden] = useState('ultima');  // 'ultima' | 'antigua' | 'compras' | 'total'
   const [segQ, setSegQ] = useState('');
+  const [segAbierto, setSegAbierto] = useState(null); // cliente desplegado (historial de compras)
   const [colorPor, setColorPor] = useState('usuario'); // gráfico de facturación: 'usuario' | 'tipo' (primer contacto / ya era cliente)
   // Solapa PRE vs DEF (evolución)
   const [evoVer, setEvoVer] = useState('ambos');   // 'pre' | 'def' | 'ambos'
@@ -5031,8 +5032,8 @@ const ModuloMarketing = ({ esAdmin = false }) => {
     const clavesR = new Set(defs.map(p => (tipoDe[p.codigo] || {}).cid).filter(Boolean));
     // Seguimiento: cada cliente que compró en el período (usuarios elegidos), con su historia completa (todos los usuarios)
     const hist = {};
-    defsAll.forEach(p => { const i = tipoDe[p.codigo]; if (!i) return; const k = i.cid; if (!hist[k]) hist[k] = { n: 0, tot: 0, primera: p.ts, ultima: p.ts, c: p.cliente, u: mkUser(p) };
-      const o = hist[k]; o.n += 1; o.tot += mkNeto(p); if (p.ts < o.primera) o.primera = p.ts; if (p.ts >= o.ultima) { o.ultima = p.ts; o.c = p.cliente; o.u = mkUser(p); } });
+    defsAll.forEach(p => { const i = tipoDe[p.codigo]; if (!i) return; const k = i.cid; if (!hist[k]) hist[k] = { n: 0, tot: 0, primera: p.ts, ultima: p.ts, c: p.cliente, u: mkUser(p), peds: [] };
+      const o = hist[k]; o.peds.push(p); o.n += 1; o.tot += mkNeto(p); if (p.ts < o.primera) o.primera = p.ts; if (p.ts >= o.ultima) { o.ultima = p.ts; o.c = p.cliente; o.u = mkUser(p); } });
     const segM = {};
     defs.forEach(p => { const i = tipoDe[p.codigo]; if (!i) return; const k = i.cid; if (!segM[k]) segM[k] = { cid: k, h: hist[k], nPer: 0, fPer: 0, nuevo: false, us: new Set() };
       const o = segM[k]; o.nPer += 1; o.fPer += mkNeto(p); if (i.t === 'nuevo') o.nuevo = true; o.us.add(mkUser(p)); });
@@ -5891,12 +5892,40 @@ const ModuloMarketing = ({ esAdmin = false }) => {
                 </div>
                 <input value={segQ} onChange={e => setSegQ(e.target.value)} placeholder="Buscar por nombre o teléfono…" style={{ ...s.inp, padding:'9px 12px', fontSize:13, marginBottom:10 }} />
                 {lista.length === 0 ? vacio('No hay clientes con ese filtro en el período.') :
-                  lista.slice(0, 300).map(o => filaContacto('sg' + o.cid, o.h.c,
-                    <>{o.h.c?.nombre || o.h.c?.telefono || 'Sin nombre'} <MkBadgeTipo info={{ t: o.tipo }} chico /></>,
-                    `${o.h.c?.telefono ? o.h.c.telefono + ' · ' : ''}${o.h.n} compra${o.h.n !== 1 ? 's' : ''} en total · última ${fmtFechaDDMMAAAA(o.h.ultima)} (hace ${gDiasDesde(o.h.ultima, m.now)} días) · en el período: ${o.nPer} (${fmt(o.fPer)})`,
-                    fmt(o.h.tot), o.h.u))}
+                  lista.slice(0, 300).map(o => { const abierto = segAbierto === o.cid; return (
+                    <div key={'sg' + o.cid}>
+                      <div onClick={() => setSegAbierto(abierto ? null : o.cid)} style={{ cursor:'pointer' }}>{filaContacto('sgf' + o.cid, o.h.c,
+                        <>{abierto ? '▾' : '▸'} {o.h.c?.nombre || o.h.c?.telefono || 'Sin nombre'} <MkBadgeTipo info={{ t: o.tipo }} chico /></>,
+                        `${o.h.c?.telefono ? o.h.c.telefono + ' · ' : ''}${o.h.n} compra${o.h.n !== 1 ? 's' : ''} en total · última ${fmtFechaDDMMAAAA(o.h.ultima)} (hace ${gDiasDesde(o.h.ultima, m.now)} días) · en el período: ${o.nPer} (${fmt(o.fPer)}) · tocá para ver sus compras`,
+                        fmt(o.h.tot), o.h.u)}</div>
+                      {abierto && (() => {
+                        const ps = [...o.h.peds].sort((a, b) => b.ts - a.ts), asc = [...ps].reverse();
+                        const gaps = asc.slice(1).map((p, i) => (p.ts - asc[i].ts) / 86400000);
+                        const prom = gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length) : null;
+                        const telRef = mkTel(o.h.c).slice(-8), nomRef = mkNorm(o.h.c?.nombre);
+                        return (
+                          <div style={{ margin:'-3px 0 10px 8px', padding:'10px 12px', borderLeft:'3px solid #60a5fa', background:'rgba(96,165,250,0.07)', borderRadius:'0 10px 10px 0' }}>
+                            <div style={{ fontSize:11.5, fontWeight:800, color:'#bfdbfe', marginBottom:6, lineHeight:1.45 }}>
+                              📜 Historial: {o.h.n} compra{o.h.n !== 1 ? 's' : ''} · primera {fmtFechaDDMMAAAA(o.h.primera)} · última {fmtFechaDDMMAAAA(o.h.ultima)}<br/>
+                              {prom !== null ? `Compra cada ${prom} días en promedio` : 'Una sola compra'} · total sin envío {fmt(o.h.tot)}
+                            </div>
+                            {ps.map(p => { const i = m.tipoDe[p.codigo]; const enPer = p.ts >= rango.desde && p.ts <= rango.hasta;
+                              const otroNom = p.cliente?.nombre && mkNorm(p.cliente.nombre) !== nomRef; const otroTel = mkTel(p.cliente) && mkTel(p.cliente).slice(-8) !== telRef;
+                              return (
+                                <div key={p.codigo} style={{ padding:'7px 0', borderTop:'1px solid rgba(255,255,255,0.08)' }}>
+                                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, fontSize:11.5 }}>
+                                    <span style={{ fontWeight:800, display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>{fmtFechaDDMMAAAA(p.ts)} {arHora(p.ts)} · {p.codigo} <MkBadgeTipo info={i} chico />{enPer && <span style={{ fontSize:9.5, color:'#f9a8d4', fontWeight:800 }}>EN EL PERÍODO</span>}</span>
+                                    <span style={{ fontWeight:900, whiteSpace:'nowrap' }}>{fmt(gTotal(p))}</span>
+                                  </div>
+                                  <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.55)', marginTop:2, lineHeight:1.4 }}>{mkUser(p)} · {gModalidad(p)} · {mkItemsTxt(p) || 'Sin detalle'}{gEnvio(p) ? ` · envío ${fmt(gEnvio(p))}` : ''}</div>
+                                  {(otroNom || otroTel) && <div style={{ fontSize:10.5, color:'#fbbf24', marginTop:2 }}>Cargado como: {p.cliente?.nombre || 'sin nombre'}{p.cliente?.telefono ? ' · ' + p.cliente.telefono : ''}</div>}
+                                </div>); })}
+                            <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', marginTop:6 }}>Incluye compras con todos los vendedores. El importe de cada compra es lo cobrado (con envío). En amarillo: compras cargadas con otro nombre o teléfono que la app tomó como el mismo cliente.</div>
+                          </div>);
+                      })()}
+                    </div>); })}
                 {lista.length > 300 && <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.45)' }}>Se muestran 300. Bajá el Excel para ver todos.</div>}
-                <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:6, lineHeight:1.4 }}>Clientes que compraron en el período elegido, a los vendedores elegidos. El monto de la derecha es todo lo que compró ese cliente (sin envío). Nuevo = su primera compra fue en el período; recurrente = ya había comprado antes.</div>
+                <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', marginTop:6, lineHeight:1.4 }}>Clientes que compraron en el período elegido, a los vendedores elegidos. El monto de la derecha es todo lo que compró ese cliente (sin envío). Tocá un cliente para ver cada una de sus compras. Nuevo = su primera compra fue en el período; recurrente = ya había comprado antes.</div>
               </div>);
           })()}
 

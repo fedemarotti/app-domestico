@@ -7648,17 +7648,18 @@ const CambiarPassword = ({ onCerrar }) => {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // GENERADOR DE DOCUMENTOS (Fede 18/11/2026)
-// Botón al lado de SALIR. Genera Cotización / Producción / Checklist / Etiqueta / Recibo de retiro:
-//  · de cualquier DEF existente (buscando por número, cliente o teléfono), o
-//  · de un documento armado DESDE CERO (o partiendo de un DEF y modificándolo).
-// Lo armado a mano NO se guarda como venta: no toca Liquidaciones, Tesorería, Entregas ni Marketing.
+// Botón al lado de SALIR. Arriba se TILDAN los documentos (Cotización, Producción, Checklist, Etiqueta,
+// Recibo de retiro). Abajo:
+//  · BUSCAR POR DEF → reimprime los tildados tal cual el original (no modifica nada del pedido).
+//  · MANUAL → pide solo los datos que necesitan los documentos tildados y los arma con el MISMO formato.
+//    Es como escribir un papel a mano: no se guarda, no es un DEF, no impacta en ningún módulo.
 // ═══════════════════════════════════════════════════════════════════════════════
 const GD_DOCS = [
-  { k:'cot',    l:'📄 Cotización',        bg:'linear-gradient(165deg,#FB923C,#EA580C)' },
-  { k:'prod',   l:'🧪 Producción',        bg:'#2a7a3b' },
-  { k:'check',  l:'✅ Checklist',         bg:'#1a5fa8' },
-  { k:'etiq',   l:'🏷️ Etiqueta',          bg:'#7a2a7a' },
-  { k:'recibo', l:'🧾 Recibo de retiro en planta', bg:'#0d5c3a' },
+  { k:'cot',    l:'📄 Cotización',   d:'Presupuesto con precios y total' },
+  { k:'prod',   l:'🧪 Producción',   d:'Orden para fabricar' },
+  { k:'check',  l:'✅ Checklist',    d:'Control de armado y activadores' },
+  { k:'etiq',   l:'🏷️ Etiqueta',     d:'Para pegar en el bulto' },
+  { k:'recibo', l:'🧾 Recibo de retiro', d:'Constancia que firma quien retira en planta' },
 ];
 const GD_TIPOS = [
   { k:'jabon',       l:'🧼 Jabón para ropa',     colores:COLORES_JABON,      calidad:true },
@@ -7671,106 +7672,82 @@ const GD_CALIDADES = ['Inicial','Intermedia','Premium'];
 const gdLimpio = v => String(v ?? '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim();
 const gdCodigoNuevo = () => { const d = new Date(); const p = n => String(n).padStart(2,'0'); return `MAN${p(d.getDate())}${p(d.getMonth()+1)}${p(d.getHours())}${p(d.getMinutes())}`; };
 const gdClienteVacio = () => ({ nombre:'', dni:'', telefono:'', email:'', direccion:'', localidad:'', ciudad:'', provincia:'', cp:'', datoExtra:'', observaciones:'' });
-const gdFormVacio = () => ({ codigo:gdCodigoNuevo(), fecha:new Date().toLocaleString('es-AR'), cliente:gdClienteVacio(), modalidad:'flex', bultos:1, zona:'', envio:'', baldes:0, cajas:0, items:[], agregados:[], totalManual:'', baseExtras:null });
+const gdFormVacio = () => ({ codigo:gdCodigoNuevo(), fecha:new Date().toLocaleString('es-AR'), cliente:gdClienteVacio(), modalidad:'flex', bultos:1, zona:'', envio:'', baldes:0, cajas:0, items:[], totalManual:'' });
 const gdPrecioSugerido = (tipo, cantidad, calidad) => {
   const t = PRECIOS[tipo]; if (!t) return '';
   const v = (tipo==='lavandina'||tipo==='desodorante') ? t[cantidad] : (t[cantidad] || {})[calidad];
   return v ? String(v) : '';
 };
-// DEF existente → formulario editable (copia; el DEF original no se toca)
-const gdFormDesdePedido = (p) => {
-  const ex = p.extras || {}; const tot = p.totales || {};
-  const { baldes, cajas } = desgloseEnvases(p.envases, ex);
-  return {
-    codigo: p.codigo || gdCodigoNuevo(), fecha: p.fecha || new Date().toLocaleString('es-AR'),
-    cliente: { ...gdClienteVacio(), ...Object.fromEntries(Object.entries(p.cliente || {}).map(([k, v]) => [k, v == null ? '' : String(v)])), localidad: (p.cliente||{}).localidad || ex.localidad || '' },
-    modalidad: ex.retiraLocal ? 'retiro' : ex.esInterior ? 'interior' : 'flex',
-    bultos: ex.bultos || 1, zona: p.zonaEnvio?.zona || '', envio: tot.envio ? String(tot.envio) : '',
-    baldes: baldes || 0, cajas: cajas || 0,
-    items: (p.items || []).map(it => ({ ...it, id: it.id || uid() })),
-    agregados: (ex.agregados || []).map(a => ({ ...a, id: a.id || uid() })),
-    totalManual: tot.total ? String(Math.round(tot.total)) : '', baseExtras: ex,
-  };
-};
 const gdCalcular = (m) => {
-  const bx = m.baseExtras || {};
-  const precioBalde = typeof bx.precioBalde === 'number' ? bx.precioBalde : PRECIO_ENVASE;
-  const precioCaja  = typeof bx.precioCaja  === 'number' ? bx.precioCaja  : PRECIO_CAJA;
   const baldes = Math.max(0, parseInt(m.baldes) || 0), cajas = Math.max(0, parseInt(m.cajas) || 0);
   const productos = (m.items || []).reduce((a, it) => a + (parseFloat(it.precio) || 0), 0);
-  const agregados = (m.agregados || []).reduce((a, x) => a + (parseFloat(x.precio) || 0), 0);
-  const envases = baldes * precioBalde + cajas * precioCaja;
+  const envases = baldes * PRECIO_ENVASE + cajas * PRECIO_CAJA;
   const envio = m.modalidad === 'flex' ? Math.max(0, parseFloat(m.envio) || 0) : 0;
-  const calculado = Math.round(productos + agregados + envases + envio);
+  const calculado = Math.round(productos + envases + envio);
   const tm = parseFloat(m.totalManual);
   const total = (String(m.totalManual).trim() !== '' && !isNaN(tm)) ? Math.round(tm) : calculado;
-  return { precioBalde, precioCaja, baldes, cajas, productos, agregados, envases, envio, calculado, total };
+  return { baldes, cajas, productos, envases, envio, calculado, total };
 };
-// Formulario → objeto con la MISMA forma que un DEF (lo consume imprimirPedido)
+// Datos cargados a mano → objeto con la misma forma que usan los documentos de siempre (imprimirPedido)
 const gdArmarPedido = (m) => {
   const c = gdCalcular(m);
   const bultos = Math.max(1, parseInt(m.bultos) || 1);
   const cliente = Object.fromEntries(Object.entries(m.cliente || {}).map(([k, v]) => [k, gdLimpio(v)]));
   const zonaObj = ZONAS_ENVIO.find(z => z.zona === m.zona);
-  const bx = m.baseExtras || {};
   return {
-    tipo:'DEF', manualDoc:true,
-    codigo: gdLimpio(m.codigo).toUpperCase() || 'MANUAL',
+    tipo:'MANUAL', codigo: gdLimpio(m.codigo).toUpperCase() || 'MANUAL',
     fecha: gdLimpio(m.fecha) || new Date().toLocaleString('es-AR'),
     cliente, items: m.items || [], envases: c.baldes,
-    extras: { ...bx, retiraLocal: m.modalidad === 'retiro', esInterior: m.modalidad === 'interior',
-      localidad: cliente.localidad, bultos, envios: Math.max(bultos, Number(bx.envios) || 0),
-      cajas: c.cajas, precioCaja: c.precioCaja, precioBalde: c.precioBalde, agregados: m.agregados || [] },
+    extras: { retiraLocal: m.modalidad === 'retiro', esInterior: m.modalidad === 'interior', localidad: cliente.localidad,
+      bultos, envios: bultos, cajas: c.cajas, precioCaja: PRECIO_CAJA, precioBalde: PRECIO_ENVASE, agregados: [] },
     zonaEnvio: (m.modalidad === 'flex' && zonaObj) ? zonaObj : null,
-    totales: { productos: c.productos, agregados: c.agregados, envases: c.envases, envio: c.envio, total: c.total },
+    totales: { productos: c.productos, agregados: 0, envases: c.envases, envio: c.envio, total: c.total },
   };
 };
-const gdGenerar = (pedido, k) => {
+// Genera los documentos tildados (uno detrás de otro, como "Imprimir todos")
+const gdGenerarTildados = (pedido, tildados) => {
   if (!pedido) return;
-  // El recibo de retiro se puede sacar aunque el pedido no sea retiro en planta
-  if (k === 'recibo') return imprimirPedido({ ...pedido, extras: { ...(pedido.extras || {}), retiraLocal: true, esInterior: false } }, 'recibo');
-  imprimirPedido(pedido, k || null);
-};
-
-const GdBotonesDocs = ({ pedido, onAntes }) => {
-  const esR = !!pedido?.extras?.retiraLocal;
-  const ir = (k) => { if (onAntes && onAntes() === false) return; gdGenerar(pedido, k); };
-  return (
-    <div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
-        {GD_DOCS.map(d => (
-          <button key={d.k} onClick={() => ir(d.k)} style={{ ...s.bP, fontSize:13.5, padding:'12px 8px', background:d.bg, boxShadow:'0 4px 12px rgba(0,0,0,0.35)', gridColumn: d.k === 'recibo' ? 'span 2' : undefined }}>
-            {d.k === 'etiq' && esR ? '🏷️ Etiqueta + recibo' : d.l}
-          </button>
-        ))}
-      </div>
-      <button onClick={() => ir(null)} style={{ ...s.bS, width:'100%' }}>🖨️ Generar los 4 juntos</button>
-      <div style={{ fontSize:11, color:C.tx3, textAlign:'center', marginTop:8 }}>Cada botón abre el documento en otra pestaña → Cmd+P para imprimir o guardar en PDF.</div>
-    </div>
-  );
+  const orden = GD_DOCS.map(d => d.k).filter(k => tildados[k]);
+  orden.forEach((k, i) => setTimeout(() => {
+    // El recibo de retiro sale aunque el pedido no haya sido retiro en planta
+    if (k === 'recibo') imprimirPedido({ ...pedido, extras: { ...(pedido.extras || {}), retiraLocal: true, esInterior: false } }, 'recibo');
+    else imprimirPedido(pedido, k);
+  }, i * 600));
 };
 
 const GeneradorDocumentos = ({ pedidos, onVolver }) => {
+  const [tild, setTild] = useState({ cot:false, prod:false, check:false, etiq:false, recibo:false });
   const [modo, setModo] = useState('def');              // 'def' | 'manual'
   const [q, setQ] = useState('');
-  const [sel, setSel] = useState(null);                 // DEF elegido
+  const [sel, setSel] = useState(null);                 // DEF encontrado
   const [buscando, setBuscando] = useState(false);
   const [msg, setMsg] = useState('');
   const [m, setM] = useState(gdFormVacio);
   const [nuevo, setNuevo] = useState(() => ({ tipo:'jabon', cantidad:50, calidad:'Intermedia', color:'', fragancia:'', precio:gdPrecioSugerido('jabon', 50, 'Intermedia') }));
   const [libre, setLibre] = useState({ nombre:'', precio:'' });
-  const [desdeDEF, setDesdeDEF] = useState('');         // código del DEF usado como base
+
+  const nTild = GD_DOCS.filter(d => tild[d.k]).length;
+  const todos = nTild === GD_DOCS.length;
+  // Qué datos pide el modo manual según lo tildado
+  const pide = {
+    precios:   tild.cot,
+    productos: tild.cot || tild.prod || tild.check || tild.recibo,
+    entrega:   tild.cot || tild.prod || tild.check || tild.etiq,
+    envases:   tild.cot || tild.prod || tild.check || tild.etiq || tild.recibo,
+    bultos:    tild.etiq || tild.recibo,
+    domicilio: tild.cot || tild.prod || tild.etiq,
+    dni:       tild.cot || tild.prod || tild.etiq || tild.recibo,
+    contacto:  tild.cot || tild.prod || tild.etiq || tild.recibo,
+  };
 
   const defs = React.useMemo(() => (pedidos || []).filter(p => p && p.tipo === 'DEF' && p.codigo), [pedidos]);
   const resultados = React.useMemo(() => {
     const t = q.trim(); if (!t) return defs.slice(0, 8);
-    const up = t.toUpperCase(), low = t.toLowerCase();
-    const dig = t.replace(/\D/g, '');
+    const up = t.toUpperCase(), low = t.toLowerCase(), dig = t.replace(/\D/g, '');
     return defs.filter(p => p.codigo.toUpperCase().includes(up)
       || String(p.cliente?.nombre || '').toLowerCase().includes(low)
       || (dig.length >= 4 && String(p.cliente?.telefono || '').replace(/\D/g, '').includes(dig))).slice(0, 25);
   }, [defs, q]);
-
   const buscarNube = async () => {
     const t = q.trim().toUpperCase(); if (!t) return;
     const cod = /^\d/.test(t) ? 'DEF' + t : t;
@@ -7785,14 +7762,12 @@ const GeneradorDocumentos = ({ pedidos, onVolver }) => {
   const setF = (k, v) => setM(prev => ({ ...prev, [k]: v }));
   const calc = gdCalcular(m);
   const tipoSel = GD_TIPOS.find(t => t.k === nuevo.tipo) || GD_TIPOS[0];
-
   const cambiarNuevo = (patch) => setNuevo(prev => {
     const n = { ...prev, ...patch };
     n.precio = gdPrecioSugerido(n.tipo, n.cantidad, n.calidad);
     if ('tipo' in patch) { n.color = ''; n.fragancia = ''; }
     return n;
   });
-
   const agregarProducto = () => {
     const { tipo, calidad, color, fragancia } = nuevo;
     const cantidad = parseInt(nuevo.cantidad) || 0;
@@ -7812,21 +7787,19 @@ const GeneradorDocumentos = ({ pedidos, onVolver }) => {
     setLibre({ nombre:'', precio:'' });
   };
   const quitarItem = (id) => setM(prev => ({ ...prev, items: prev.items.filter(x => x.id !== id) }));
-  const quitarAgr = (id) => setM(prev => ({ ...prev, agregados: prev.agregados.filter(x => x.id !== id) }));
+  const limpiarManual = () => { if ((m.items.length || m.cliente.nombre) && !confirm('¿Borrar todo lo cargado?')) return; setM(gdFormVacio()); };
 
-  const usarComoBase = (p) => { setM(gdFormDesdePedido(p)); setDesdeDEF(p.codigo); setModo('manual'); try { window.scrollTo(0, 0); } catch {} };
-  const empezarDeCero = () => { if ((m.items.length || m.cliente.nombre) && !confirm('¿Borrar lo cargado y empezar de cero?')) return; setM(gdFormVacio()); setDesdeDEF(''); };
-  const validar = () => {
-    if (!gdLimpio(m.cliente.nombre)) { alert('Falta el nombre del cliente.'); return false; }
-    if (!m.items.length && !m.agregados.length) { alert('Agregá al menos un producto.'); return false; }
-    return true;
+  const generarDEF = () => {
+    if (!nTild) return alert('Tildá arriba qué documentos querés.');
+    gdGenerarTildados(sel, tild);
+  };
+  const generarManual = () => {
+    if (!nTild) return alert('Tildá arriba qué documentos querés.');
+    if (!gdLimpio(m.cliente.nombre)) return alert('Falta el nombre del cliente.');
+    if (pide.productos && !m.items.length) return alert('Agregá al menos un producto.');
+    gdGenerarTildados(gdArmarPedido(m), tild);
   };
 
-  const tabBtn = (k, txt) => (
-    <button onClick={() => setModo(k)} style={{ flex:1, padding:'11px 8px', borderRadius:12, cursor:'pointer', fontWeight:800, fontSize:13.5, fontFamily:'inherit',
-      background: modo === k ? 'rgba(249,115,22,0.22)' : 'rgba(255,255,255,0.05)', color: modo === k ? '#FDBA74' : C.tx2,
-      border: modo === k ? '1px solid rgba(249,115,22,0.6)' : `1px solid ${C.ln}` }}>{txt}</button>
-  );
   const inpC = { ...s.inp, padding:'10px 12px', fontSize:14 };
   const lblC = { ...s.lbl, fontSize:11.5, marginBottom:4 };
   const campo = (lbl, k, extra = {}) => (
@@ -7835,42 +7808,62 @@ const GeneradorDocumentos = ({ pedidos, onVolver }) => {
       <input value={m.cliente[k] || ''} onChange={e => setCli(k, e.target.value)} style={inpC} inputMode={extra.num ? 'numeric' : undefined} />
     </div>
   );
-  const filaItem = (it, onQuitar) => (
-    <div key={it.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:10, padding:'9px 12px', background:'rgba(255,255,255,0.05)', borderRadius:10, marginBottom:7 }}>
-      <div style={{ minWidth:0 }}>
-        <div style={{ fontSize:13, fontWeight:800 }}>{lpTit(it)}</div>
-        <ResumenItemDEF det={it} itemPRE={it} />
-        {['lavandina','desodorante'].includes(it.tipo) && (it.fragancias_piso||[]).length > 0 && <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)', marginTop:3 }}>💧 {it.fragancias_piso.map(f => `${f.fragancia} ${f.cantidad} Lts`).join(' + ')}</div>}
-      </div>
-      <div style={{ display:'flex', gap:10, alignItems:'center', flexShrink:0 }}>
-        <span style={{ color:C.na, fontWeight:800 }}>{precioAgrTxt(it)}</span>
-        <button onClick={onQuitar} style={{ background:'rgba(239,68,68,0.2)', color:'#f87171', border:'none', borderRadius:6, padding:'3px 8px', cursor:'pointer' }}>✕</button>
-      </div>
-    </div>
-  );
   const selBox = (value, onChange, opts, extraStyle) => (
     <select value={value} onChange={onChange} style={{ ...inpC, appearance:'auto', WebkitAppearance:'menulist', ...(extraStyle || {}) }}>{opts}</select>
+  );
+  const tabBtn = (k, txt) => (
+    <button onClick={() => setModo(k)} style={{ flex:1, padding:'12px 8px', borderRadius:12, cursor:'pointer', fontWeight:800, fontSize:14, fontFamily:'inherit',
+      background: modo === k ? 'rgba(249,115,22,0.22)' : 'rgba(255,255,255,0.05)', color: modo === k ? '#FDBA74' : C.tx2,
+      border: modo === k ? '1px solid rgba(249,115,22,0.6)' : `1px solid ${C.ln}` }}>{txt}</button>
+  );
+  const btnGenerar = (onClick) => (
+    <button onClick={onClick} disabled={!nTild} style={{ ...s.bP, marginTop:4, opacity: nTild ? 1 : 0.45, cursor: nTild ? 'pointer' : 'default' }}>
+      🖨️ {nTild ? `Generar ${nTild === 1 ? 'el documento tildado' : `los ${nTild} documentos tildados`}` : 'Tildá arriba los documentos'}
+    </button>
   );
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+      <div style={{ marginBottom:14 }}>
         <button onClick={onVolver} style={{ padding:'8px 14px', background:'rgba(255,255,255,0.06)', color:'#fff', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, fontWeight:700, fontSize:12, cursor:'pointer' }}>🏠 Salir</button>
       </div>
-      <div style={{ fontSize:24, fontWeight:900, color:'#FACC15', letterSpacing:'-0.02em', marginBottom:2 }}>📑 GENERADOR DE DOCUMENTOS</div>
-      <div style={{ fontSize:12, color:C.tx3, marginBottom:16 }}>Cotización · Producción · Checklist · Etiqueta · Recibo de retiro</div>
-      <div style={{ display:'flex', gap:8, marginBottom:16 }}>
-        {tabBtn('def', '🔎 Desde un DEF')}
-        {tabBtn('manual', '✏️ Desde cero')}
+      <div style={{ fontSize:24, fontWeight:900, color:'#FACC15', letterSpacing:'-0.02em', marginBottom:16 }}>📑 GENERADOR DE DOCUMENTOS</div>
+
+      {/* 1 · DOCUMENTOS A TILDAR */}
+      <div style={s.card}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+          <div style={{ ...s.cTit, marginBottom:0 }}>1 · Tildá los documentos</div>
+          <button onClick={() => setTild(Object.fromEntries(GD_DOCS.map(d => [d.k, !todos])))} style={{ background:'none', border:'none', color:'#FDBA74', fontSize:12, fontWeight:700, cursor:'pointer' }}>{todos ? 'Destildar todos' : 'Tildar todos'}</button>
+        </div>
+        {GD_DOCS.map(d => {
+          const on = !!tild[d.k];
+          return (
+            <button key={d.k} onClick={() => setTild(prev => ({ ...prev, [d.k]: !prev[d.k] }))} style={{ display:'flex', alignItems:'center', gap:12, width:'100%', textAlign:'left', padding:'11px 12px', marginBottom:7, borderRadius:12, cursor:'pointer', fontFamily:'inherit',
+              background: on ? 'rgba(34,197,94,0.14)' : 'rgba(255,255,255,0.04)', border: on ? '1px solid rgba(34,197,94,0.55)' : `1px solid ${C.ln}`, color:C.tx }}>
+              <span style={{ width:22, height:22, borderRadius:6, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, fontWeight:900,
+                background: on ? '#22c55e' : 'transparent', border: on ? '2px solid #22c55e' : '2px solid rgba(255,255,255,0.35)', color:'#06210f' }}>{on ? '✓' : ''}</span>
+              <span>
+                <span style={{ display:'block', fontSize:14.5, fontWeight:800 }}>{d.l}</span>
+                <span style={{ display:'block', fontSize:11.5, color:C.tx3 }}>{d.d}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 2 · DE DÓNDE SALEN LOS DATOS */}
+      <div style={{ display:'flex', gap:8, marginBottom:14 }}>
+        {tabBtn('def', '🔎 Buscar por DEF')}
+        {tabBtn('manual', '✏️ Manual')}
       </div>
 
       {modo === 'def' && (
-        <div>
-          {!sel && (
-            <div style={s.card}>
-              <div style={s.cTit}>Buscar pedido definitivo</div>
+        <div style={s.card}>
+          <div style={s.cTit}>2 · Buscar el DEF</div>
+          {!sel ? (
+            <div>
               <div style={{ display:'flex', gap:8 }}>
-                <input value={q} onChange={e => { setQ(e.target.value); setMsg(''); }} onKeyDown={e => { if (e.key === 'Enter' && resultados.length === 0) buscarNube(); }} style={s.inp} placeholder="N° de DEF, cliente o teléfono" />
+                <input value={q} onChange={e => { setQ(e.target.value); setMsg(''); }} onKeyDown={e => { if (e.key === 'Enter') { if (resultados.length === 1) setSel(resultados[0]); else if (!resultados.length) buscarNube(); } }} style={s.inp} placeholder="N° de DEF, cliente o teléfono" />
                 {q.trim() && resultados.length === 0 && <button onClick={buscarNube} disabled={buscando} style={{ ...s.bS, width:'auto', whiteSpace:'nowrap' }}>{buscando ? '⏳' : '☁️ Buscar'}</button>}
               </div>
               {msg && <div style={{ fontSize:12.5, color:'#f87171', marginTop:8 }}>{msg}</div>}
@@ -7885,25 +7878,21 @@ const GeneradorDocumentos = ({ pedidos, onVolver }) => {
                 </button>
               ))}
             </div>
-          )}
-          {sel && (
+          ) : (
             <div>
-              <div style={{ ...s.card, background:'rgba(34,197,94,0.10)', border:'1px solid rgba(34,197,94,0.28)' }}>
+              <div style={{ padding:14, borderRadius:12, background:'rgba(34,197,94,0.10)', border:'1px solid rgba(34,197,94,0.28)', marginBottom:12 }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10 }}>
                   <div style={{ minWidth:0 }}>
                     <div style={{ fontSize:22, fontWeight:900, letterSpacing:1 }}>{sel.codigo}</div>
                     <div style={{ fontSize:13, fontWeight:700 }}>{sel.cliente?.nombre}</div>
-                    <div style={{ fontSize:11.5, color:C.tx3 }}>{sel.fecha} · {gModalidad(sel)} · {(sel.items || []).length} producto{(sel.items || []).length !== 1 ? 's' : ''}</div>
+                    <div style={{ fontSize:11.5, color:C.tx3 }}>{sel.fecha} · {gModalidad(sel)}</div>
                   </div>
                   <div style={{ fontSize:20, fontWeight:900, color:C.na, flexShrink:0 }}>{fmt(sel.totales?.total || sel.total || 0)}</div>
                 </div>
               </div>
-              <GdBotonesDocs pedido={sel} />
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginTop:14 }}>
-                <button onClick={() => usarComoBase(sel)} style={{ ...s.bS, width:'100%' }}>✏️ Modificar y generar</button>
-                <button onClick={() => setSel(null)} style={{ ...s.bS, width:'100%' }}>← Otro DEF</button>
-              </div>
-              <div style={{ fontSize:11, color:C.tx3, textAlign:'center', marginTop:8 }}>“Modificar” arma una copia editable: el DEF original no se toca.</div>
+              {btnGenerar(generarDEF)}
+              <button onClick={() => setSel(null)} style={{ ...s.bS, width:'100%', marginTop:8 }}>← Buscar otro DEF</button>
+              <div style={{ fontSize:11, color:C.tx3, textAlign:'center', marginTop:8 }}>Se reimprimen tal cual el original. El pedido no se modifica.</div>
             </div>
           )}
         </div>
@@ -7911,114 +7900,125 @@ const GeneradorDocumentos = ({ pedidos, onVolver }) => {
 
       {modo === 'manual' && (
         <div>
-          {desdeDEF && <div style={{ ...s.card, padding:12, background:'rgba(96,165,250,0.10)', border:'1px solid rgba(96,165,250,0.35)', fontSize:12.5 }}>✏️ Copia editable de <b>{desdeDEF}</b>. Los cambios son solo para el documento: el DEF original no se modifica.</div>}
+          {!nTild && <div style={{ ...s.card, padding:14, fontSize:13, color:'#FDBA74', border:'1px solid rgba(249,115,22,0.4)' }}>☝️ Tildá arriba qué documentos querés: el formulario te pide solo los datos que necesitan.</div>}
+          {nTild > 0 && (<div>
           <div style={s.card}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
-              <div style={{ ...s.cTit, marginBottom:0 }}>1 · Documento</div>
-              <button onClick={empezarDeCero} style={{ background:'none', border:'none', color:C.tx3, fontSize:12, cursor:'pointer', textDecoration:'underline' }}>Empezar de cero</button>
+              <div style={{ ...s.cTit, marginBottom:0 }}>2 · Datos del cliente</div>
+              <button onClick={limpiarManual} style={{ background:'none', border:'none', color:C.tx3, fontSize:12, cursor:'pointer', textDecoration:'underline' }}>Borrar todo</button>
             </div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-              <div><label style={lblC}>N° de documento</label><input value={m.codigo} onChange={e => setF('codigo', e.target.value)} style={inpC} /></div>
-              <div><label style={lblC}>Fecha</label><input value={m.fecha} onChange={e => setF('fecha', e.target.value)} style={inpC} /></div>
-            </div>
-          </div>
-
-          <div style={s.card}>
-            <div style={s.cTit}>2 · Cliente</div>
             <BuscadorCliente onElegir={c => setM(prev => ({ ...prev, cliente: { ...gdClienteVacio(), ...Object.fromEntries(Object.entries(c || {}).filter(([k]) => k in gdClienteVacio()).map(([k, v]) => [k, v == null ? '' : String(v)])) } }))} />
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
               {campo('Nombre y apellido *', 'nombre', { full:true })}
-              {campo('DNI', 'dni', { num:true })}
-              {campo('Teléfono', 'telefono', { num:true })}
-              {campo('Mail', 'email', { full:true })}
-              {campo('Dirección', 'direccion', { full:true })}
-              {campo('Localidad / Partido', 'localidad')}
-              {campo('Ciudad', 'ciudad')}
-              {campo('Provincia', 'provincia')}
-              {campo('CP', 'cp', { num:true })}
-              {campo('Dato extra', 'datoExtra', { full:true })}
-              {campo('Observaciones (salen destacadas)', 'observaciones', { full:true })}
+              {pide.dni && campo('DNI', 'dni', { num:true })}
+              {pide.contacto && campo('Teléfono', 'telefono', { num:true })}
+              {pide.domicilio && campo('Mail', 'email', { full:true })}
+              {pide.domicilio && campo('Domicilio', 'direccion', { full:true })}
+              {pide.domicilio && campo('Localidad / Partido', 'localidad')}
+              {pide.domicilio && campo('Ciudad', 'ciudad')}
+              {pide.domicilio && campo('Provincia', 'provincia')}
+              {pide.domicilio && campo('CP', 'cp', { num:true })}
+              {pide.domicilio && campo('Dato extra', 'datoExtra', { full:true })}
+              {pide.domicilio && campo('Observaciones (salen destacadas)', 'observaciones', { full:true })}
             </div>
           </div>
 
-          <div style={s.card}>
-            <div style={s.cTit}>3 · Entrega y envases</div>
-            <div style={{ display:'flex', gap:6, marginBottom:12 }}>
-              {[['flex','🚚 Flex AMBA'],['retiro','🏪 Retira en planta'],['interior','📦 Interior']].map(([k, t]) => (
-                <button key={k} onClick={() => setF('modalidad', k)} style={{ flex:1, padding:'10px 4px', borderRadius:10, cursor:'pointer', fontWeight:800, fontSize:12, fontFamily:'inherit',
-                  background: m.modalidad === k ? 'rgba(14,165,233,0.22)' : 'rgba(255,255,255,0.05)', color: m.modalidad === k ? '#7dd3fc' : C.tx2,
-                  border: m.modalidad === k ? '1px solid rgba(14,165,233,0.6)' : `1px solid ${C.ln}` }}>{t}</button>
-              ))}
-            </div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-              <div><label style={lblC}>Bultos</label><input type="number" min="1" inputMode="numeric" value={m.bultos} onChange={e => setF('bultos', e.target.value)} style={inpC} /></div>
-              {m.modalidad === 'flex' ? (
-                <div><label style={lblC}>Zona Flex</label>
-                  {selBox(m.zona, e => { const z = ZONAS_ENVIO.find(x => x.zona === e.target.value); setM(prev => ({ ...prev, zona: e.target.value, envio: z ? String(z.precio * Math.max(1, parseInt(prev.bultos) || 1)) : prev.envio })); },
-                    [<option key="" value="">— Elegir —</option>, ...ZONAS_ENVIO.map(z => <option key={z.zona} value={z.zona}>{z.zona} · {fmt(z.precio)}</option>)])}
+          {(pide.entrega || pide.envases || pide.bultos) && (
+            <div style={s.card}>
+              <div style={s.cTit}>3 · Entrega y envases</div>
+              {pide.entrega && (
+                <div style={{ display:'flex', gap:6, marginBottom:12 }}>
+                  {[['flex','🚚 Flex AMBA'],['retiro','🏪 Retira en planta'],['interior','📦 Interior']].map(([k, t]) => (
+                    <button key={k} onClick={() => setF('modalidad', k)} style={{ flex:1, padding:'10px 4px', borderRadius:10, cursor:'pointer', fontWeight:800, fontSize:12, fontFamily:'inherit',
+                      background: m.modalidad === k ? 'rgba(14,165,233,0.22)' : 'rgba(255,255,255,0.05)', color: m.modalidad === k ? '#7dd3fc' : C.tx2,
+                      border: m.modalidad === k ? '1px solid rgba(14,165,233,0.6)' : `1px solid ${C.ln}` }}>{t}</button>
+                  ))}
                 </div>
-              ) : <div />}
-              {m.modalidad === 'flex' && <div style={{ gridColumn:'span 2' }}><label style={lblC}>Costo de envío (pesos)</label><input type="number" min="0" inputMode="numeric" value={m.envio} onChange={e => setF('envio', e.target.value)} style={inpC} placeholder="$0" /></div>}
-              <div><label style={lblC}>Baldes ({fmt(calc.precioBalde)} c/u)</label><input type="number" min="0" inputMode="numeric" value={m.baldes} onChange={e => setF('baldes', e.target.value)} style={inpC} /></div>
-              <div><label style={lblC}>Cajas ({calc.precioCaja > 0 ? fmt(calc.precioCaja) + ' c/u' : 'sin cargo'})</label><input type="number" min="0" inputMode="numeric" value={m.cajas} onChange={e => setF('cajas', e.target.value)} style={inpC} /></div>
-            </div>
-            <div style={{ fontSize:11, color:C.tx3, marginTop:8 }}>Sin baldes ni cajas → sale “se entrega en bolsas (sin envase)”.</div>
-          </div>
-
-          <div style={s.card}>
-            <div style={s.cTit}>4 · Productos</div>
-            {m.items.length === 0 && m.agregados.length === 0 && <div style={{ fontSize:12.5, color:C.tx3, marginBottom:10 }}>Todavía no hay productos.</div>}
-            {m.items.map(it => filaItem(it, () => quitarItem(it.id)))}
-            {m.agregados.length > 0 && <div style={{ fontSize:10.5, fontWeight:800, color:C.tx3, textTransform:'uppercase', letterSpacing:'0.1em', margin:'10px 0 6px' }}>Productos extra</div>}
-            {m.agregados.map(a => filaItem(a, () => quitarAgr(a.id)))}
-
-            <div style={{ borderTop:`1px solid ${C.ln}`, marginTop:12, paddingTop:12 }}>
-              <div style={{ fontSize:12, fontWeight:800, color:C.tx2, marginBottom:8 }}>➕ Pasta de línea</div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
-                {selBox(nuevo.tipo, e => cambiarNuevo({ tipo: e.target.value }), GD_TIPOS.map(t => <option key={t.k} value={t.k}>{t.l}</option>), { gridColumn:'span 2' })}
-                {selBox(nuevo.cantidad, e => cambiarNuevo({ cantidad: parseInt(e.target.value) }), [50, 200].map(n => <option key={n} value={n}>{n} Lts</option>))}
-                {tipoSel.calidad ? selBox(nuevo.calidad, e => cambiarNuevo({ calidad: e.target.value }), GD_CALIDADES.map(c => <option key={c} value={c}>{c}</option>)) : <div />}
-                {tipoSel.colores && selBox(nuevo.color, e => setNuevo(prev => ({ ...prev, color: e.target.value })), [<option key="" value="">Color…</option>, ...tipoSel.colores.map(c => <option key={c.label} value={c.label}>{c.label}</option>)])}
-                {tipoSel.fragancia && selBox(nuevo.fragancia, e => setNuevo(prev => ({ ...prev, fragancia: e.target.value })), [<option key="" value="">Fragancia…</option>, ...FRAGANCIAS.map(f => <option key={f.label} value={f.label}>{f.icon} {f.label}</option>)])}
-                <input type="number" min="0" inputMode="numeric" value={nuevo.precio} onChange={e => setNuevo(prev => ({ ...prev, precio: e.target.value }))} style={{ ...inpC, gridColumn: (tipoSel.colores || tipoSel.fragancia) ? undefined : 'span 2' }} placeholder="Precio $" />
+              )}
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                {pide.bultos && <div><label style={lblC}>Bultos</label><input type="number" min="1" inputMode="numeric" value={m.bultos} onChange={e => setF('bultos', e.target.value)} style={inpC} /></div>}
+                {pide.precios && m.modalidad === 'flex' && (
+                  <div><label style={lblC}>Zona Flex</label>
+                    {selBox(m.zona, e => { const z = ZONAS_ENVIO.find(x => x.zona === e.target.value); setM(prev => ({ ...prev, zona: e.target.value, envio: z ? String(z.precio * Math.max(1, parseInt(prev.bultos) || 1)) : prev.envio })); },
+                      [<option key="" value="">— Elegir —</option>, ...ZONAS_ENVIO.map(z => <option key={z.zona} value={z.zona}>{z.zona} · {fmt(z.precio)}</option>)])}
+                  </div>
+                )}
+                {pide.precios && m.modalidad === 'flex' && <div style={{ gridColumn:'span 2' }}><label style={lblC}>Costo de envío (pesos)</label><input type="number" min="0" inputMode="numeric" value={m.envio} onChange={e => setF('envio', e.target.value)} style={inpC} placeholder="$0" /></div>}
+                {pide.envases && <div><label style={lblC}>Baldes{pide.precios ? ` (${fmt(PRECIO_ENVASE)} c/u)` : ''}</label><input type="number" min="0" inputMode="numeric" value={m.baldes} onChange={e => setF('baldes', e.target.value)} style={inpC} /></div>}
+                {pide.envases && <div><label style={lblC}>Cajas{pide.precios ? ` (${fmt(PRECIO_CAJA)} c/u)` : ''}</label><input type="number" min="0" inputMode="numeric" value={m.cajas} onChange={e => setF('cajas', e.target.value)} style={inpC} /></div>}
               </div>
-              <button onClick={agregarProducto} style={{ ...s.bS, width:'100%', marginTop:8 }}>Agregar</button>
-              <div style={{ fontSize:11, color:C.tx3, marginTop:6 }}>El precio se completa con la lista vigente; lo podés cambiar.</div>
+              {pide.envases && <div style={{ fontSize:11, color:C.tx3, marginTop:8 }}>Sin baldes ni cajas → sale “se entrega en bolsas (sin envase)”.</div>}
             </div>
+          )}
 
-            <div style={{ borderTop:`1px solid ${C.ln}`, marginTop:12, paddingTop:12 }}>
-              <div style={{ fontSize:12, fontWeight:800, color:C.tx2, marginBottom:8 }}>✏️ Otro producto a mano</div>
-              <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:8 }}>
-                <input value={libre.nombre} onChange={e => setLibre(p => ({ ...p, nombre: e.target.value }))} style={inpC} placeholder="Descripción" />
-                <input type="number" min="0" inputMode="numeric" value={libre.precio} onChange={e => setLibre(p => ({ ...p, precio: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') agregarLibre(); }} style={inpC} placeholder="$0" />
+          {pide.productos && (
+            <div style={s.card}>
+              <div style={s.cTit}>4 · Productos</div>
+              {m.items.length === 0 && <div style={{ fontSize:12.5, color:C.tx3, marginBottom:10 }}>Todavía no hay productos.</div>}
+              {m.items.map(it => (
+                <div key={it.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:10, padding:'9px 12px', background:'rgba(255,255,255,0.05)', borderRadius:10, marginBottom:7 }}>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:800 }}>{lpTit(it)}</div>
+                    <ResumenItemDEF det={it} itemPRE={it} />
+                    {['lavandina','desodorante'].includes(it.tipo) && (it.fragancias_piso||[]).length > 0 && <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)', marginTop:3 }}>💧 {it.fragancias_piso.map(f => `${f.fragancia} ${f.cantidad} Lts`).join(' + ')}</div>}
+                  </div>
+                  <div style={{ display:'flex', gap:10, alignItems:'center', flexShrink:0 }}>
+                    {pide.precios && <span style={{ color:C.na, fontWeight:800 }}>{precioAgrTxt(it)}</span>}
+                    <button onClick={() => quitarItem(it.id)} style={{ background:'rgba(239,68,68,0.2)', color:'#f87171', border:'none', borderRadius:6, padding:'3px 8px', cursor:'pointer' }}>✕</button>
+                  </div>
+                </div>
+              ))}
+              <div style={{ borderTop:`1px solid ${C.ln}`, marginTop:12, paddingTop:12 }}>
+                <div style={{ fontSize:12, fontWeight:800, color:C.tx2, marginBottom:8 }}>➕ Pasta de línea</div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                  {selBox(nuevo.tipo, e => cambiarNuevo({ tipo: e.target.value }), GD_TIPOS.map(t => <option key={t.k} value={t.k}>{t.l}</option>), { gridColumn:'span 2' })}
+                  {selBox(nuevo.cantidad, e => cambiarNuevo({ cantidad: parseInt(e.target.value) }), [50, 200].map(n => <option key={n} value={n}>{n} Lts</option>))}
+                  {tipoSel.calidad ? selBox(nuevo.calidad, e => cambiarNuevo({ calidad: e.target.value }), GD_CALIDADES.map(c => <option key={c} value={c}>{c}</option>)) : <div />}
+                  {tipoSel.colores && selBox(nuevo.color, e => setNuevo(prev => ({ ...prev, color: e.target.value })), [<option key="" value="">Color…</option>, ...tipoSel.colores.map(c => <option key={c.label} value={c.label}>{c.label}</option>)])}
+                  {tipoSel.fragancia && selBox(nuevo.fragancia, e => setNuevo(prev => ({ ...prev, fragancia: e.target.value })), [<option key="" value="">Fragancia…</option>, ...FRAGANCIAS.map(f => <option key={f.label} value={f.label}>{f.icon} {f.label}</option>)])}
+                  {pide.precios && <input type="number" min="0" inputMode="numeric" value={nuevo.precio} onChange={e => setNuevo(prev => ({ ...prev, precio: e.target.value }))} style={{ ...inpC, gridColumn: (tipoSel.colores || tipoSel.fragancia) ? undefined : 'span 2' }} placeholder="Precio $" />}
+                </div>
+                <button onClick={agregarProducto} style={{ ...s.bS, width:'100%', marginTop:8 }}>Agregar</button>
+                {pide.precios && <div style={{ fontSize:11, color:C.tx3, marginTop:6 }}>El precio se completa con la lista vigente; lo podés cambiar.</div>}
               </div>
-              <button onClick={agregarLibre} disabled={!gdLimpio(libre.nombre)} style={{ ...s.bS, width:'100%', marginTop:8, opacity: gdLimpio(libre.nombre) ? 1 : 0.45 }}>Agregar</button>
+              <div style={{ borderTop:`1px solid ${C.ln}`, marginTop:12, paddingTop:12 }}>
+                <div style={{ fontSize:12, fontWeight:800, color:C.tx2, marginBottom:8 }}>✏️ Otro producto (texto libre)</div>
+                <div style={{ display:'grid', gridTemplateColumns: pide.precios ? '2fr 1fr' : '1fr', gap:8 }}>
+                  <input value={libre.nombre} onChange={e => setLibre(p => ({ ...p, nombre: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') agregarLibre(); }} style={inpC} placeholder="Descripción" />
+                  {pide.precios && <input type="number" min="0" inputMode="numeric" value={libre.precio} onChange={e => setLibre(p => ({ ...p, precio: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') agregarLibre(); }} style={inpC} placeholder="$0" />}
+                </div>
+                <button onClick={agregarLibre} disabled={!gdLimpio(libre.nombre)} style={{ ...s.bS, width:'100%', marginTop:8, opacity: gdLimpio(libre.nombre) ? 1 : 0.45 }}>Agregar</button>
+              </div>
             </div>
-          </div>
-          <ListaPreciosPicker titulo="📋 AGREGAR DE LA LISTA DE PRECIOS" onAgregar={a => setM(prev => ({ ...prev, items: [...prev.items, { id:uid(), tipoItem:'manual', ...a }] }))} />
+          )}
+          {pide.productos && <ListaPreciosPicker titulo="📋 AGREGAR DE LA LISTA DE PRECIOS" onAgregar={a => setM(prev => ({ ...prev, items: [...prev.items, { id:uid(), tipoItem:'manual', ...a }] }))} />}
 
-          <div style={s.card}>
-            <div style={s.cTit}>5 · Total</div>
-            {[['Productos', calc.productos + calc.agregados], ['Envases', calc.envases], ['Envío', calc.envio]].map(([l, v]) => (
-              <div key={l} style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:C.tx2, marginBottom:4 }}><span>{l}</span><span>{fmt(v)}</span></div>
-            ))}
-            <div style={{ display:'flex', justifyContent:'space-between', fontSize:14, fontWeight:800, borderTop:`1px solid ${C.ln}`, paddingTop:8, marginTop:6 }}><span>Total calculado</span><span>{fmt(calc.calculado)}</span></div>
-            <label style={{ ...lblC, margin:'12px 0 4px' }}>Total del documento (vacío = usa el calculado)</label>
-            <div style={{ display:'flex', gap:8 }}>
+          {pide.precios && (
+            <div style={s.card}>
+              <div style={s.cTit}>5 · Total de la cotización</div>
+              {[['Productos', calc.productos], ['Envases', calc.envases], ['Envío', calc.envio]].map(([l, v]) => (
+                <div key={l} style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:C.tx2, marginBottom:4 }}><span>{l}</span><span>{fmt(v)}</span></div>
+              ))}
+              <div style={{ display:'flex', justifyContent:'space-between', fontSize:14, fontWeight:800, borderTop:`1px solid ${C.ln}`, paddingTop:8, marginTop:6 }}><span>Total calculado</span><span>{fmt(calc.calculado)}</span></div>
+              <label style={{ ...lblC, margin:'12px 0 4px' }}>Otro total (vacío = usa el calculado)</label>
               <input type="number" min="0" inputMode="numeric" value={m.totalManual} onChange={e => setF('totalManual', e.target.value)} style={inpC} placeholder={String(calc.calculado)} />
-              {String(m.totalManual).trim() !== '' && <button onClick={() => setF('totalManual', '')} style={{ ...s.bS, width:'auto', whiteSpace:'nowrap', padding:'10px 12px', fontSize:12 }}>Usar calculado</button>}
+              <div style={{ ...s.tot, textAlign:'right', marginTop:10 }}>{fmt(calc.total)}</div>
             </div>
-            {String(m.totalManual).trim() !== '' && calc.total !== calc.calculado && <div style={{ fontSize:11.5, color:'#FDBA74', marginTop:6 }}>⚠️ El total del documento ({fmt(calc.total)}) no coincide con el calculado ({fmt(calc.calculado)}).</div>}
-            <div style={{ ...s.tot, textAlign:'right', marginTop:10 }}>{fmt(calc.total)}</div>
-          </div>
+          )}
 
           <div style={{ ...s.card, border:'1px solid rgba(249,115,22,0.4)' }}>
-            <div style={s.cTit}>6 · Generar</div>
-            <GdBotonesDocs pedido={gdArmarPedido(m)} onAntes={validar} />
-            <div style={{ fontSize:11, color:C.tx3, textAlign:'center', marginTop:10 }}>Documento suelto: no se guarda como venta ni impacta en Liquidaciones, Tesorería, Entregas ni Marketing.</div>
+            <div style={s.cTit}>Generar</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
+              <div><label style={lblC}>N° que figura en el papel</label><input value={m.codigo} onChange={e => setF('codigo', e.target.value)} style={inpC} /></div>
+              <div><label style={lblC}>Fecha</label><input value={m.fecha} onChange={e => setF('fecha', e.target.value)} style={inpC} /></div>
+            </div>
+            {btnGenerar(generarManual)}
+            <div style={{ fontSize:11, color:C.tx3, textAlign:'center', marginTop:10 }}>Es como escribirlo a mano: no se guarda, no es un DEF y no impacta en ningún módulo.</div>
           </div>
+          </div>)}
         </div>
       )}
+      <div style={{ fontSize:11, color:C.tx3, textAlign:'center', marginTop:4 }}>Cada documento se abre en otra pestaña → Cmd+P para imprimir o guardar en PDF. Si el navegador bloquea ventanas emergentes, permitilas para este sitio.</div>
     </div>
   );
 };
